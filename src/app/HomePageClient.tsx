@@ -183,11 +183,6 @@ export default function HomePageClient({ session, stats, initialRecords, categor
       <section className="bg-white p-5 sm:p-6 rounded-3xl shadow-sm border border-gray-100 text-center w-full max-w-full overflow-hidden">
         <div className="flex items-center justify-center gap-3 mb-4 sm:mb-6">
           <h2 className="text-lg font-semibold text-gray-800">总资产</h2>
-          {session?.username && (
-            <span className="text-sm font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
-              {session.username}
-            </span>
-          )}
         </div>
         <div className="flex justify-center items-center space-x-6 sm:space-x-12">
           <div className="flex flex-col items-center min-w-0">
