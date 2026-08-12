@@ -4,16 +4,16 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "next build",
     "start": "next start -H 0.0.0.0 -p $PORT",
     "lint": "next lint"
   },
   "dependencies": {
     "@fontsource/noto-sans-sc": "^5.3.0",
-    "@prisma/adapter-better-sqlite3": "^7.9.1",
     "@prisma/client": "^7.9.1",
+    "@prisma/adapter-pg": "^7.9.1",
+    "pg": "^8.11.3",
     "@react-pdf/renderer": "^4.6.0",
-    "better-sqlite3": "^13.0.3",
     "browser-image-compression": "^2.0.2",
     "date-fns": "^4.4.0",
     "html2canvas": "^1.4.1",
@@ -27,8 +27,8 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^20",
+    "@types/pg": "^8.11.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
