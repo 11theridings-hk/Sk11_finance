@@ -13,8 +13,9 @@ export default async function HomePage() {
     redirect('/login')
   }
 
-  const [stats, records, categories, pools] = await Promise.all([
+  const [stats, initialRecords, categories, pools] = await Promise.all([
     getUserStats(session.userId),
+    // Fetch the latest records specifically for the initial render
     getRecentRecords(session.userId),
     getCategories(),
     getCapitalPools(),
@@ -25,7 +26,7 @@ export default async function HomePage() {
       <HomePageClient 
         session={session}
         stats={stats}
-        records={records}
+        initialRecords={initialRecords}
         categories={categories}
         pools={pools}
       />

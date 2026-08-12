@@ -8,7 +8,7 @@ import { createCategory } from './actions/category'
 type Props = {
   session: any
   stats: { totalHkd: number; totalRmb: number }
-  records: any[]
+  initialRecords: any[]
   categories: any[]
   pools: any[]
 }
@@ -60,8 +60,9 @@ function compressImage(file: File, maxSizeKB: number = 200): Promise<{ url: stri
   })
 }
 
-export default function HomePageClient({ session, stats, records, categories, pools }: Props) {
+export default function HomePageClient({ session, stats, initialRecords, categories, pools }: Props) {
   const [isClient, setIsClient] = useState(false)
+  const [records, setRecords] = useState(initialRecords)
   const [type, setType] = useState<'INCOME' | 'EXPENSE'>('EXPENSE')
   const [date, setDate] = useState('')
   const [categoryId, setCategoryId] = useState('')
@@ -149,11 +150,8 @@ export default function HomePageClient({ session, stats, records, categories, po
 
     if (res.success) {
       alert('记录添加成功')
-      setAmount('')
-      setNote('')
-      setAttachment(null)
-      // 触发 5s 冷却倒计时
-      setCountdown(5)
+      // Force a page refresh to update both stats and the records list
+      window.location.reload()
     } else {
       alert('失败: ' + res.error)
       setIsSubmitting(false)
@@ -183,7 +181,14 @@ export default function HomePageClient({ session, stats, records, categories, po
 
       {/* 资产展示 Hero Section */}
       <section className="bg-white p-5 sm:p-6 rounded-3xl shadow-sm border border-gray-100 text-center w-full max-w-full overflow-hidden">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4 sm:mb-6">总资产</h2>
+        <div className="flex items-center justify-center gap-3 mb-4 sm:mb-6">
+          <h2 className="text-lg font-semibold text-gray-800">总资产</h2>
+          {session?.username && (
+            <span className="text-sm font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+              {session.username}
+            </span>
+          )}
+        </div>
         <div className="flex justify-center items-center space-x-6 sm:space-x-12">
           <div className="flex flex-col items-center min-w-0">
             <div className="text-xs font-medium text-gray-400 mb-1 tracking-wide">HKD</div>

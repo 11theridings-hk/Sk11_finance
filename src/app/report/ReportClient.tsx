@@ -145,11 +145,11 @@ export default function ReportClient({ categories, users }: Props) {
     const roleName = userId ? users.find(u => u.id === userId)?.roleName || '未知' : '全部'
     const currencyName = currency === 'ALL' ? '全部' : currency
 
-    doc.text(`统计周期: ${timeRangeStr}`, 15, 53)
-    doc.text(`总交易笔数: ${totalCount} 笔`, 150, 53)
+    doc.text(`统计周期: ${timeRangeStr}`, 15, 45)
+    doc.text(`总交易笔数: ${totalCount} 笔`, 150, 45)
     
     doc.setTextColor(150, 150, 150)
-    doc.text(`筛选条件 -> 分类: [${categoryName}]   |   币种: [${currencyName}]   |   角色: [${roleName}]`, 15, 61)
+    doc.text(`筛选条件 -> 分类: [${categoryName}]   |   币种: [${currencyName}]   |   角色: [${roleName}]`, 15, 52)
     
     // ----------------------------------------
     // HKD & RMB 资产统计卡片
@@ -246,6 +246,17 @@ export default function ReportClient({ categories, users }: Props) {
     doc.setTextColor(0, 0, 0)
     doc.text('明细列表报表', 14, 15)
 
+    // 新增：在明细列表上方显示总计
+    doc.setFontSize(10)
+    doc.setTextColor(80, 80, 80)
+    const totalIncomeStr = (totalIncomeHKD > 0 ? `HKD +${totalIncomeHKD.toFixed(2)} ` : '') + (totalIncomeRMB > 0 ? `RMB +${totalIncomeRMB.toFixed(2)}` : '')
+    const totalExpenseStr = (totalExpenseHKD > 0 ? `HKD -${totalExpenseHKD.toFixed(2)} ` : '') + (totalExpenseRMB > 0 ? `RMB -${totalExpenseRMB.toFixed(2)}` : '')
+    const balanceStr = `HKD ${balanceHKD.toFixed(2)} / RMB ${balanceRMB.toFixed(2)}`
+    
+    doc.text(`期间总收入: ${totalIncomeStr || '0'}`, 14, 25)
+    doc.text(`期间总支出: ${totalExpenseStr || '0'}`, 85, 25)
+    doc.text(`期间结余: ${balanceStr}`, 155, 25)
+
     const tableData = records.map(r => [
       new Date(r.date).toLocaleDateString(),
       r.type === 'INCOME' ? '收入' : '支出',
@@ -256,7 +267,7 @@ export default function ReportClient({ categories, users }: Props) {
     ])
 
     autoTable(doc, {
-      startY: 20,
+      startY: 35,
       head: [['日期', '类型', '分类', '角色', '金额', '备注']],
       body: tableData,
       styles: { font: fontBase64 ? 'NotoSansSC' : 'helvetica' },
