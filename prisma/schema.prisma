@@ -1,0 +1,95 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String        @id @default(uuid())
+  password     String        @unique // 明文密码作为登录凭证
+  roleName     String        // 角色名称
+  isAdmin      Boolean       @default(false) // 是否为管理员
+  poolEnabled  Boolean       @default(false) // 是否启用资金池
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  
+  // 关系
+  records      Record[]      @relation("UserRecords")
+  attachments  Attachment[]  @relation("UserAttachments")
+  capitalPools CapitalPool[] @relation("UserCapitalPools")
+}
+
+model Category {
+  id           String        @id @default(uuid())
+  name         String        // 分类名称
+  parentId     String?       // 父分类ID
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  
+  // 关系
+  parent       Category?     @relation("CategoryToCategory", fields: [parentId], references: [id])
+  children     Category[]    @relation("CategoryToCategory")
+  records      Record[]      @relation("CategoryRecords")
+  subRecords   Record[]      @relation("SubCategoryRecords")
+  attachments  Attachment[]  @relation("CategoryAttachments")
+}
+
+model CapitalPool {
+  id           String        @id @default(uuid())
+  name         String        // 资金池名称
+  balanceHkd   Float         @default(0) // HKD 余额
+  balanceRmb   Float         @default(0) // RMB 余额
+  userId       String?       // 关联角色ID（可选）
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  
+  // 关系
+  user         User?         @relation("UserCapitalPools", fields: [userId], references: [id])
+  records      Record[]      @relation("CapitalPoolRecords")
+}
+
+model Record {
+  id           String        @id @default(uuid())
+  type         String        // "INCOME" | "EXPENSE"
+  date         DateTime      // 记录日期
+  note         String?       // 备注说明
+  currency     String        // "HKD" | "RMB"
+  amount       Float         // 金额（正数/负数）
+  attachmentUrl String?      // 附件路径
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  // 外键
+  userId       String
+  categoryId   String
+  subCategoryId String?
+  poolId       String
+
+  // 关系
+  user         User          @relation("UserRecords", fields: [userId], references: [id])
+  category     Category      @relation("CategoryRecords", fields: [categoryId], references: [id])
+  subCategory  Category?     @relation("SubCategoryRecords", fields: [subCategoryId], references: [id])
+  pool         CapitalPool   @relation("CapitalPoolRecords", fields: [poolId], references: [id])
+}
+
+model Attachment {
+  id           String        @id @default(uuid())
+  fileUrl      String        // 文件路径
+  size         Int           // 文件大小(bytes)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  // 外键
+  uploaderId   String
+  categoryId   String?
+
+  // 关系
+  uploader     User          @relation("UserAttachments", fields: [uploaderId], references: [id])
+  category     Category?     @relation("CategoryAttachments", fields: [categoryId], references: [id])
+}

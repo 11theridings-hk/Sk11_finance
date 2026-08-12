@@ -1,0 +1,95 @@
+'use server'
+
+import prisma from '@/lib/prisma'
+import { revalidatePath } from 'next/cache'
+
+// 获取所有用户
+export async function getUsers() {
+  return await prisma.user.findMany({
+    orderBy: { createdAt: 'desc' }
+  })
+}
+
+// 创建白名单用户
+export async function createUser(data: { password: string; roleName: string; isAdmin: boolean }) {
+  try {
+    const user = await prisma.user.create({
+      data: {
+        password: data.password,
+        roleName: data.roleName,
+        isAdmin: data.isAdmin,
+        poolEnabled: false,
+      }
+    })
+    revalidatePath('/admin')
+    return { success: true, user }
+  } catch (error: any) {
+    return { success: false, error: error.message || '创建失败，可能密码已存在' }
+  }
+}
+
+// 更新用户
+export async function updateUser(id: string, data: { password?: string; roleName?: string; isAdmin?: boolean }) {
+  try {
+    const user = await prisma.user.update({
+      where: { id },
+      data
+    })
+    
+    // 如果 roleName 改变且 poolEnabled，同步更新对应资金池名称
+    if (data.roleName && user.poolEnabled) {
+      await prisma.capitalPool.updateMany({
+        where: { userId: id },
+        data: { name: data.roleName }
+      })
+    }
+    
+    revalidatePath('/admin')
+    return { success: true, user }
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
+}
+
+// 删除用户
+export async function deleteUser(id: string) {
+  try {
+    await prisma.user.delete({
+      where: { id }
+    })
+    revalidatePath('/admin')
+    return { success: true }
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
+}
+
+// 切换资金池状态
+export async function toggleUserPool(id: string, enabled: boolean) {
+  try {
+    const user = await prisma.user.update({
+      where: { id },
+      data: { poolEnabled: enabled }
+    })
+
+    if (enabled) {
+      // 启用：如果不存在对应的资金池，则创建一个
+      const existingPool = await prisma.capitalPool.findFirst({
+        where: { userId: id }
+      })
+      if (!existingPool) {
+        await prisma.capitalPool.create({
+          data: {
+            name: user.roleName,
+            userId: user.id
+          }
+        })
+      }
+    }
+    // 如果禁用，在页面上资金池置灰即可，不删除历史数据
+    revalidatePath('/admin')
+    return { success: true, user }
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
+}
