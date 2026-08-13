@@ -23,6 +23,7 @@ model User {
   records      Record[]      @relation("UserRecords")
   attachments  Attachment[]  @relation("UserAttachments")
   capitalPools CapitalPool[] @relation("UserCapitalPools")
+  remarkLogs   RemarkLog[]   @relation("UserRemarkLogs")
 }
 
 model Category {
@@ -115,6 +116,7 @@ model RemarkLog {
 
   // 关系
   record       Record        @relation("RecordRemarks", fields: [recordId], references: [id], onDelete: Cascade)
+  user         User          @relation("UserRemarkLogs", fields: [userId], references: [id])
 }
 
 model Attachment {
