@@ -5,6 +5,7 @@ import { getSession } from './actions/auth'
 import { getUserStats, getRecentRecords } from './actions/record'
 import { getCategories } from './actions/category'
 import { getCapitalPools } from './actions/pool'
+import { getOpenOrders } from './actions/order'
 import HomePageClient from './HomePageClient'
 
 export default async function HomePage() {
@@ -13,22 +14,23 @@ export default async function HomePage() {
     redirect('/login')
   }
 
-  const [stats, initialRecords, categories, pools] = await Promise.all([
+  const [stats, initialRecords, categories, pools, openOrders] = await Promise.all([
     getUserStats(session.userId),
-    // Fetch the latest records specifically for the initial render
     getRecentRecords(session.userId),
     getCategories(),
-    getCapitalPools(),
+    getCapitalPools(session.userId),
+    getOpenOrders()
   ])
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#F2F2F7]">
       <HomePageClient 
         session={session}
         stats={stats}
         initialRecords={initialRecords}
         categories={categories}
         pools={pools}
+        openOrders={openOrders}
       />
     </div>
   )

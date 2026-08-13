@@ -35,10 +35,10 @@ async function ensureUncategorized() {
 }
 
 // 创建分类
-export async function createCategory(name: string, parentId?: string) {
+export async function createCategory(name: string, parentId?: string, type: 'INCOME' | 'EXPENSE' = 'EXPENSE') {
   try {
     const category = await prisma.category.create({
-      data: { name, parentId: parentId || null }
+      data: { name, parentId: parentId || null, type }
     })
     revalidatePath('/admin')
     revalidatePath('/')
@@ -49,11 +49,14 @@ export async function createCategory(name: string, parentId?: string) {
 }
 
 // 修改分类
-export async function updateCategory(id: string, name: string) {
+export async function updateCategory(id: string, name: string, type?: 'INCOME' | 'EXPENSE') {
   try {
+    const data: any = { name }
+    if (type) data.type = type
+    
     const category = await prisma.category.update({
       where: { id },
-      data: { name }
+      data
     })
     revalidatePath('/admin')
     revalidatePath('/')

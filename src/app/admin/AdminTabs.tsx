@@ -45,7 +45,7 @@ export default function AdminTabs({ initialCategories, initialAttachments, initi
       <div className="max-w-5xl mx-auto p-4 sm:px-6 lg:px-8 mt-4">
         {activeTab === "category" && <CategoryTab categories={initialCategories} />}
         {activeTab === "attachment" && <AttachmentTab attachments={initialAttachments} />}
-        {activeTab === "pool" && <PoolTab pools={initialPools} />}
+        {activeTab === "pool" && <PoolTab pools={initialPools} users={initialUsers} />}
         {activeTab === "user" && <UserTab users={initialUsers} />}
       </div>
     </div>
@@ -55,18 +55,30 @@ export default function AdminTabs({ initialCategories, initialAttachments, initi
 // ---------------- 分类管理组件 ----------------
 function CategoryTab({ categories }: { categories: any[] }) {
   const [newCatName, setNewCatName] = useState("");
+  const [newCatType, setNewCatType] = useState<"INCOME" | "EXPENSE">("EXPENSE");
   const [loading, setLoading] = useState(false);
+  const [addingSubCatTo, setAddingSubCatTo] = useState<string | null>(null);
+  const [newSubCatName, setNewSubCatName] = useState("");
 
-  const handleCreate = async () => {
+  const handleCreateMain = async () => {
     if (!newCatName.trim()) return;
     setLoading(true);
-    await createCategory(newCatName.trim());
+    await createCategory(newCatName.trim(), undefined, newCatType);
     setNewCatName("");
     setLoading(false);
   };
 
+  const handleCreateSub = async (parentId: string) => {
+    if (!newSubCatName.trim()) return;
+    setLoading(true);
+    await createCategory(newSubCatName.trim(), parentId);
+    setNewSubCatName("");
+    setAddingSubCatTo(null);
+    setLoading(false);
+  };
+
   const handleDelete = async (id: string) => {
-    if (confirm("确定要删除该分类吗？关联的记录将被移至“未分类”。")) {
+    if (confirm("确定要删除该分类吗？关联的记录将被移至“未分类”。如果是主分类，其子分类将变为独立的主分类。")) {
       await deleteCategory(id);
     }
   };
@@ -75,37 +87,110 @@ function CategoryTab({ categories }: { categories: any[] }) {
     <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6">
       <h2 className="text-lg font-semibold text-gray-800 mb-6">分类管理</h2>
       
-      {/* 添加新分类 */}
-      <div className="flex gap-3 mb-8">
+      {/* 添加新主分类 */}
+      <div className="flex flex-col sm:flex-row gap-3 mb-8 bg-[#F2F2F7] p-4 rounded-2xl">
         <input
           type="text"
           value={newCatName}
           onChange={(e) => setNewCatName(e.target.value)}
-          placeholder="新分类名称"
-          className="flex-1 px-4 py-3 bg-[#F2F2F7] border-transparent rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm transition-all text-gray-900 placeholder-gray-400"
+          placeholder="新主分类名称"
+          className="flex-1 px-4 py-3 bg-white border-transparent rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm transition-all text-gray-900 placeholder-gray-400"
         />
-        <button
-          onClick={handleCreate}
-          disabled={loading}
-          className="px-6 py-3 bg-[#007AFF] text-white rounded-xl text-sm font-semibold hover:bg-[#0066CC] disabled:opacity-50 transition-all shadow-sm disabled:shadow-none"
+        <select
+          value={newCatType}
+          onChange={(e) => setNewCatType(e.target.value as "INCOME" | "EXPENSE")}
+          className="px-4 py-3 bg-white border-transparent rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900"
         >
-          添加
+          <option value="EXPENSE">支出分类</option>
+          <option value="INCOME">收入分类</option>
+        </select>
+        <button
+          onClick={handleCreateMain}
+          disabled={loading}
+          className="px-6 py-3 bg-[#007AFF] text-white rounded-xl text-sm font-semibold hover:bg-[#0066CC] disabled:opacity-50 transition-all shadow-sm"
+        >
+          添加主分类
         </button>
       </div>
 
       {/* 分类列表 */}
-      <div className="space-y-3">
+      <div className="space-y-4">
         {categories.map((cat) => (
-          <div key={cat.id} className="flex items-center justify-between p-4 bg-white rounded-xl border border-gray-100 shadow-sm hover:border-gray-200 transition-colors">
-            <span className="text-gray-900 font-medium">{cat.name}</span>
-            {cat.name !== "未分类" && (
-              <button
-                onClick={() => handleDelete(cat.id)}
-                className="text-[#FF3B30] hover:text-[#CC2E26] text-sm font-semibold px-2 py-1"
-              >
-                删除
-              </button>
-            )}
+          <div key={cat.id} className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between p-4 bg-[#F2F2F7]/50">
+              <div className="flex items-center gap-2">
+                <span className="text-gray-900 font-semibold text-base">{cat.name}</span>
+                {cat.name !== "未分类" && (
+                  <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${cat.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 'bg-[#FF3B30]/10 text-[#FF3B30]'}`}>
+                    {cat.type === 'INCOME' ? '收入' : '支出'}
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                {cat.name !== "未分类" && (
+                  <>
+                    <button
+                      onClick={() => setAddingSubCatTo(cat.id)}
+                      className="text-[#007AFF] hover:text-[#0066CC] text-sm font-semibold px-2 py-1"
+                    >
+                      + 子分类
+                    </button>
+                    <button
+                      onClick={() => handleDelete(cat.id)}
+                      className="text-[#FF3B30] hover:text-[#CC2E26] text-sm font-semibold px-2 py-1"
+                    >
+                      删除
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+            
+            <div className="p-3 bg-white space-y-2">
+              {addingSubCatTo === cat.id && (
+                <div className="flex gap-2 mb-3 pl-4 border-l-2 border-[#007AFF]/30">
+                  <input
+                    type="text"
+                    value={newSubCatName}
+                    onChange={(e) => setNewSubCatName(e.target.value)}
+                    placeholder="新子分类名称"
+                    className="flex-1 px-3 py-2 bg-[#F2F2F7] border-transparent rounded-lg focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900"
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => handleCreateSub(cat.id)}
+                    disabled={loading}
+                    className="px-4 py-2 bg-[#007AFF] text-white rounded-lg text-sm font-semibold"
+                  >
+                    保存
+                  </button>
+                  <button
+                    onClick={() => setAddingSubCatTo(null)}
+                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-semibold"
+                  >
+                    取消
+                  </button>
+                </div>
+              )}
+              
+              {cat.children && cat.children.length > 0 ? (
+                <div className="space-y-1.5 pl-4 border-l-2 border-gray-100">
+                  {cat.children.map((sub: any) => (
+                    <div key={sub.id} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded-lg group">
+                      <span className="text-gray-700 text-sm font-medium">{sub.name}</span>
+                      <button
+                        onClick={() => handleDelete(sub.id)}
+                        className="text-[#FF3B30] hover:text-[#CC2E26] text-xs font-semibold opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        删除
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs text-gray-400 pl-4 py-1 italic">无子分类</div>
+              )}
+            </div>
           </div>
         ))}
         {categories.length === 0 && (
@@ -149,15 +234,19 @@ function AttachmentTab({ attachments }: { attachments: any[] }) {
 }
 
 // ---------------- 资金池管理组件 ----------------
-function PoolTab({ pools }: { pools: any[] }) {
+function PoolTab({ pools, users }: { pools: any[], users: any[] }) {
   const [newPoolName, setNewPoolName] = useState("");
+  const [userId, setUserId] = useState("");
+  const [isReviewRequired, setIsReviewRequired] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleCreate = async () => {
     if (!newPoolName.trim()) return;
     setLoading(true);
-    await createCapitalPool(newPoolName.trim());
+    await createCapitalPool(newPoolName.trim(), userId || undefined, isReviewRequired);
     setNewPoolName("");
+    setUserId("");
+    setIsReviewRequired(false);
     setLoading(false);
   };
 
@@ -173,18 +262,37 @@ function PoolTab({ pools }: { pools: any[] }) {
       <h2 className="text-lg font-semibold text-gray-800 mb-6">资金池管理</h2>
       
       {/* 添加新资金池 */}
-      <div className="flex gap-3 mb-8">
+      <div className="flex flex-col sm:flex-row gap-3 mb-8 bg-[#F2F2F7] p-4 rounded-2xl">
         <input
           type="text"
           value={newPoolName}
           onChange={(e) => setNewPoolName(e.target.value)}
           placeholder="新资金池名称"
-          className="flex-1 px-4 py-3 bg-[#F2F2F7] border-transparent rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm transition-all text-gray-900 placeholder-gray-400"
+          className="flex-1 px-4 py-3 bg-white border-transparent rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900 placeholder-gray-400"
         />
+        <select
+          value={userId}
+          onChange={(e) => setUserId(e.target.value)}
+          className="px-4 py-3 bg-white border-transparent rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900"
+        >
+          <option value="">(公共资金池)</option>
+          {users.map(u => (
+            <option key={u.id} value={u.id}>分配给: {u.roleName}</option>
+          ))}
+        </select>
+        <label className="flex items-center text-sm font-medium text-gray-700 cursor-pointer bg-white px-4 rounded-xl border border-transparent">
+          <input
+            type="checkbox"
+            checked={isReviewRequired}
+            onChange={(e) => setIsReviewRequired(e.target.checked)}
+            className="mr-2 rounded text-[#007AFF] focus:ring-[#007AFF]"
+          />
+          设为审核账户
+        </label>
         <button
           onClick={handleCreate}
           disabled={loading}
-          className="px-6 py-3 bg-[#007AFF] text-white rounded-xl text-sm font-semibold hover:bg-[#0066CC] disabled:opacity-50 transition-all shadow-sm disabled:shadow-none"
+          className="px-6 py-3 bg-[#007AFF] text-white rounded-xl text-sm font-semibold hover:bg-[#0066CC] disabled:opacity-50 transition-all shadow-sm"
         >
           添加
         </button>
@@ -193,15 +301,24 @@ function PoolTab({ pools }: { pools: any[] }) {
       {/* 资金池列表 */}
       <div className="space-y-3">
         {pools.map((pool) => {
-          // 如果关联用户已禁用资金池，则显示为置灰状态
           const isDisabled = pool.user && pool.user.poolEnabled === false;
           return (
             <div key={pool.id} className={`flex items-center justify-between p-4 rounded-xl border transition-colors shadow-sm ${isDisabled ? 'bg-[#F2F2F7] border-transparent opacity-70' : 'bg-white border-gray-100 hover:border-gray-200'}`}>
-              <div className="flex flex-col">
-                <span className={`font-semibold ${isDisabled ? 'text-gray-500' : 'text-gray-900'}`}>
-                  {pool.name} {isDisabled && '(已禁用)'}
-                </span>
-                <span className="text-xs font-medium text-gray-400 mt-1">
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <span className={`font-semibold ${isDisabled ? 'text-gray-500' : 'text-gray-900'}`}>
+                    {pool.name} {isDisabled && '(已禁用)'}
+                  </span>
+                  {pool.isReviewRequired && (
+                    <span className="px-2 py-0.5 bg-[#FF3B30]/10 text-[#FF3B30] text-[10px] font-bold rounded">审核账户</span>
+                  )}
+                  {pool.userId ? (
+                    <span className="px-2 py-0.5 bg-[#007AFF]/10 text-[#007AFF] text-[10px] font-bold rounded">所属: {pool.user?.roleName}</span>
+                  ) : (
+                    <span className="px-2 py-0.5 bg-gray-100 text-gray-600 text-[10px] font-bold rounded">公共</span>
+                  )}
+                </div>
+                <span className="text-xs font-medium text-gray-400">
                   HKD: {pool.balanceHkd} | RMB: {pool.balanceRmb}
                 </span>
               </div>

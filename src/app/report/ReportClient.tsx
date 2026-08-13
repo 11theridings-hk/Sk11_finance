@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { getReportRecords, ReportFilter } from '../actions/report'
+import { requestModifyRecord } from '../actions/modify'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import JSZip from 'jszip'
@@ -22,6 +23,57 @@ export default function ReportClient({ categories, users }: Props) {
   const [loading, setLoading] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [fontBase64, setFontBase64] = useState<string | null>(null)
+
+  // 修改记录相关状态
+  const [editingRecord, setEditingRecord] = useState<any>(null)
+  const [editDate, setEditDate] = useState('')
+  const [editType, setEditType] = useState<'INCOME' | 'EXPENSE'>('EXPENSE')
+  const [editCategoryId, setEditCategoryId] = useState('')
+  const [editSubCategoryId, setEditSubCategoryId] = useState('')
+  const [editAmount, setEditAmount] = useState('')
+  const [editCurrency, setEditCurrency] = useState<'HKD' | 'RMB'>('HKD')
+  const [editNote, setEditNote] = useState('')
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false)
+
+  const handleEditClick = (record: any) => {
+    setEditingRecord(record)
+    setEditDate(new Date(record.date).toISOString().split('T')[0])
+    setEditType(record.type as 'INCOME' | 'EXPENSE')
+    setEditCategoryId(record.categoryId)
+    setEditSubCategoryId(record.subCategoryId || '')
+    setEditAmount(Math.abs(record.amount).toString())
+    setEditCurrency(record.currency as 'HKD' | 'RMB')
+    setEditNote(record.note || '')
+  }
+
+  const submitEdit = async () => {
+    if (!editCategoryId || !editAmount) return alert('必填项不完整')
+    setIsSubmittingEdit(true)
+    
+    let finalAmount = parseFloat(editAmount)
+    if (editType === 'EXPENSE') finalAmount = -Math.abs(finalAmount)
+    else finalAmount = Math.abs(finalAmount)
+
+    const res = await requestModifyRecord(editingRecord.id, {
+      type: editType,
+      date: editDate,
+      categoryId: editCategoryId,
+      subCategoryId: editSubCategoryId,
+      amount: finalAmount,
+      currency: editCurrency,
+      note: editNote,
+      poolId: editingRecord.poolId // 保持原资金池
+    })
+
+    if (res.success) {
+      alert('修改申请已提交，等待管理员审核')
+      setEditingRecord(null)
+      handleSearch() // 刷新列表
+    } else {
+      alert('提交失败: ' + res.error)
+    }
+    setIsSubmittingEdit(false)
+  }
 
   // 尝试在客户端加载中文字体，以解决 jsPDF 中文乱码问题
   useEffect(() => {
@@ -453,12 +505,13 @@ export default function ReportClient({ categories, users }: Props) {
               <th className="px-6 py-3 font-medium">金额</th>
               <th className="px-6 py-3 font-medium">备注</th>
               <th className="px-6 py-3 font-medium">附件</th>
+              <th className="px-6 py-3 font-medium">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {records.length === 0 ? (
               <tr>
-                <td colSpan={8} className="p-8 text-center text-gray-400 font-medium">暂无数据，请尝试查询</td>
+                <td colSpan={9} className="p-8 text-center text-gray-400 font-medium">暂无数据，请尝试查询</td>
               </tr>
             ) : (
               records.map(record => (
@@ -466,15 +519,20 @@ export default function ReportClient({ categories, users }: Props) {
                   <td className="px-6 py-4 font-medium">{new Date(record.date).toLocaleDateString()}</td>
                   <td className="px-6 py-4">
                     <span className={`px-2.5 py-1 rounded-md text-xs font-semibold ${
-                      record.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 'bg-[#FF3B30]/10 text-[#FF3B30]'
+                      record.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 
+                      record.type === 'EXPENSE' ? 'bg-[#FF3B30]/10 text-[#FF3B30]' : 
+                      'bg-purple-100 text-purple-700'
                     }`}>
-                      {record.type === 'INCOME' ? '收入' : '支出'}
+                      {record.type === 'INCOME' ? '收入' : record.type === 'EXPENSE' ? '支出' : record.type}
                     </span>
                   </td>
-                  <td className="px-6 py-4">{record.category?.name || '-'}</td>
+                  <td className="px-6 py-4">
+                    {record.category?.name || '-'}
+                    {record.subCategory ? ` / ${record.subCategory.name}` : ''}
+                  </td>
                   <td className="px-6 py-4">{record.user?.roleName || '-'}</td>
                   <td className="px-6 py-4">{record.pool?.name || '-'}</td>
-                  <td className={`px-6 py-4 font-bold ${record.type === 'INCOME' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
+                  <td className={`px-6 py-4 font-bold ${record.type === 'INCOME' || record.type === 'AR' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
                     {record.amount > 0 ? '+' : ''}{record.amount} {record.currency}
                   </td>
                   <td className="px-6 py-4 max-w-xs truncate text-gray-500" title={record.note || ''}>{record.note || '-'}</td>
@@ -485,12 +543,109 @@ export default function ReportClient({ categories, users }: Props) {
                       <span className="text-xs text-gray-400">-</span>
                     )}
                   </td>
+                  <td className="px-6 py-4">
+                    {(record.type === 'INCOME' || record.type === 'EXPENSE') && !record.isReviewing && (
+                      <button 
+                        onClick={() => handleEditClick(record)}
+                        className="text-[#007AFF] hover:underline font-medium text-sm"
+                      >
+                        修改
+                      </button>
+                    )}
+                    {record.isReviewing && (
+                      <span className="text-xs text-[#FF9500] font-medium">修改待审中</span>
+                    )}
+                  </td>
                 </tr>
               ))
             )}
           </tbody>
         </table>
       </div>
+
+      {/* 修改弹窗 */}
+      {editingRecord && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl w-full max-w-2xl shadow-xl overflow-hidden">
+            <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+              <h3 className="text-lg font-bold text-gray-900">修改记录申请</h3>
+              <button onClick={() => setEditingRecord(null)} className="p-2 bg-gray-200 hover:bg-gray-300 rounded-full text-gray-600 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-5">
+              <div className="flex space-x-3 mb-4">
+                <button
+                  className={`px-5 py-2 rounded-lg font-semibold text-sm transition-all shadow-sm ${editType === 'EXPENSE' ? 'bg-[#FF3B30] text-white' : 'bg-[#F2F2F7] text-gray-600'}`}
+                  onClick={() => { setEditType('EXPENSE'); setEditCategoryId(''); setEditSubCategoryId(''); }}
+                >
+                  支出 (Expense)
+                </button>
+                <button
+                  className={`px-5 py-2 rounded-lg font-semibold text-sm transition-all shadow-sm ${editType === 'INCOME' ? 'bg-[#007AFF] text-white' : 'bg-[#F2F2F7] text-gray-600'}`}
+                  onClick={() => { setEditType('INCOME'); setEditCategoryId(''); setEditSubCategoryId(''); }}
+                >
+                  收入 (Income)
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">日期</label>
+                  <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} className={inputClass} />
+                </div>
+                
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">主分类</label>
+                  <select value={editCategoryId} onChange={e => { setEditCategoryId(e.target.value); setEditSubCategoryId(''); }} className={inputClass}>
+                    <option value="">请选择...</option>
+                    {categories.filter(c => c.type === editType).map(cat => (
+                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">金额 ({editCurrency})</label>
+                  <input type="number" step="0.01" value={editAmount} onChange={e => setEditAmount(e.target.value)} className={inputClass} />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">子分类</label>
+                  <select value={editSubCategoryId} onChange={e => setEditSubCategoryId(e.target.value)} className={inputClass}>
+                    <option value="">无</option>
+                    {categories.find(c => c.id === editCategoryId)?.children?.map((sub: any) => (
+                      <option key={sub.id} value={sub.id}>{sub.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">备注</label>
+                  <input type="text" value={editNote} onChange={e => setEditNote(e.target.value)} className={inputClass} />
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-4 border-t border-gray-100">
+                <button
+                  onClick={() => setEditingRecord(null)}
+                  className="flex-1 py-3 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl font-semibold shadow-sm transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={submitEdit}
+                  disabled={isSubmittingEdit}
+                  className="flex-1 py-3 bg-[#007AFF] hover:bg-[#0066CC] text-white rounded-xl font-semibold shadow-sm transition-colors disabled:opacity-50"
+                >
+                  保存并提交审核
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

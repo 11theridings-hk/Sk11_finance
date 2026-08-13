@@ -3,12 +3,24 @@
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 
-// 获取所有资金池（含关联用户状态，用于判定是否置灰）
-export async function getCapitalPools() {
+// 获取资金池
+export async function getCapitalPools(userId?: string) {
+  let where = {}
+  if (userId) {
+    where = {
+      OR: [
+        { userId: userId },
+        { isReviewRequired: true },
+        { userId: null } // 假设 null 的池子所有人可见，或根据业务需求调整。我们先包含 null 避免全都不见。
+      ]
+    }
+  }
+
   return await prisma.capitalPool.findMany({
+    where,
     include: {
       user: {
-        select: { poolEnabled: true }
+        select: { poolEnabled: true, roleName: true }
       }
     },
     orderBy: { createdAt: 'desc' }
@@ -16,10 +28,14 @@ export async function getCapitalPools() {
 }
 
 // 创建资金池
-export async function createCapitalPool(name: string) {
+export async function createCapitalPool(name: string, userId?: string, isReviewRequired: boolean = false) {
   try {
     const pool = await prisma.capitalPool.create({
-      data: { name }
+      data: { 
+        name,
+        userId: userId || null,
+        isReviewRequired
+      }
     })
     revalidatePath('/admin')
     revalidatePath('/')
@@ -30,11 +46,15 @@ export async function createCapitalPool(name: string) {
 }
 
 // 修改资金池
-export async function updateCapitalPool(id: string, name: string) {
+export async function updateCapitalPool(id: string, name: string, userId?: string, isReviewRequired?: boolean) {
   try {
+    const data: any = { name }
+    if (userId !== undefined) data.userId = userId || null
+    if (isReviewRequired !== undefined) data.isReviewRequired = isReviewRequired
+
     const pool = await prisma.capitalPool.update({
       where: { id },
-      data: { name }
+      data
     })
     revalidatePath('/admin')
     revalidatePath('/')

@@ -19,6 +19,14 @@
 - **[2026-08-13] 體驗優化**: 加入全站頂部狀態列（顯示當前登入角色與登出按鈕）；修復表單提交後首頁數據（總資產與列表）未即時更新的問題。
 - **[2026-08-13] 雲端部署 (Railway)**: 將資料庫由本地 SQLite 遷移至雲端 PostgreSQL，解決 Railway 部署時的 502 Bad Gateway 與 Volume 持久化遺失問題，系統成功上線。
 
+### 1.5 部署到 Railway 相關問題與修復
+*   **Next.js 靜態打包錯誤 (Prerender Error)**：Next.js 在 `npm run build` 時會嘗試預渲染頁面，導致存取資料庫失敗。
+    *   **解決方案**：在 `layout.tsx` 中加入 `export const dynamic = "force-dynamic";` 強制全站動態渲染。
+*   **Railway Nixpacks 網路超時 (mise timeout)**：Railway 預設的建置工具在下載底層依賴時發生 `502 Bad Gateway`。
+    *   **解決方案**：改為提供 `Dockerfile`，強制使用 Docker 引擎進行打包，完全繞過 Nixpacks 的網路問題。同時修改 `next.config.ts` 啟用 `standalone` 輸出模式。
+*   **PostgreSQL 資料表未建立 (The table does not exist)**：切換到 PostgreSQL 後，資料庫為空，導致查詢失敗。
+    *   **解決方案**：在 Dockerfile 的啟動指令 (`CMD`) 中加入 `npx prisma db push --accept-data-loss`，確保每次容器啟動時自動同步 Prisma Schema 到資料庫。
+
 ## 3. 核心数据模型 (Data Models)
 1.  **用户表 (User)**：密码 (作为唯一登录凭证，明文存储/展示)、角色名称、是否管理员、资金池启用状态。
 2.  **分类表 (Category)**：分类名称、父分类 ID (支持两级，删除时相关记录归入“未分类”)。
