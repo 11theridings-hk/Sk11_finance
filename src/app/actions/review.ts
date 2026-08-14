@@ -42,7 +42,40 @@ export async function reviewRecord(id: string, action: 'APPROVE' | 'REJECT') {
       if (action === 'APPROVE') {
         // 如果是修改审核
         if (record.originalRecordId) {
-          // 替换旧记录的值
+          const oldRecord = await tx.record.findUnique({ where: { id: record.originalRecordId } })
+          if (!oldRecord) throw new Error('原记录不存在')
+
+          // 1. 撤销旧记录的影响 (如果是收支)
+          if (oldRecord.poolId && (oldRecord.type === 'INCOME' || oldRecord.type === 'EXPENSE')) {
+            if (oldRecord.currency === 'HKD') {
+              await tx.capitalPool.update({
+                where: { id: oldRecord.poolId },
+                data: { balanceHkd: { decrement: oldRecord.amount } }
+              })
+            } else {
+              await tx.capitalPool.update({
+                where: { id: oldRecord.poolId },
+                data: { balanceRmb: { decrement: oldRecord.amount } }
+              })
+            }
+          }
+
+          // 2. 施加新记录的影响 (如果是收支)
+          if (record.poolId && (record.type === 'INCOME' || record.type === 'EXPENSE')) {
+            if (record.currency === 'HKD') {
+              await tx.capitalPool.update({
+                where: { id: record.poolId },
+                data: { balanceHkd: { increment: record.amount } }
+              })
+            } else {
+              await tx.capitalPool.update({
+                where: { id: record.poolId },
+                data: { balanceRmb: { increment: record.amount } }
+              })
+            }
+          }
+
+          // 3. 替换旧记录的值
           await tx.record.update({
             where: { id: record.originalRecordId },
             data: {

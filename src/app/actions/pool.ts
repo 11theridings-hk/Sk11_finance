@@ -2,6 +2,14 @@
 
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
+import { getSession } from './auth'
+
+async function checkAdmin() {
+  const session = await getSession()
+  if (!session || !session.isAdmin) {
+    throw new Error('权限不足')
+  }
+}
 
 // 获取资金池
 export async function getCapitalPools(userId?: string) {
@@ -30,6 +38,7 @@ export async function getCapitalPools(userId?: string) {
 // 创建资金池
 export async function createCapitalPool(name: string, userId?: string, isReviewRequired: boolean = false) {
   try {
+    await checkAdmin()
     const pool = await prisma.capitalPool.create({
       data: { 
         name,
@@ -48,6 +57,7 @@ export async function createCapitalPool(name: string, userId?: string, isReviewR
 // 修改资金池
 export async function updateCapitalPool(id: string, name: string, userId?: string, isReviewRequired?: boolean) {
   try {
+    await checkAdmin()
     const data: any = { name }
     if (userId !== undefined) data.userId = userId || null
     if (isReviewRequired !== undefined) data.isReviewRequired = isReviewRequired
@@ -67,6 +77,7 @@ export async function updateCapitalPool(id: string, name: string, userId?: strin
 // 删除资金池
 export async function deleteCapitalPool(id: string) {
   try {
+    await checkAdmin()
     // 检查是否有记录关联
     const records = await prisma.record.count({
       where: { poolId: id }

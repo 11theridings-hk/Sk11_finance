@@ -1,6 +1,7 @@
 'use server'
 
 import prisma from '@/lib/prisma'
+import { getSession } from './auth'
 
 export type ReportFilter = {
   startDate?: Date
@@ -11,8 +12,19 @@ export type ReportFilter = {
 }
 
 export async function getReportRecords(filter: ReportFilter) {
-  const where: any = {}
+  const session = await getSession()
+  if (!session) return []
 
+  const where: any = {
+    status: 'APPROVED' // B06: 报表口径限制为已生效记录
+  }
+
+  // B02: 普通用户默认只允许查自己的记录
+  if (!session.isAdmin) {
+    where.userId = session.userId
+  } else if (filter.userId) {
+    where.userId = filter.userId
+  }
   if (filter.startDate || filter.endDate) {
     where.date = {}
     if (filter.startDate) where.date.gte = filter.startDate
@@ -34,10 +46,6 @@ export async function getReportRecords(filter: ReportFilter) {
 
   if (filter.currency && filter.currency !== 'ALL') {
     where.currency = filter.currency
-  }
-
-  if (filter.userId) {
-    where.userId = filter.userId
   }
 
   return await prisma.record.findMany({

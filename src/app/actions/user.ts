@@ -2,17 +2,34 @@
 
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
+import { getSession } from './auth'
 
-// 获取所有用户
+async function checkAdmin() {
+  const session = await getSession()
+  if (!session || !session.isAdmin) {
+    throw new Error('权限不足')
+  }
+}
+
+// 获取所有用户 (仅管理员可调用所有，非管理员只能获取自己)
 export async function getUsers() {
-  return await prisma.user.findMany({
-    orderBy: { createdAt: 'desc' }
-  })
+  const session = await getSession()
+  if (!session) return []
+  if (session.isAdmin) {
+    return await prisma.user.findMany({
+      orderBy: { createdAt: 'desc' }
+    })
+  } else {
+    return await prisma.user.findMany({
+      where: { id: session.userId }
+    })
+  }
 }
 
 // 创建白名单用户
 export async function createUser(data: { password: string; roleName: string; isAdmin: boolean }) {
   try {
+    await checkAdmin()
     const user = await prisma.user.create({
       data: {
         password: data.password,
@@ -31,6 +48,7 @@ export async function createUser(data: { password: string; roleName: string; isA
 // 更新用户
 export async function updateUser(id: string, data: { password?: string; roleName?: string; isAdmin?: boolean }) {
   try {
+    await checkAdmin()
     const user = await prisma.user.update({
       where: { id },
       data
@@ -54,6 +72,7 @@ export async function updateUser(id: string, data: { password?: string; roleName
 // 删除用户
 export async function deleteUser(id: string) {
   try {
+    await checkAdmin()
     await prisma.user.delete({
       where: { id }
     })
@@ -67,6 +86,7 @@ export async function deleteUser(id: string) {
 // 切换资金池状态
 export async function toggleUserPool(id: string, enabled: boolean) {
   try {
+    await checkAdmin()
     const user = await prisma.user.update({
       where: { id },
       data: { poolEnabled: enabled }

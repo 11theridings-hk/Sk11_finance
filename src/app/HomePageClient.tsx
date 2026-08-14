@@ -87,6 +87,7 @@ export default function HomePageClient({ session, stats, initialRecords, categor
   const [attachment, setAttachment] = useState<{ url: string; size: number } | null>(null)
   const [note, setNote] = useState('')
   const [orderNo, setOrderNo] = useState('')
+  const [orderNote, setOrderNote] = useState('')
   
   // 归结单相关
   const [orderSearch, setOrderSearch] = useState('')
@@ -95,6 +96,7 @@ export default function HomePageClient({ session, stats, initialRecords, categor
 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [countdown, setCountdown] = useState(0)
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false)
 
   useEffect(() => {
     setIsClient(true)
@@ -160,13 +162,15 @@ export default function HomePageClient({ session, stats, initialRecords, categor
     let timer: any
     if (countdown > 0) {
       timer = setTimeout(() => setCountdown(c => c - 1), 1000)
-    } else {
-      setIsSubmitting(false)
+    } else if (countdown === 0 && showConfirmDialog) {
+      // 倒计时结束，执行提交
+      setShowConfirmDialog(false)
+      executeSubmit()
     }
     return () => clearTimeout(timer)
-  }, [countdown])
+  }, [countdown, showConfirmDialog])
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!categoryId || !amount) {
       alert('请填写必填项')
@@ -176,7 +180,14 @@ export default function HomePageClient({ session, stats, initialRecords, categor
       alert('请选择资金池')
       return
     }
+    setShowConfirmDialog(true)
+  }
 
+  const handleConfirmSubmit = () => {
+    setCountdown(5)
+  }
+
+  const executeSubmit = async () => {
     setIsSubmitting(true)
     
     let finalAmount = parseFloat(amount)
@@ -203,11 +214,11 @@ export default function HomePageClient({ session, stats, initialRecords, categor
       categoryId,
       subCategoryId: subCategoryId || undefined,
       poolId: isARAP ? undefined : poolId,
-      userId: session.userId,
       attachmentUrl: attachment?.url,
       attachmentSize: attachment?.size,
-      orderNo: finalOrderNo
-    })
+      orderNo: finalOrderNo,
+      orderNote: isOrder && !selectedOrderNo ? orderNote : undefined // 传递 orderNote，需要修改 CreateRecordInput
+    } as any)
 
     if (res.success) {
       alert('记录添加成功')
@@ -238,9 +249,9 @@ export default function HomePageClient({ session, stats, initialRecords, categor
   if (!isClient) return <div className="min-h-screen bg-[#F2F2F7]"></div>
 
   return (
-    <div className="space-y-6 pt-6 overflow-x-hidden relative">
+    <div className="space-y-4 sm:space-y-6 pt-4 sm:pt-6 overflow-x-hidden relative">
       {/* 资产展示 Hero Section */}
-      <section className="bg-white p-5 sm:p-6 rounded-3xl shadow-sm border border-gray-100 text-center w-full max-w-full overflow-hidden relative">
+      <section className="bg-white p-4 sm:p-5 rounded-2xl sm:rounded-3xl shadow-sm border border-gray-100 text-center w-full max-w-full overflow-hidden relative">
         <div className="absolute top-4 left-4 sm:top-5 sm:left-5 text-xs text-gray-500 font-medium flex items-center gap-1">
           当前角色: <span className="text-gray-800 font-semibold">{session.roleName}</span>
         </div>
@@ -333,8 +344,8 @@ export default function HomePageClient({ session, stats, initialRecords, categor
       </div>
 
       {/* 收支表单 */}
-      <section className={`p-6 rounded-3xl shadow-sm border ${formBgClass} ${formBorderClass} transition-colors`}>
-        <div className="flex space-x-3 mb-6 bg-gray-200/50 p-1 rounded-xl w-fit">
+      <section className={`p-4 sm:p-6 rounded-2xl sm:rounded-3xl shadow-sm border ${formBgClass} ${formBorderClass} transition-colors`}>
+        <div className="flex space-x-2 sm:space-x-3 mb-5 sm:mb-6 bg-gray-200/50 p-1 rounded-xl w-fit">
           <button
             type="button"
             className={`px-5 py-2 rounded-lg font-semibold text-sm transition-all shadow-sm ${type === 'EXPENSE' ? 'bg-white text-[#FF3B30]' : 'bg-transparent text-gray-600 shadow-none'}`}
@@ -475,15 +486,29 @@ export default function HomePageClient({ session, stats, initialRecords, categor
 
             {/* 备注 */}
             <div className={isARAP ? "md:col-span-1" : "md:col-span-2"}>
-              <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">备注 (可选)</label>
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">记录备注 (可选)</label>
               <input
                 type="text"
                 value={note}
                 onChange={e => setNote(e.target.value)}
                 className={inputClass}
-                placeholder="记录一些细节..."
+                placeholder="记录单笔明细细节..."
               />
             </div>
+
+            {/* 归结单备注 */}
+            {isOrder && !selectedOrderNo && (
+              <div className="md:col-span-2">
+                <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">归结单总备注 (可选)</label>
+                <input
+                  type="text"
+                  value={orderNote}
+                  onChange={e => setOrderNote(e.target.value)}
+                  className={inputClass}
+                  placeholder="整张归结单的说明..."
+                />
+              </div>
+            )}
 
             {/* 图片上传 */}
             <div className="md:col-span-2 bg-white/50 p-4 rounded-2xl border border-dashed border-gray-300">
@@ -541,8 +566,8 @@ export default function HomePageClient({ session, stats, initialRecords, categor
       )}
 
       {/* 列表区域 */}
-      <section className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden mb-10">
-        <div className="p-6 pb-4 border-b border-gray-100 flex justify-between items-center">
+      <section className="bg-white rounded-2xl sm:rounded-3xl shadow-sm border border-gray-100 overflow-hidden mb-10">
+        <div className="p-4 sm:p-6 pb-3 sm:pb-4 border-b border-gray-100 flex justify-between items-center">
           <h2 className="text-lg font-semibold text-gray-800">
             {isOrder ? '归结单记录' : '最近 10 条记录'}
           </h2>
@@ -558,18 +583,18 @@ export default function HomePageClient({ session, stats, initialRecords, categor
                 const totalRmb = order.records?.filter((r: any) => r.currency === 'RMB').reduce((sum: number, r: any) => sum + r.amount, 0) || 0
                 return (
                   <div key={order.id} className="flex items-center p-4 hover:bg-gray-50 transition-colors">
-                    <div className="flex-1 cursor-pointer" onClick={() => setModalOrder(order)}>
-                      <div className="flex items-center gap-3 mb-1">
+                    <div className="flex-1 cursor-pointer min-w-0" onClick={() => setModalOrder(order)}>
+                      <div className="flex flex-wrap items-center gap-2 mb-1">
                         <span className="font-semibold text-gray-900">{new Date(order.date).toLocaleDateString()}</span>
-                        <span className="font-mono text-sm text-gray-500 bg-gray-100 px-2 py-0.5 rounded">{order.orderNo}</span>
+                        <span className="font-mono text-sm text-gray-500 bg-gray-100 px-2 py-0.5 rounded truncate">{order.orderNo}</span>
                       </div>
-                      <div className="text-sm text-gray-600 mb-2">{order.note || '无备注'}</div>
+                      <div className="text-sm text-gray-600 mb-2 truncate" title={order.note}>{order.note || '无备注'}</div>
                       <div className="flex gap-4 text-xs font-semibold">
                         {totalHkd !== 0 && <span className={totalHkd > 0 ? 'text-green-600' : 'text-red-500'}>HKD: {totalHkd > 0 ? '+' : ''}{totalHkd.toFixed(2)}</span>}
                         {totalRmb !== 0 && <span className={totalRmb > 0 ? 'text-green-600' : 'text-red-500'}>RMB: {totalRmb > 0 ? '+' : ''}{totalRmb.toFixed(2)}</span>}
                       </div>
                     </div>
-                    <div className="ml-4">
+                    <div className="ml-2 sm:ml-4 shrink-0">
                       <label className="flex items-center cursor-pointer">
                         <input 
                           type="radio" 
@@ -586,48 +611,83 @@ export default function HomePageClient({ session, stats, initialRecords, categor
             )}
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-gray-700">
-              <thead className="bg-[#F2F2F7]/50 text-xs text-gray-500 uppercase tracking-wider">
-                <tr>
-                  <th className="px-6 py-3 font-medium">日期</th>
-                  <th className="px-6 py-3 font-medium">类型</th>
-                  <th className="px-6 py-3 font-medium">分类</th>
-                  <th className="px-6 py-3 font-medium">金额</th>
-                  <th className="px-6 py-3 font-medium">备注</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {records.length === 0 ? (
+          <div className="w-full">
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left text-sm text-gray-700">
+                <thead className="bg-[#F2F2F7]/50 text-xs text-gray-500 uppercase tracking-wider">
                   <tr>
-                    <td colSpan={5} className="p-8 text-center text-gray-400 font-medium">暂无记录</td>
+                    <th className="px-6 py-3 font-medium">日期</th>
+                    <th className="px-6 py-3 font-medium">类型</th>
+                    <th className="px-6 py-3 font-medium">分类</th>
+                    <th className="px-6 py-3 font-medium">金额</th>
+                    <th className="px-6 py-3 font-medium">备注</th>
                   </tr>
-                ) : (
-                  records.map(record => (
-                    <tr key={record.id} className="hover:bg-gray-50/80 transition-colors">
-                      <td className="px-6 py-4 font-medium">{new Date(record.date).toLocaleDateString()}</td>
-                      <td className="px-6 py-4">
-                        <span className={`px-2.5 py-1 rounded-md text-xs font-semibold ${
-                          record.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 
-                          record.type === 'EXPENSE' ? 'bg-[#FF3B30]/10 text-[#FF3B30]' : 
-                          'bg-purple-100 text-purple-700'
-                        }`}>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {records.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-8 text-center text-gray-400 font-medium">暂无记录</td>
+                    </tr>
+                  ) : (
+                    records.map(record => (
+                      <tr key={record.id} className="hover:bg-gray-50/80 transition-colors">
+                        <td className="px-6 py-4 font-medium">{new Date(record.date).toLocaleDateString()}</td>
+                        <td className="px-6 py-4">
+                          <span className={`px-2.5 py-1 rounded-md text-xs font-semibold ${
+                            record.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 
+                            record.type === 'EXPENSE' ? 'bg-[#FF3B30]/10 text-[#FF3B30]' : 
+                            'bg-purple-100 text-purple-700'
+                          }`}>
+                            {record.type === 'INCOME' ? '收入' : record.type === 'EXPENSE' ? '支出' : record.type}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          {record.category?.name || '-'}
+                          {record.subCategory ? ` / ${record.subCategory.name}` : ''}
+                        </td>
+                        <td className={`px-6 py-4 font-bold ${record.type === 'INCOME' || record.type === 'AR' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
+                          {record.amount > 0 ? '+' : ''}{record.amount} {record.currency}
+                        </td>
+                        <td className="px-6 py-4 text-gray-500 truncate max-w-xs">{record.note || '-'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+            
+            {/* 移动端卡片视图 */}
+            <div className="md:hidden divide-y divide-gray-100">
+              {records.length === 0 ? (
+                <div className="p-8 text-center text-gray-400 font-medium">暂无记录</div>
+              ) : (
+                records.map(record => (
+                  <div key={record.id} className="p-4 space-y-2">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-gray-900 text-sm">{new Date(record.date).toLocaleDateString()}</span>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            record.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 
+                            record.type === 'EXPENSE' ? 'bg-[#FF3B30]/10 text-[#FF3B30]' : 
+                            'bg-purple-100 text-purple-700'
+                          }`}>
                           {record.type === 'INCOME' ? '收入' : record.type === 'EXPENSE' ? '支出' : record.type}
                         </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        {record.category?.name || '-'}
-                        {record.subCategory ? ` / ${record.subCategory.name}` : ''}
-                      </td>
-                      <td className={`px-6 py-4 font-bold ${record.type === 'INCOME' || record.type === 'AR' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
+                      </div>
+                      <span className={`font-bold text-sm ${record.type === 'INCOME' || record.type === 'AR' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
                         {record.amount > 0 ? '+' : ''}{record.amount} {record.currency}
-                      </td>
-                      <td className="px-6 py-4 text-gray-500">{record.note || '-'}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                      </span>
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      {record.category?.name || '-'} {record.subCategory ? `/ ${record.subCategory.name}` : ''}
+                    </div>
+                    {record.note && (
+                      <div className="text-xs text-gray-500 truncate">{record.note}</div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         )}
       </section>
@@ -693,6 +753,42 @@ export default function HomePageClient({ session, stats, initialRecords, categor
           </div>
         </div>
       )}
+
+      {/* 确认弹窗 */}
+      {showConfirmDialog && (
+        <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl w-full max-w-sm flex flex-col shadow-xl overflow-hidden p-6 text-center">
+            <h3 className="text-xl font-bold text-gray-900 mb-2">确认提交记录</h3>
+            <div className="bg-gray-50 rounded-2xl p-4 text-left text-sm space-y-2 mb-6 border border-gray-100">
+              <p><span className="text-gray-500">类型:</span> <span className="font-semibold">{isARAP ? (type === 'INCOME' ? '应收款' : '应付款') : (type === 'INCOME' ? '收入' : '支出')}</span></p>
+              <p><span className="text-gray-500">金额:</span> <span className={`font-bold ${type === 'INCOME' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>{amount} {currency}</span></p>
+              <p><span className="text-gray-500">日期:</span> <span>{date}</span></p>
+              <p><span className="text-gray-500">分类:</span> <span>{currentCategory?.name} {subCategoryId ? ' / 有子分类' : ''}</span></p>
+              {!isARAP && poolId && (
+                <p><span className="text-gray-500">资金池:</span> <span>{pools.find(p => p.id === poolId)?.name}</span></p>
+              )}
+            </div>
+            
+            <div className="flex gap-3">
+              <button 
+                onClick={() => { setShowConfirmDialog(false); setCountdown(0); }}
+                disabled={countdown > 0}
+                className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition-colors disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button 
+                onClick={handleConfirmSubmit}
+                disabled={countdown > 0}
+                className={`flex-1 py-3 text-white font-semibold rounded-xl transition-colors disabled:opacity-50 ${submitBtnClass}`}
+              >
+                {countdown > 0 ? `提交中 (${countdown}s)` : '再次确认'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }

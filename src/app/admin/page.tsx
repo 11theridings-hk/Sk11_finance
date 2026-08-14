@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+import { getSession } from "../actions/auth";
 import { getCategories } from "../actions/category";
 import { getAttachments } from "../actions/record";
 import { getCapitalPools } from "../actions/pool";
@@ -9,6 +11,14 @@ export const metadata = {
 };
 
 export default async function AdminPage() {
+  const session = await getSession();
+  if (!session) {
+    redirect('/login');
+  }
+  if (!session.isAdmin) {
+    redirect('/');
+  }
+
   // 获取各个模块的数据
   const categories = await getCategories();
   const attachments = await getAttachments();

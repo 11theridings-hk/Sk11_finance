@@ -2,6 +2,7 @@
 
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
+import { getSession } from './auth'
 
 export type CreateRecordInput = {
   type: 'INCOME' | 'EXPENSE' | 'AR' | 'AP'
@@ -14,13 +15,16 @@ export type CreateRecordInput = {
   categoryId: string
   subCategoryId?: string
   poolId?: string
-  userId: string
   attachmentSize?: number
   orderNo?: string // 传入 10 位订单号，如果没有则不创建关联
+  orderNote?: string
 }
 
 export async function createRecord(data: CreateRecordInput) {
   try {
+    const session = await getSession()
+    if (!session) throw new Error('未登录')
+    
     const result = await prisma.$transaction(async (tx) => {
       // 1. 判断是否需要审核
       let status = 'APPROVED'
@@ -43,8 +47,15 @@ export async function createRecord(data: CreateRecordInput) {
             data: {
               orderNo: data.orderNo,
               date: data.date,
-              status: 'OPEN'
+              status: 'OPEN',
+              note: data.orderNote
             }
+          })
+        } else if (data.orderNote && !order.note) {
+          // 如果已有单子但没备注，更新备注
+          await tx.consolidatedOrder.update({
+            where: { id: order.id },
+            data: { note: data.orderNote }
           })
         }
         orderId = order.id
@@ -64,7 +75,7 @@ export async function createRecord(data: CreateRecordInput) {
           categoryId: data.categoryId,
           subCategoryId: data.subCategoryId,
           poolId: data.poolId,
-          userId: data.userId,
+          userId: session.userId,
           orderId
         }
       })
@@ -75,7 +86,7 @@ export async function createRecord(data: CreateRecordInput) {
           data: {
             fileUrl: data.attachmentUrl,
             size: data.attachmentSize,
-            uploaderId: data.userId,
+            uploaderId: session.userId,
             categoryId: data.categoryId
           }
         })

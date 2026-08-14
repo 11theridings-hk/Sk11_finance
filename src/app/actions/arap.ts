@@ -2,12 +2,22 @@
 
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
+import { getSession } from './auth'
 
 export async function getARAPRecords() {
+  const session = await getSession()
+  if (!session) return []
+  
+  const where: any = {
+    type: { in: ['AR', 'AP'] }
+  }
+  
+  if (!session.isAdmin) {
+    where.userId = session.userId
+  }
+
   return await prisma.record.findMany({
-    where: {
-      type: { in: ['AR', 'AP'] }
-    },
+    where,
     orderBy: { executionDate: 'asc' },
     include: {
       category: true,
@@ -23,10 +33,30 @@ export async function getARAPRecords() {
 
 export async function updateARAPAmount(id: string, amount: number) {
   try {
-    await prisma.record.update({
-      where: { id },
-      data: { amount }
+    const session = await getSession()
+    if (!session) throw new Error('未登录')
+
+    await prisma.$transaction(async (tx) => {
+      const oldRecord = await tx.record.findUnique({ where: { id } })
+      if (!oldRecord) throw new Error('记录不存在')
+
+      await tx.record.update({
+        where: { id },
+        data: { amount }
+      })
+
+      const typeName = oldRecord.type === 'AR' ? '应收' : '应付'
+      const logContent = `将${typeName}金额从 ${Math.abs(oldRecord.amount)} ${oldRecord.currency} 修改为 ${Math.abs(amount)} ${oldRecord.currency}`
+
+      await tx.remarkLog.create({
+        data: {
+          content: logContent,
+          recordId: id,
+          userId: session.userId
+        }
+      })
     })
+
     revalidatePath('/ar-ap')
     revalidatePath('/')
     return { success: true }
@@ -35,13 +65,16 @@ export async function updateARAPAmount(id: string, amount: number) {
   }
 }
 
-export async function addRemarkLog(recordId: string, content: string, userId: string) {
+export async function addRemarkLog(recordId: string, content: string) {
   try {
+    const session = await getSession()
+    if (!session) throw new Error('未登录')
+
     await prisma.remarkLog.create({
       data: {
         content,
         recordId,
-        userId
+        userId: session.userId
       }
     })
     revalidatePath('/ar-ap')

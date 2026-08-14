@@ -10,9 +10,10 @@ import JSZip from 'jszip'
 type Props = {
   categories: any[]
   users: any[]
+  session: any
 }
 
-export default function ReportClient({ categories, users }: Props) {
+export default function ReportClient({ categories, users, session }: Props) {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [categoryId, setCategoryId] = useState('')
@@ -151,17 +152,25 @@ export default function ReportClient({ categories, users }: Props) {
     let totalCount = records.length
     let totalIncomeHKD = 0
     let totalExpenseHKD = 0
+    let totalArHKD = 0
+    let totalApHKD = 0
     let totalIncomeRMB = 0
     let totalExpenseRMB = 0
+    let totalArRMB = 0
+    let totalApRMB = 0
 
     records.forEach(r => {
       const val = Math.abs(r.amount)
       if (r.currency === 'HKD') {
         if (r.type === 'INCOME') totalIncomeHKD += val
-        else totalExpenseHKD += val
+        else if (r.type === 'EXPENSE') totalExpenseHKD += val
+        else if (r.type === 'AR') totalArHKD += val
+        else if (r.type === 'AP') totalApHKD += val
       } else if (r.currency === 'RMB') {
         if (r.type === 'INCOME') totalIncomeRMB += val
-        else totalExpenseRMB += val
+        else if (r.type === 'EXPENSE') totalExpenseRMB += val
+        else if (r.type === 'AR') totalArRMB += val
+        else if (r.type === 'AP') totalApRMB += val
       }
     })
 
@@ -208,35 +217,43 @@ export default function ReportClient({ categories, users }: Props) {
     // ----------------------------------------
     doc.setDrawColor(220, 220, 220)
     doc.setFillColor(250, 250, 252)
-    doc.roundedRect(15, 70, 85, 45, 3, 3, 'FD')
-    doc.roundedRect(110, 70, 85, 45, 3, 3, 'FD')
+    doc.roundedRect(15, 60, 85, 55, 3, 3, 'FD')
+    doc.roundedRect(110, 60, 85, 55, 3, 3, 'FD')
 
     if (fontBase64) doc.setFont('NotoSansSC', 'bold')
     doc.setFontSize(14)
     doc.setTextColor(50, 50, 50)
-    doc.text('HKD 统计', 57.5, 80, { align: 'center' })
-    doc.text('RMB 统计', 152.5, 80, { align: 'center' })
+    doc.text('HKD 统计', 57.5, 70, { align: 'center' })
+    doc.text('RMB 统计', 152.5, 70, { align: 'center' })
 
     if (fontBase64) doc.setFont('NotoSansSC', 'normal')
     doc.setFontSize(11)
     // HKD
     doc.setTextColor(52, 199, 89) // Green
-    doc.text(`总收入: +${totalIncomeHKD.toFixed(2)}`, 20, 90)
+    doc.text(`总收入: +${totalIncomeHKD.toFixed(2)}`, 20, 80)
     doc.setTextColor(255, 59, 48) // Red
-    doc.text(`总支出: -${totalExpenseHKD.toFixed(2)}`, 20, 98)
+    doc.text(`总支出: -${totalExpenseHKD.toFixed(2)}`, 20, 88)
+    doc.setTextColor(0, 122, 255) // Blue
+    doc.text(`应收: +${totalArHKD.toFixed(2)}`, 20, 96)
+    doc.setTextColor(255, 59, 48) // Red
+    doc.text(`应付: -${totalApHKD.toFixed(2)}`, 20, 104)
     doc.setTextColor(0, 0, 0)
     if (fontBase64) doc.setFont('NotoSansSC', 'bold')
-    doc.text(`期内结余: ${balanceHKD >= 0 ? '+' : ''}${balanceHKD.toFixed(2)}`, 20, 108)
+    doc.text(`期内结余: ${balanceHKD >= 0 ? '+' : ''}${balanceHKD.toFixed(2)}`, 20, 112)
     
     if (fontBase64) doc.setFont('NotoSansSC', 'normal')
     // RMB
     doc.setTextColor(52, 199, 89) // Green
-    doc.text(`总收入: +${totalIncomeRMB.toFixed(2)}`, 115, 90)
+    doc.text(`总收入: +${totalIncomeRMB.toFixed(2)}`, 115, 80)
     doc.setTextColor(255, 59, 48) // Red
-    doc.text(`总支出: -${totalExpenseRMB.toFixed(2)}`, 115, 98)
+    doc.text(`总支出: -${totalExpenseRMB.toFixed(2)}`, 115, 88)
+    doc.setTextColor(0, 122, 255) // Blue
+    doc.text(`应收: +${totalArRMB.toFixed(2)}`, 115, 96)
+    doc.setTextColor(255, 59, 48) // Red
+    doc.text(`应付: -${totalApRMB.toFixed(2)}`, 115, 104)
     doc.setTextColor(0, 0, 0)
     if (fontBase64) doc.setFont('NotoSansSC', 'bold')
-    doc.text(`期内结余: ${balanceRMB >= 0 ? '+' : ''}${balanceRMB.toFixed(2)}`, 115, 108)
+    doc.text(`期内结余: ${balanceRMB >= 0 ? '+' : ''}${balanceRMB.toFixed(2)}`, 115, 112)
     
     // ----------------------------------------
     // 分类支出占比 (文字 + 简单的柱状条)
@@ -311,7 +328,7 @@ export default function ReportClient({ categories, users }: Props) {
 
     const tableData = records.map(r => [
       new Date(r.date).toLocaleDateString(),
-      r.type === 'INCOME' ? '收入' : '支出',
+      r.type === 'INCOME' ? '收入' : r.type === 'EXPENSE' ? '支出' : r.type === 'AR' ? '应收' : '应付',
       r.category?.name || '-',
       r.user?.roleName || '-',
       `${r.amount > 0 ? '+' : ''}${r.amount} ${r.currency}`,
@@ -352,7 +369,7 @@ export default function ReportClient({ categories, users }: Props) {
         doc.setFontSize(12)
         if (fontBase64) doc.setFont('NotoSansSC', 'normal')
         doc.text(`日期: ${new Date(r.date).toLocaleDateString()}`, 20, 40)
-        doc.text(`类型: ${r.type === 'INCOME' ? '收入' : '支出'}`, 20, 50)
+        doc.text(`类型: ${r.type === 'INCOME' ? '收入' : r.type === 'EXPENSE' ? '支出' : r.type === 'AR' ? '应收' : '应付'}`, 20, 50)
         doc.text(`分类: ${r.category?.name || '-'}`, 20, 60)
         doc.text(`金额: ${r.amount} ${r.currency}`, 20, 70)
         doc.text(`角色: ${r.user?.roleName || '-'}`, 20, 80)
@@ -493,61 +510,115 @@ export default function ReportClient({ categories, users }: Props) {
       </div>
 
       {/* 结果表格 */}
-      <div className="overflow-x-auto rounded-xl border border-gray-100">
-        <table className="w-full text-left text-sm text-gray-700">
-          <thead className="bg-[#F2F2F7]/50 text-xs text-gray-500 uppercase tracking-wider">
-            <tr>
-              <th className="px-6 py-3 font-medium">日期</th>
-              <th className="px-6 py-3 font-medium">类型</th>
-              <th className="px-6 py-3 font-medium">分类</th>
-              <th className="px-6 py-3 font-medium">角色</th>
-              <th className="px-6 py-3 font-medium">资金池</th>
-              <th className="px-6 py-3 font-medium">金额</th>
-              <th className="px-6 py-3 font-medium">备注</th>
-              <th className="px-6 py-3 font-medium">附件</th>
-              <th className="px-6 py-3 font-medium">操作</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {records.length === 0 ? (
+      <div className="rounded-xl border border-gray-100 overflow-hidden">
+        <div className="hidden md:block overflow-x-auto">
+          <table className="w-full text-left text-sm text-gray-700">
+            <thead className="bg-[#F2F2F7]/50 text-xs text-gray-500 uppercase tracking-wider">
               <tr>
-                <td colSpan={9} className="p-8 text-center text-gray-400 font-medium">暂无数据，请尝试查询</td>
+                <th className="px-6 py-3 font-medium">日期</th>
+                <th className="px-6 py-3 font-medium">类型</th>
+                <th className="px-6 py-3 font-medium">分类</th>
+                <th className="px-6 py-3 font-medium">角色</th>
+                <th className="px-6 py-3 font-medium">资金池</th>
+                <th className="px-6 py-3 font-medium">金额</th>
+                <th className="px-6 py-3 font-medium">备注</th>
+                <th className="px-6 py-3 font-medium">附件</th>
+                <th className="px-6 py-3 font-medium">操作</th>
               </tr>
-            ) : (
-              records.map(record => (
-                <tr key={record.id} className="hover:bg-gray-50/80 transition-colors">
-                  <td className="px-6 py-4 font-medium">{new Date(record.date).toLocaleDateString()}</td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2.5 py-1 rounded-md text-xs font-semibold ${
-                      record.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 
-                      record.type === 'EXPENSE' ? 'bg-[#FF3B30]/10 text-[#FF3B30]' : 
-                      'bg-purple-100 text-purple-700'
-                    }`}>
-                      {record.type === 'INCOME' ? '收入' : record.type === 'EXPENSE' ? '支出' : record.type}
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {records.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="p-8 text-center text-gray-400 font-medium">暂无数据，请尝试查询</td>
+                </tr>
+              ) : (
+                records.map(record => (
+                  <tr key={record.id} className="hover:bg-gray-50/80 transition-colors">
+                    <td className="px-6 py-4 font-medium">{new Date(record.date).toLocaleDateString()}</td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2.5 py-1 rounded-md text-xs font-semibold ${
+                        record.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 
+                        record.type === 'EXPENSE' ? 'bg-[#FF3B30]/10 text-[#FF3B30]' : 
+                        'bg-purple-100 text-purple-700'
+                      }`}>
+                        {record.type === 'INCOME' ? '收入' : record.type === 'EXPENSE' ? '支出' : record.type === 'AR' ? '应收' : '应付'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      {record.category?.name || '-'}
+                      {record.subCategory ? ` / ${record.subCategory.name}` : ''}
+                    </td>
+                    <td className="px-6 py-4">{record.user?.roleName || '-'}</td>
+                    <td className="px-6 py-4">{record.pool?.name || '-'}</td>
+                    <td className={`px-6 py-4 font-bold ${record.type === 'INCOME' || record.type === 'AR' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
+                      {record.amount > 0 ? '+' : ''}{record.amount} {record.currency}
+                    </td>
+                    <td className="px-6 py-4 max-w-xs truncate text-gray-500" title={record.note || ''}>{record.note || '-'}</td>
+                    <td className="px-6 py-4">
+                      {record.attachmentUrl ? (
+                        <span className="text-xs font-semibold text-[#34C759] bg-[#34C759]/10 px-2.5 py-1 rounded-md">有图</span>
+                      ) : (
+                        <span className="text-xs text-gray-400">-</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      {(record.type === 'INCOME' || record.type === 'EXPENSE') && !record.isReviewing && (
+                        <button 
+                          onClick={() => handleEditClick(record)}
+                          className="text-[#007AFF] hover:underline font-medium text-sm"
+                        >
+                          修改
+                        </button>
+                      )}
+                      {record.isReviewing && (
+                        <span className="text-xs text-[#FF9500] font-medium">修改待审中</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* 移动端卡片视图 */}
+        <div className="md:hidden divide-y divide-gray-100">
+          {records.length === 0 ? (
+            <div className="p-8 text-center text-gray-400 font-medium">暂无数据，请尝试查询</div>
+          ) : (
+            records.map(record => (
+              <div key={record.id} className="p-4 space-y-2">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-gray-900 text-sm">{new Date(record.date).toLocaleDateString()}</span>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        record.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 
+                        record.type === 'EXPENSE' ? 'bg-[#FF3B30]/10 text-[#FF3B30]' : 
+                        'bg-purple-100 text-purple-700'
+                      }`}>
+                      {record.type === 'INCOME' ? '收入' : record.type === 'EXPENSE' ? '支出' : record.type === 'AR' ? '应收' : '应付'}
                     </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    {record.category?.name || '-'}
-                    {record.subCategory ? ` / ${record.subCategory.name}` : ''}
-                  </td>
-                  <td className="px-6 py-4">{record.user?.roleName || '-'}</td>
-                  <td className="px-6 py-4">{record.pool?.name || '-'}</td>
-                  <td className={`px-6 py-4 font-bold ${record.type === 'INCOME' || record.type === 'AR' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
+                  </div>
+                  <span className={`font-bold text-sm ${record.type === 'INCOME' || record.type === 'AR' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
                     {record.amount > 0 ? '+' : ''}{record.amount} {record.currency}
-                  </td>
-                  <td className="px-6 py-4 max-w-xs truncate text-gray-500" title={record.note || ''}>{record.note || '-'}</td>
-                  <td className="px-6 py-4">
-                    {record.attachmentUrl ? (
-                      <span className="text-xs font-semibold text-[#34C759] bg-[#34C759]/10 px-2.5 py-1 rounded-md">有图</span>
-                    ) : (
-                      <span className="text-xs text-gray-400">-</span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4">
+                  </span>
+                </div>
+                <div className="text-sm text-gray-600 flex justify-between">
+                  <span>
+                    {record.category?.name || '-'} {record.subCategory ? `/ ${record.subCategory.name}` : ''}
+                  </span>
+                  <span className="text-xs text-gray-500">{record.user?.roleName || '-'}</span>
+                </div>
+                {record.note && (
+                  <div className="text-xs text-gray-500 truncate">{record.note}</div>
+                )}
+                <div className="flex justify-between items-center pt-2 mt-2 border-t border-gray-50">
+                  <span className="text-xs text-gray-400">资金池: {record.pool?.name || '-'}</span>
+                  <div>
                     {(record.type === 'INCOME' || record.type === 'EXPENSE') && !record.isReviewing && (
                       <button 
                         onClick={() => handleEditClick(record)}
-                        className="text-[#007AFF] hover:underline font-medium text-sm"
+                        className="text-[#007AFF] font-medium text-xs bg-[#007AFF]/10 px-3 py-1 rounded"
                       >
                         修改
                       </button>
@@ -555,42 +626,42 @@ export default function ReportClient({ categories, users }: Props) {
                     {record.isReviewing && (
                       <span className="text-xs text-[#FF9500] font-medium">修改待审中</span>
                     )}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
 
       {/* 修改弹窗 */}
       {editingRecord && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl w-full max-w-2xl shadow-xl overflow-hidden">
-            <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-end md:items-center justify-center p-0 md:p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-t-3xl md:rounded-3xl w-full max-w-2xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-4 md:p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
               <h3 className="text-lg font-bold text-gray-900">修改记录申请</h3>
               <button onClick={() => setEditingRecord(null)} className="p-2 bg-gray-200 hover:bg-gray-300 rounded-full text-gray-600 transition-colors">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
               </button>
             </div>
             
-            <div className="p-6 space-y-5">
-              <div className="flex space-x-3 mb-4">
+            <div className="p-4 md:p-6 space-y-4 md:space-y-5 overflow-y-auto">
+              <div className="flex space-x-3 mb-2 md:mb-4">
                 <button
                   className={`px-5 py-2 rounded-lg font-semibold text-sm transition-all shadow-sm ${editType === 'EXPENSE' ? 'bg-[#FF3B30] text-white' : 'bg-[#F2F2F7] text-gray-600'}`}
                   onClick={() => { setEditType('EXPENSE'); setEditCategoryId(''); setEditSubCategoryId(''); }}
                 >
-                  支出 (Expense)
+                  支出
                 </button>
                 <button
                   className={`px-5 py-2 rounded-lg font-semibold text-sm transition-all shadow-sm ${editType === 'INCOME' ? 'bg-[#007AFF] text-white' : 'bg-[#F2F2F7] text-gray-600'}`}
                   onClick={() => { setEditType('INCOME'); setEditCategoryId(''); setEditSubCategoryId(''); }}
                 >
-                  收入 (Income)
+                  收入
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-5">
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">日期</label>
                   <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} className={inputClass} />
@@ -600,7 +671,7 @@ export default function ReportClient({ categories, users }: Props) {
                   <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">主分类</label>
                   <select value={editCategoryId} onChange={e => { setEditCategoryId(e.target.value); setEditSubCategoryId(''); }} className={inputClass}>
                     <option value="">请选择...</option>
-                    {categories.filter(c => c.type === editType).map(cat => (
+                    {categories.filter(c => c.type === editType && !c.parentId).map(cat => (
                       <option key={cat.id} value={cat.id}>{cat.name}</option>
                     ))}
                   </select>
@@ -615,7 +686,7 @@ export default function ReportClient({ categories, users }: Props) {
                   <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">子分类</label>
                   <select value={editSubCategoryId} onChange={e => setEditSubCategoryId(e.target.value)} className={inputClass}>
                     <option value="">无</option>
-                    {categories.find(c => c.id === editCategoryId)?.children?.map((sub: any) => (
+                    {categories.filter(c => c.parentId === editCategoryId).map((sub: any) => (
                       <option key={sub.id} value={sub.id}>{sub.name}</option>
                     ))}
                   </select>

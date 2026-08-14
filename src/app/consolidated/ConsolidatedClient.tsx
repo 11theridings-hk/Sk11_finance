@@ -141,9 +141,9 @@ export default function ConsolidatedClient({ openOrders, closedOrders }: { openO
       </div>
 
       {modalOrder && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-xl overflow-hidden">
-            <div className="p-5 border-b border-gray-100 flex justify-between items-start bg-gray-50/50">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-end md:items-center justify-center p-0 md:p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-t-3xl md:rounded-3xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-xl overflow-hidden">
+            <div className="p-4 md:p-5 border-b border-gray-100 flex justify-between items-start bg-gray-50/50">
               <div className="flex-1">
                 <div className="flex items-center gap-3 mb-2">
                   <h3 className="text-xl font-bold text-gray-900">{new Date(modalOrder.date).toLocaleDateString()}</h3>
@@ -169,52 +169,98 @@ export default function ConsolidatedClient({ openOrders, closedOrders }: { openO
             </div>
             
             <div className="overflow-y-auto p-0 flex-1">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-[#F2F2F7] sticky top-0 text-xs text-gray-500 uppercase tracking-wider shadow-sm">
-                  <tr>
-                    <th className="px-4 py-3 font-medium">日期</th>
-                    <th className="px-4 py-3 font-medium">类型</th>
-                    <th className="px-4 py-3 font-medium">分类</th>
-                    <th className="px-4 py-3 font-medium">角色</th>
-                    <th className="px-4 py-3 font-medium">资金池</th>
-                    <th className="px-4 py-3 font-medium">金额</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {modalOrder.records?.map((record: any) => (
-                    <tr key={record.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium">{new Date(record.date).toLocaleDateString()}</td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-1 rounded text-[10px] font-bold ${
-                          record.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 
-                          record.type === 'EXPENSE' ? 'bg-[#FF3B30]/10 text-[#FF3B30]' : 
-                          'bg-purple-100 text-purple-700'
-                        }`}>
-                          {record.type}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 truncate max-w-[120px]" title={record.category?.name}>
-                        {record.category?.name || '-'}
-                        {record.subCategory ? ` / ${record.subCategory.name}` : ''}
-                      </td>
-                      <td className="px-4 py-3 truncate max-w-[80px]">
-                        {record.user?.roleName || '-'}
-                      </td>
-                      <td className="px-4 py-3 truncate max-w-[80px]">
-                        {record.pool?.name || '-'}
-                      </td>
-                      <td className={`px-4 py-3 font-semibold ${record.amount > 0 ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
-                        {record.amount > 0 ? '+' : ''}{record.amount} {record.currency}
-                      </td>
-                    </tr>
-                  ))}
-                  {(!modalOrder.records || modalOrder.records.length === 0) && (
+              {/* Desktop Table */}
+              <div className="hidden md:block">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-[#F2F2F7] sticky top-0 text-xs text-gray-500 uppercase tracking-wider shadow-sm">
                     <tr>
-                      <td colSpan={6} className="p-8 text-center text-gray-400">暂无关联记录</td>
+                      <th className="px-4 py-3 font-medium">日期</th>
+                      <th className="px-4 py-3 font-medium">类型</th>
+                      <th className="px-4 py-3 font-medium">分类</th>
+                      <th className="px-4 py-3 font-medium">角色</th>
+                      <th className="px-4 py-3 font-medium">资金池</th>
+                      <th className="px-4 py-3 font-medium">金额</th>
+                      <th className="px-4 py-3 font-medium">备注</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {modalOrder.records?.map((record: any) => (
+                      <tr key={record.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-medium">{new Date(record.date).toLocaleDateString()}</td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2 py-1 rounded text-[10px] font-bold ${
+                            record.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 
+                            record.type === 'EXPENSE' ? 'bg-[#FF3B30]/10 text-[#FF3B30]' : 
+                            'bg-purple-100 text-purple-700'
+                          }`}>
+                            {record.type}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 truncate max-w-[120px]" title={record.category?.name}>
+                          {record.category?.name || '-'}
+                          {record.subCategory ? ` / ${record.subCategory.name}` : ''}
+                        </td>
+                        <td className="px-4 py-3 truncate max-w-[80px]">
+                          {record.user?.roleName || '-'}
+                        </td>
+                        <td className="px-4 py-3 truncate max-w-[80px]">
+                          {record.pool?.name || '-'}
+                        </td>
+                        <td className={`px-4 py-3 font-semibold ${record.amount > 0 ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
+                          {record.amount > 0 ? '+' : ''}{record.amount} {record.currency}
+                        </td>
+                        <td className="px-4 py-3 max-w-[150px] truncate text-gray-500" title={record.note}>
+                          {record.note || '-'}
+                        </td>
+                      </tr>
+                    ))}
+                    {(!modalOrder.records || modalOrder.records.length === 0) && (
+                      <tr>
+                        <td colSpan={7} className="p-8 text-center text-gray-400">暂无关联记录</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile Cards */}
+              <div className="md:hidden divide-y divide-gray-100">
+                {(!modalOrder.records || modalOrder.records.length === 0) ? (
+                  <div className="p-8 text-center text-gray-400">暂无关联记录</div>
+                ) : (
+                  modalOrder.records.map((record: any) => (
+                    <div key={record.id} className="p-4 space-y-2">
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-gray-900 text-sm">{new Date(record.date).toLocaleDateString()}</span>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              record.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 
+                              record.type === 'EXPENSE' ? 'bg-[#FF3B30]/10 text-[#FF3B30]' : 
+                              'bg-purple-100 text-purple-700'
+                            }`}>
+                            {record.type}
+                          </span>
+                        </div>
+                        <span className={`font-bold text-sm ${record.amount > 0 ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
+                          {record.amount > 0 ? '+' : ''}{record.amount} {record.currency}
+                        </span>
+                      </div>
+                      <div className="text-sm text-gray-600 flex justify-between">
+                        <span className="truncate" title={record.category?.name}>
+                          {record.category?.name || '-'} {record.subCategory ? `/ ${record.subCategory.name}` : ''}
+                        </span>
+                        <span className="text-xs text-gray-500 shrink-0 ml-2">{record.user?.roleName || '-'}</span>
+                      </div>
+                      {record.note && (
+                        <div className="text-xs text-gray-500 truncate" title={record.note}>{record.note}</div>
+                      )}
+                      <div className="text-xs text-gray-400 mt-1">
+                        资金池: {record.pool?.name || '-'}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         </div>

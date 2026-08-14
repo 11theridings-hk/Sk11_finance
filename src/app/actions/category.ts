@@ -2,6 +2,14 @@
 
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
+import { getSession } from './auth'
+
+async function checkAdmin() {
+  const session = await getSession()
+  if (!session || !session.isAdmin) {
+    throw new Error('权限不足')
+  }
+}
 
 // 获取所有分类（包含子分类结构）
 export async function getCategories() {
@@ -37,8 +45,18 @@ async function ensureUncategorized() {
 // 创建分类
 export async function createCategory(name: string, parentId?: string, type: 'INCOME' | 'EXPENSE' = 'EXPENSE') {
   try {
+    await checkAdmin()
+    
+    let finalType = type
+    if (parentId) {
+      const parent = await prisma.category.findUnique({ where: { id: parentId } })
+      if (parent) {
+        finalType = parent.type as 'INCOME' | 'EXPENSE'
+      }
+    }
+
     const category = await prisma.category.create({
-      data: { name, parentId: parentId || null, type }
+      data: { name, parentId: parentId || null, type: finalType }
     })
     revalidatePath('/admin')
     revalidatePath('/')
@@ -51,6 +69,7 @@ export async function createCategory(name: string, parentId?: string, type: 'INC
 // 修改分类
 export async function updateCategory(id: string, name: string, type?: 'INCOME' | 'EXPENSE') {
   try {
+    await checkAdmin()
     const data: any = { name }
     if (type) data.type = type
     
@@ -69,6 +88,7 @@ export async function updateCategory(id: string, name: string, type?: 'INCOME' |
 // 删除分类
 export async function deleteCategory(id: string) {
   try {
+    await checkAdmin()
     const uncategorized = await ensureUncategorized()
     
     if (id === uncategorized.id) {
