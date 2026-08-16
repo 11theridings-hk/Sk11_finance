@@ -23,6 +23,7 @@ export async function getOpenOrders() {
     orderBy: { date: 'desc' }, // 最近日期到最远日期
     include: {
       records: {
+        where: !session.isAdmin ? { userId: session.userId } : undefined,
         include: {
           category: true,
           subCategory: true,
@@ -70,6 +71,7 @@ export async function getClosedOrders() {
     orderBy: { closedAt: 'desc' },
     include: {
       records: {
+        where: !session.isAdmin ? { userId: session.userId } : undefined,
         include: {
           category: true,
           subCategory: true,

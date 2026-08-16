@@ -40,6 +40,10 @@ export async function updateARAPAmount(id: string, amount: number) {
       const oldRecord = await tx.record.findUnique({ where: { id } })
       if (!oldRecord) throw new Error('记录不存在')
 
+      if (oldRecord.userId !== session.userId && !session.isAdmin) {
+        throw new Error('权限不足：只能修改自己的记录')
+      }
+
       await tx.record.update({
         where: { id },
         data: { amount }
@@ -69,6 +73,13 @@ export async function addRemarkLog(recordId: string, content: string) {
   try {
     const session = await getSession()
     if (!session) throw new Error('未登录')
+
+    const record = await prisma.record.findUnique({ where: { id: recordId } })
+    if (!record) throw new Error('记录不存在')
+
+    if (record.userId !== session.userId && !session.isAdmin) {
+      throw new Error('权限不足：只能对自己的记录添加备注')
+    }
 
     await prisma.remarkLog.create({
       data: {

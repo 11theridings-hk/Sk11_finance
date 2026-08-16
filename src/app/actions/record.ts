@@ -51,12 +51,17 @@ export async function createRecord(data: CreateRecordInput) {
               note: data.orderNote
             }
           })
-        } else if (data.orderNote && !order.note) {
-          // 如果已有单子但没备注，更新备注
-          await tx.consolidatedOrder.update({
-            where: { id: order.id },
-            data: { note: data.orderNote }
-          })
+        } else {
+          if (order.status === 'CLOSED') {
+            throw new Error('该归结单已关闭，不可追加记录')
+          }
+          if (data.orderNote && !order.note) {
+            // 如果已有单子但没备注，更新备注
+            await tx.consolidatedOrder.update({
+              where: { id: order.id },
+              data: { note: data.orderNote }
+            })
+          }
         }
         orderId = order.id
       }
@@ -123,6 +128,12 @@ export async function createRecord(data: CreateRecordInput) {
 
 // 获取个人 Hero 统计数据
 export async function getUserStats(userId: string) {
+  const session = await getSession()
+  if (!session) return { hkdCashFlow: 0, hkdAR: 0, hkdAP: 0, rmbCashFlow: 0, rmbAR: 0, rmbAP: 0 }
+  if (session.userId !== userId && !session.isAdmin) {
+    throw new Error('权限不足')
+  }
+
   const records = await prisma.record.findMany({
     where: { 
       userId,
@@ -155,8 +166,16 @@ export async function getUserStats(userId: string) {
 
 // 获取最近 10 条记录
 export async function getRecentRecords(userId?: string) {
+  const session = await getSession()
+  if (!session) return []
+  if (userId && session.userId !== userId && !session.isAdmin) {
+    throw new Error('权限不足')
+  }
+  // 如果是普通用户且没有传 userId，强制只看自己的
+  const queryUserId = (!session.isAdmin && !userId) ? session.userId : userId
+
   return await prisma.record.findMany({
-    where: userId ? { userId } : undefined,
+    where: queryUserId ? { userId: queryUserId } : undefined,
     orderBy: { createdAt: 'desc' },
     take: 10,
     include: {
@@ -169,7 +188,11 @@ export async function getRecentRecords(userId?: string) {
 
 // 获取所有附件
 export async function getAttachments() {
+  const session = await getSession()
+  if (!session) return []
+  
   return await prisma.attachment.findMany({
+    where: !session.isAdmin ? { uploaderId: session.userId } : undefined,
     orderBy: { createdAt: 'desc' },
     include: {
       uploader: { select: { roleName: true } },

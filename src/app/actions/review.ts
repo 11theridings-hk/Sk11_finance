@@ -86,6 +86,7 @@ export async function reviewRecord(id: string, action: 'APPROVE' | 'REJECT') {
               date: record.date,
               type: record.type,
               poolId: record.poolId,
+              currency: record.currency,
               isReviewing: false
             }
           })

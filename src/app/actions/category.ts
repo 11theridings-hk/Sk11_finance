@@ -95,26 +95,24 @@ export async function deleteCategory(id: string) {
       return { success: false, error: '不能删除默认的“未分类”' }
     }
 
-    // 将该分类下的子分类的 parentId 置为空或转给未分类
-    await prisma.category.updateMany({
-      where: { parentId: id },
-      data: { parentId: null } // 变成一级分类
-    })
-
     // 将关联该分类的记录转入“未分类”
-    await prisma.record.updateMany({
-      where: { categoryId: id },
-      data: { categoryId: uncategorized.id }
-    })
-    await prisma.record.updateMany({
-      where: { subCategoryId: id },
-      data: { subCategoryId: null }
-    })
-
-    // 最后删除分类
-    await prisma.category.delete({
-      where: { id }
-    })
+    await prisma.$transaction([
+      prisma.category.updateMany({
+        where: { parentId: id },
+        data: { parentId: null }
+      }),
+      prisma.record.updateMany({
+        where: { categoryId: id },
+        data: { categoryId: uncategorized.id }
+      }),
+      prisma.record.updateMany({
+        where: { subCategoryId: id },
+        data: { subCategoryId: null }
+      }),
+      prisma.category.delete({
+        where: { id }
+      })
+    ])
 
     revalidatePath('/admin')
     revalidatePath('/')

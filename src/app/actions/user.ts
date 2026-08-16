@@ -2,7 +2,7 @@
 
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
-import { getSession } from './auth'
+import { getSession, hashPassword } from './auth'
 
 async function checkAdmin() {
   const session = await getSession()
@@ -32,7 +32,7 @@ export async function createUser(data: { password: string; roleName: string; isA
     await checkAdmin()
     const user = await prisma.user.create({
       data: {
-        password: data.password,
+        password: await hashPassword(data.password),
         roleName: data.roleName,
         isAdmin: data.isAdmin,
         poolEnabled: false,
@@ -49,18 +49,26 @@ export async function createUser(data: { password: string; roleName: string; isA
 export async function updateUser(id: string, data: { password?: string; roleName?: string; isAdmin?: boolean }) {
   try {
     await checkAdmin()
-    const user = await prisma.user.update({
-      where: { id },
-      data
-    })
-    
-    // 如果 roleName 改变且 poolEnabled，同步更新对应资金池名称
-    if (data.roleName && user.poolEnabled) {
-      await prisma.capitalPool.updateMany({
-        where: { userId: id },
-        data: { name: data.roleName }
-      })
+    const updateData: any = { ...data }
+    if (data.password) {
+      updateData.password = await hashPassword(data.password)
     }
+
+    const user = await prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id },
+        data: updateData
+      })
+      
+      // 如果 roleName 改变且 poolEnabled，同步更新对应资金池名称
+      if (data.roleName && updated.poolEnabled) {
+        await tx.capitalPool.updateMany({
+          where: { userId: id },
+          data: { name: data.roleName }
+        })
+      }
+      return updated
+    })
     
     revalidatePath('/admin')
     return { success: true, user }
@@ -87,25 +95,28 @@ export async function deleteUser(id: string) {
 export async function toggleUserPool(id: string, enabled: boolean) {
   try {
     await checkAdmin()
-    const user = await prisma.user.update({
-      where: { id },
-      data: { poolEnabled: enabled }
-    })
-
-    if (enabled) {
-      // 启用：如果不存在对应的资金池，则创建一个
-      const existingPool = await prisma.capitalPool.findFirst({
-        where: { userId: id }
+    const user = await prisma.$transaction(async (tx) => {
+      const updatedUser = await tx.user.update({
+        where: { id },
+        data: { poolEnabled: enabled }
       })
-      if (!existingPool) {
-        await prisma.capitalPool.create({
-          data: {
-            name: user.roleName,
-            userId: user.id
-          }
+
+      if (enabled) {
+        // 启用：如果不存在对应的资金池，则创建一个
+        const existingPool = await tx.capitalPool.findFirst({
+          where: { userId: id }
         })
+        if (!existingPool) {
+          await tx.capitalPool.create({
+            data: {
+              name: updatedUser.roleName,
+              userId: updatedUser.id
+            }
+          })
+        }
       }
-    }
+      return updatedUser
+    })
     // 如果禁用，在页面上资金池置灰即可，不删除历史数据
     revalidatePath('/admin')
     return { success: true, user }

@@ -2,11 +2,21 @@
 
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
+import { getSession } from './auth'
 
 export async function requestModifyRecord(originalId: string, data: any) {
   try {
+    const session = await getSession()
+    if (!session) return { success: false, error: '未登录' }
+
     const originalRecord = await prisma.record.findUnique({ where: { id: originalId } })
     if (!originalRecord) return { success: false, error: '原记录不存在' }
+    
+    // 权限校验：必须是记录所有者或管理员
+    if (originalRecord.userId !== session.userId && !session.isAdmin) {
+      return { success: false, error: '权限不足：只能修改自己的记录' }
+    }
+
     if (originalRecord.isReviewing) return { success: false, error: '该记录正在修改审核中' }
 
     await prisma.$transaction(async (tx) => {

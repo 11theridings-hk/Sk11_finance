@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession } from "../actions/auth";
 import { getCategories } from "../actions/category";
@@ -31,9 +32,9 @@ export default async function AdminPage() {
       <header className="bg-white border-b border-gray-200">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex justify-between items-center">
           <div className="flex items-center gap-3">
-            <a href="/" className="text-[#007AFF] text-sm font-semibold hover:opacity-80">
+            <Link href="/" className="text-[#007AFF] text-sm font-semibold hover:opacity-80">
               ‹ 返回首页
-            </a>
+            </Link>
             <h1 className="text-lg font-bold text-gray-900">管理后台</h1>
           </div>
         </div>
