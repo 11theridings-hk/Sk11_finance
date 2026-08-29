@@ -23,7 +23,6 @@ model User {
   records      Record[]      @relation("UserRecords")
   attachments  Attachment[]  @relation("UserAttachments")
   capitalPools CapitalPool[] @relation("UserCapitalPools")
-  remarkLogs   RemarkLog[]   @relation("UserRemarkLogs")
 }
 
 model Category {
@@ -46,7 +45,6 @@ model CapitalPool {
   id               String        @id @default(uuid())
   name             String        // 资金池名称
   balanceHkd       Float         @default(0) // HKD 余额
-  balanceRmb       Float         @default(0) // RMB 余额
   userId           String?       // 关联角色ID（可选）
   isReviewRequired Boolean       @default(false) // 是否为审核账户
   createdAt        DateTime      @default(now())
@@ -57,27 +55,12 @@ model CapitalPool {
   records      Record[]      @relation("CapitalPoolRecords")
 }
 
-model ConsolidatedOrder {
-  id           String        @id @default(uuid())
-  orderNo      String        @unique // 10位号码带有日期信息
-  date         DateTime      // 日期
-  note         String?       // 备注信息
-  status       String        @default("OPEN") // "OPEN" - 归单 | "CLOSED" - 结单
-  closedAt     DateTime?     // 结单时间
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-
-  records      Record[]      @relation("OrderRecords")
-}
-
 model Record {
   id               String        @id @default(uuid())
-  type             String        // "INCOME" | "EXPENSE" | "AR" (应收款) | "AP" (应付款)
+  type             String        // "INCOME" | "EXPENSE"
   status           String        @default("APPROVED") // "PENDING" (待审) | "APPROVED" (已审) | "REJECTED" (驳回)
   date             DateTime      // 记录日期
-  executionDate    DateTime?     // 执行期限（仅用于AR/AP）
   note             String?       // 备注说明
-  currency         String        // "HKD" | "RMB"
   amount           Float         // 金额（正数/负数）
   attachmentUrl    String?      // 附件路径
   createdAt        DateTime      @default(now())
@@ -91,32 +74,15 @@ model Record {
   userId           String
   categoryId       String
   subCategoryId    String?
-  poolId           String?       // AR/AP 没有资金池，改为可选
-  orderId          String?       // 归结单ID
+  poolId           String?
 
   // 关系
   user             User          @relation("UserRecords", fields: [userId], references: [id])
   category         Category      @relation("CategoryRecords", fields: [categoryId], references: [id])
   subCategory      Category?     @relation("SubCategoryRecords", fields: [subCategoryId], references: [id])
   pool             CapitalPool?  @relation("CapitalPoolRecords", fields: [poolId], references: [id])
-  order            ConsolidatedOrder? @relation("OrderRecords", fields: [orderId], references: [id])
   originalRecord   Record?       @relation("ModifiedRecord", fields: [originalRecordId], references: [id])
   modifications    Record[]      @relation("ModifiedRecord")
-  remarkLogs       RemarkLog[]   @relation("RecordRemarks")
-}
-
-model RemarkLog {
-  id           String        @id @default(uuid())
-  content      String        // 备注内容
-  createdAt    DateTime      @default(now())
-  
-  // 外键
-  recordId     String
-  userId       String        // 添加备注的用户
-
-  // 关系
-  record       Record        @relation("RecordRemarks", fields: [recordId], references: [id], onDelete: Cascade)
-  user         User          @relation("UserRemarkLogs", fields: [userId], references: [id])
 }
 
 model Attachment {

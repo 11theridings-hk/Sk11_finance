@@ -5,32 +5,32 @@ import { getSession } from './actions/auth'
 import { getUserStats, getRecentRecords } from './actions/record'
 import { getCategories } from './actions/category'
 import { getCapitalPools } from './actions/pool'
-import { getOpenOrders } from './actions/order'
 import HomePageClient from './HomePageClient'
+import { getCurrentLocale } from '@/lib/locale'
 
 export default async function HomePage() {
   const session = await getSession()
   if (!session) {
     redirect('/login')
   }
+  const locale = await getCurrentLocale()
 
-  const [stats, initialRecords, categories, pools, openOrders] = await Promise.all([
+  const [stats, initialRecords, categories, pools] = await Promise.all([
     getUserStats(session.userId),
     getRecentRecords(session.userId),
     getCategories(),
     getCapitalPools(session.userId),
-    getOpenOrders()
   ])
 
   return (
     <div className="min-h-screen bg-[#F2F2F7]">
       <HomePageClient 
+        locale={locale}
         session={session}
         stats={stats}
         initialRecords={initialRecords}
         categories={categories}
         pools={pools}
-        openOrders={openOrders}
       />
     </div>
   )

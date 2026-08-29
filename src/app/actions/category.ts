@@ -3,11 +3,15 @@
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { getSession } from './auth'
+import { getCurrentLocale } from '@/lib/locale'
+import { createTranslator } from '@/lib/i18n'
 
 async function checkAdmin() {
   const session = await getSession()
+  const locale = await getCurrentLocale()
+  const t = createTranslator(locale)
   if (!session || !session.isAdmin) {
-    throw new Error('权限不足')
+    throw new Error(t('unauthorized'))
   }
 }
 
@@ -88,11 +92,13 @@ export async function updateCategory(id: string, name: string, type?: 'INCOME' |
 // 删除分类
 export async function deleteCategory(id: string) {
   try {
+    const locale = await getCurrentLocale()
+    const t = createTranslator(locale)
     await checkAdmin()
     const uncategorized = await ensureUncategorized()
     
     if (id === uncategorized.id) {
-      return { success: false, error: '不能删除默认的“未分类”' }
+      return { success: false, error: t('deleteDefaultUncategorized') }
     }
 
     // 将关联该分类的记录转入“未分类”

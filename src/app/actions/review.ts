@@ -3,6 +3,8 @@
 import prisma from '@/lib/prisma'
 import { getSession } from './auth'
 import { revalidatePath } from 'next/cache'
+import { getCurrentLocale } from '@/lib/locale'
+import { createTranslator } from '@/lib/i18n'
 
 export async function getPendingReviewCount() {
   const session = await getSession()
@@ -31,48 +33,36 @@ export async function getReviewRecords(status: 'PENDING' | 'APPROVED' | 'REJECTE
 }
 
 export async function reviewRecord(id: string, action: 'APPROVE' | 'REJECT') {
+  const locale = await getCurrentLocale()
+  const t = createTranslator(locale)
   const session = await getSession()
-  if (!session || !session.isAdmin) return { success: false, error: '权限不足' }
+  if (!session || !session.isAdmin) return { success: false, error: t('unauthorized') }
 
   try {
     await prisma.$transaction(async (tx) => {
       const record = await tx.record.findUnique({ where: { id } })
-      if (!record || record.status !== 'PENDING') throw new Error('记录不存在或已被审核')
+      if (!record || record.status !== 'PENDING') throw new Error(t('recordAlreadyReviewed'))
 
       if (action === 'APPROVE') {
         // 如果是修改审核
         if (record.originalRecordId) {
           const oldRecord = await tx.record.findUnique({ where: { id: record.originalRecordId } })
-          if (!oldRecord) throw new Error('原记录不存在')
+          if (!oldRecord) throw new Error(t('originalRecordNotFound'))
 
           // 1. 撤销旧记录的影响 (如果是收支)
           if (oldRecord.poolId && (oldRecord.type === 'INCOME' || oldRecord.type === 'EXPENSE')) {
-            if (oldRecord.currency === 'HKD') {
-              await tx.capitalPool.update({
-                where: { id: oldRecord.poolId },
-                data: { balanceHkd: { decrement: oldRecord.amount } }
-              })
-            } else {
-              await tx.capitalPool.update({
-                where: { id: oldRecord.poolId },
-                data: { balanceRmb: { decrement: oldRecord.amount } }
-              })
-            }
+            await tx.capitalPool.update({
+              where: { id: oldRecord.poolId },
+              data: { balanceHkd: { decrement: oldRecord.amount } }
+            })
           }
 
           // 2. 施加新记录的影响 (如果是收支)
           if (record.poolId && (record.type === 'INCOME' || record.type === 'EXPENSE')) {
-            if (record.currency === 'HKD') {
-              await tx.capitalPool.update({
-                where: { id: record.poolId },
-                data: { balanceHkd: { increment: record.amount } }
-              })
-            } else {
-              await tx.capitalPool.update({
-                where: { id: record.poolId },
-                data: { balanceRmb: { increment: record.amount } }
-              })
-            }
+            await tx.capitalPool.update({
+              where: { id: record.poolId },
+              data: { balanceHkd: { increment: record.amount } }
+            })
           }
 
           // 3. 替换旧记录的值
@@ -86,7 +76,6 @@ export async function reviewRecord(id: string, action: 'APPROVE' | 'REJECT') {
               date: record.date,
               type: record.type,
               poolId: record.poolId,
-              currency: record.currency,
               isReviewing: false
             }
           })
@@ -100,17 +89,10 @@ export async function reviewRecord(id: string, action: 'APPROVE' | 'REJECT') {
           })
           // 更新资金池
           if (record.poolId && (record.type === 'INCOME' || record.type === 'EXPENSE')) {
-            if (record.currency === 'HKD') {
-              await tx.capitalPool.update({
-                where: { id: record.poolId },
-                data: { balanceHkd: { increment: record.amount } }
-              })
-            } else {
-              await tx.capitalPool.update({
-                where: { id: record.poolId },
-                data: { balanceRmb: { increment: record.amount } }
-              })
-            }
+            await tx.capitalPool.update({
+              where: { id: record.poolId },
+              data: { balanceHkd: { increment: record.amount } }
+            })
           }
         }
       } else {
@@ -137,4 +119,3 @@ export async function reviewRecord(id: string, action: 'APPROVE' | 'REJECT') {
     return { success: false, error: error.message }
   }
 }
-

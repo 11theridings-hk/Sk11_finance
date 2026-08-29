@@ -3,11 +3,15 @@
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { getSession } from './auth'
+import { getCurrentLocale } from '@/lib/locale'
+import { createTranslator } from '@/lib/i18n'
 
 async function checkAdmin() {
   const session = await getSession()
+  const locale = await getCurrentLocale()
+  const t = createTranslator(locale)
   if (!session || !session.isAdmin) {
-    throw new Error('权限不足')
+    throw new Error(t('unauthorized'))
   }
 }
 
@@ -77,13 +81,15 @@ export async function updateCapitalPool(id: string, name: string, userId?: strin
 // 删除资金池
 export async function deleteCapitalPool(id: string) {
   try {
+    const locale = await getCurrentLocale()
+    const t = createTranslator(locale)
     await checkAdmin()
     // 检查是否有记录关联
     const records = await prisma.record.count({
       where: { poolId: id }
     })
     if (records > 0) {
-      return { success: false, error: '该资金池下已有收支记录，无法直接删除' }
+      return { success: false, error: t('poolHasRecords') }
     }
 
     await prisma.capitalPool.delete({

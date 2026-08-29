@@ -4,6 +4,8 @@ import { cookies } from 'next/headers'
 import prisma from '@/lib/prisma'
 import { SignJWT, jwtVerify } from 'jose'
 import { createHash } from 'crypto'
+import { getCurrentLocale } from '@/lib/locale'
+import { createTranslator } from '@/lib/i18n'
 
 const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'finance-18-super-secret-key-change-in-prod')
 const PWD_SALT = process.env.PWD_SALT || 'finance-18-salt'
@@ -13,6 +15,8 @@ export async function hashPassword(password: string) {
 }
 
 export async function login(password: string, isAdminLogin: boolean = false) {
+  const locale = await getCurrentLocale()
+  const t = createTranslator(locale)
   // 查找匹配该密码的用户（密码需 hash）
   const hashedPassword = await hashPassword(password)
   const user = await prisma.user.findUnique({
@@ -29,15 +33,17 @@ export async function login(password: string, isAdminLogin: boolean = false) {
       })
       return await performLogin(legacyUser, isAdminLogin)
     }
-    return { success: false, error: '密码错误或用户不存在' }
+    return { success: false, error: t('passwordWrongOrUserMissing') }
   }
 
   return await performLogin(user, isAdminLogin)
 }
 
 async function performLogin(user: any, isAdminLogin: boolean) {
+  const locale = await getCurrentLocale()
+  const t = createTranslator(locale)
   if (isAdminLogin && !user.isAdmin) {
-    return { success: false, error: '该用户没有管理员权限' }
+    return { success: false, error: t('adminPermissionRequired') }
   }
 
   // 生成 JWT Token

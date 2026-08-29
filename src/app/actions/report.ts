@@ -7,7 +7,6 @@ export type ReportFilter = {
   startDate?: Date
   endDate?: Date
   categoryId?: string
-  currency?: 'HKD' | 'RMB' | 'ALL'
   userId?: string
 }
 
@@ -42,10 +41,6 @@ export async function getReportRecords(filter: ReportFilter) {
       { categoryId: { in: categoryIds } },
       { subCategoryId: { in: categoryIds } }
     ]
-  }
-
-  if (filter.currency && filter.currency !== 'ALL') {
-    where.currency = filter.currency
   }
 
   return await prisma.record.findMany({

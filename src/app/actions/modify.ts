@@ -3,21 +3,25 @@
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { getSession } from './auth'
+import { getCurrentLocale } from '@/lib/locale'
+import { createTranslator } from '@/lib/i18n'
 
 export async function requestModifyRecord(originalId: string, data: any) {
   try {
+    const locale = await getCurrentLocale()
+    const t = createTranslator(locale)
     const session = await getSession()
-    if (!session) return { success: false, error: '未登录' }
+    if (!session) return { success: false, error: t('notLoggedIn') }
 
     const originalRecord = await prisma.record.findUnique({ where: { id: originalId } })
-    if (!originalRecord) return { success: false, error: '原记录不存在' }
+    if (!originalRecord) return { success: false, error: t('originalRecordNotFound') }
     
     // 权限校验：必须是记录所有者或管理员
     if (originalRecord.userId !== session.userId && !session.isAdmin) {
-      return { success: false, error: '权限不足：只能修改自己的记录' }
+      return { success: false, error: t('canOnlyModifyOwnRecord') }
     }
 
-    if (originalRecord.isReviewing) return { success: false, error: '该记录正在修改审核中' }
+    if (originalRecord.isReviewing) return { success: false, error: t('reviewingInProgress') }
 
     await prisma.$transaction(async (tx) => {
       // 标记原记录正在审核中
@@ -33,7 +37,6 @@ export async function requestModifyRecord(originalId: string, data: any) {
           status: 'PENDING',
           date: new Date(data.date),
           note: data.note,
-          currency: data.currency,
           amount: data.amount,
           categoryId: data.categoryId,
           subCategoryId: data.subCategoryId || undefined,
