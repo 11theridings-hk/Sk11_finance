@@ -6,6 +6,8 @@ import { getAttachments } from "../actions/record";
 import { getCapitalPools } from "../actions/pool";
 import { getUsers } from "../actions/user";
 import AdminTabs from "./AdminTabs";
+import { getCurrentLocale } from "@/lib/locale";
+import { createTranslator } from "@/lib/i18n";
 
 export const metadata = {
   title: "管理后台",
@@ -19,6 +21,8 @@ export default async function AdminPage() {
   if (!session.isAdmin) {
     redirect('/');
   }
+  const locale = await getCurrentLocale();
+  const t = createTranslator(locale);
 
   // 获取各个模块的数据
   const categories = await getCategories();
@@ -33,9 +37,9 @@ export default async function AdminPage() {
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex justify-between items-center">
           <div className="flex items-center gap-3">
             <Link href="/" className="text-[#007AFF] text-sm font-semibold hover:opacity-80">
-              ‹ 返回首页
+              ‹ {t('backHome')}
             </Link>
-            <h1 className="text-lg font-bold text-gray-900">管理后台</h1>
+            <h1 className="text-lg font-bold text-gray-900">{t('adminPage')}</h1>
           </div>
         </div>
       </header>
@@ -47,6 +51,7 @@ export default async function AdminPage() {
           initialAttachments={attachments}
           initialPools={pools}
           initialUsers={users}
+          locale={locale}
         />
       </main>
     </div>

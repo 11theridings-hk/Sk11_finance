@@ -3,21 +3,30 @@
 import React, { useState, useEffect } from 'react'
 import { getReportRecords, ReportFilter } from '../actions/report'
 import { requestModifyRecord } from '../actions/modify'
+import { deleteRecord } from '../actions/record'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import JSZip from 'jszip'
+import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
+import { compressImage, type ClientAttachment } from '@/lib/image'
+import RecordDetailModal from '../RecordDetailModal'
 
 type Props = {
   categories: any[]
   users: any[]
-  session: any
+  pools: any[]
+  locale: Locale
 }
 
-export default function ReportClient({ categories, users, session }: Props) {
+export default function ReportClient({ categories, users, pools, locale }: Props) {
+  const t = createTranslator(locale)
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [categoryId, setCategoryId] = useState('')
-  const [currency, setCurrency] = useState<'ALL' | 'HKD' | 'RMB'>('ALL')
+  const [subCategoryId, setSubCategoryId] = useState('')
+  const [thirdCategoryId, setThirdCategoryId] = useState('')
+  const [poolId, setPoolId] = useState('')
+  const [status, setStatus] = useState<'APPROVED' | 'PENDING' | 'ALL'>('APPROVED')
   const [userId, setUserId] = useState('')
 
   const [records, setRecords] = useState<any[]>([])
@@ -27,14 +36,22 @@ export default function ReportClient({ categories, users, session }: Props) {
 
   // 修改记录相关状态
   const [editingRecord, setEditingRecord] = useState<any>(null)
+  const [selectedRecord, setSelectedRecord] = useState<any>(null)
   const [editDate, setEditDate] = useState('')
   const [editType, setEditType] = useState<'INCOME' | 'EXPENSE'>('EXPENSE')
   const [editCategoryId, setEditCategoryId] = useState('')
   const [editSubCategoryId, setEditSubCategoryId] = useState('')
+  const [editThirdCategoryId, setEditThirdCategoryId] = useState('')
   const [editAmount, setEditAmount] = useState('')
-  const [editCurrency, setEditCurrency] = useState<'HKD' | 'RMB'>('HKD')
   const [editNote, setEditNote] = useState('')
+  const [editAttachment, setEditAttachment] = useState<ClientAttachment | null>(null)
+  const [editAttachmentNote, setEditAttachmentNote] = useState('')
   const [isSubmittingEdit, setIsSubmittingEdit] = useState(false)
+
+  const currentCategory = categories.find((item) => item.id === categoryId)
+  const currentSubCategory = currentCategory?.children?.find((item: any) => item.id === subCategoryId)
+  const editCurrentCategory = categories.find((item) => item.id === editCategoryId)
+  const editCurrentSubCategory = editCurrentCategory?.children?.find((item: any) => item.id === editSubCategoryId)
 
   const handleEditClick = (record: any) => {
     setEditingRecord(record)
@@ -42,13 +59,15 @@ export default function ReportClient({ categories, users, session }: Props) {
     setEditType(record.type as 'INCOME' | 'EXPENSE')
     setEditCategoryId(record.categoryId)
     setEditSubCategoryId(record.subCategoryId || '')
+    setEditThirdCategoryId(record.thirdCategoryId || '')
     setEditAmount(Math.abs(record.amount).toString())
-    setEditCurrency(record.currency as 'HKD' | 'RMB')
     setEditNote(record.note || '')
+    setEditAttachment(null)
+    setEditAttachmentNote('')
   }
 
   const submitEdit = async () => {
-    if (!editCategoryId || !editAmount) return alert('必填项不完整')
+    if (!editCategoryId || !editAmount) return alert(t('selectedCategoryMissing'))
     setIsSubmittingEdit(true)
     
     let finalAmount = parseFloat(editAmount)
@@ -60,27 +79,49 @@ export default function ReportClient({ categories, users, session }: Props) {
       date: editDate,
       categoryId: editCategoryId,
       subCategoryId: editSubCategoryId,
+      thirdCategoryId: editThirdCategoryId,
       amount: finalAmount,
-      currency: editCurrency,
       note: editNote,
-      poolId: editingRecord.poolId // 保持原资金池
+      poolId: editingRecord.poolId,
+      attachment: editAttachment ? { ...editAttachment, note: editAttachmentNote || undefined } : undefined
     })
 
     if (res.success) {
-      alert('修改申请已提交，等待管理员审核')
+      alert(t('modifyRequestSubmitted'))
       setEditingRecord(null)
-      handleSearch() // 刷新列表
+      handleSearch()
     } else {
-      alert('提交失败: ' + res.error)
+      alert(`${t('submitFailed')}: ${res.error}`)
     }
     setIsSubmittingEdit(false)
   }
 
-  // 尝试在客户端加载中文字体，以解决 jsPDF 中文乱码问题
+  const handleEditAttachmentChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    try {
+      const compressed = await compressImage(file, 200)
+      setEditAttachment(compressed)
+    } catch {
+      alert(t('imageCompressionFailed'))
+    }
+  }
+
+  const handleDeleteRecord = async (recordId: string) => {
+    if (!window.confirm(t('deleteRecordConfirm'))) return
+    setLoading(true)
+    const res = await deleteRecord(recordId)
+    if (res.success) {
+      handleSearch()
+      return
+    }
+    alert(res.error)
+    setLoading(false)
+  }
+
   useEffect(() => {
     const loadFont = async () => {
       try {
-        // 使用本地放入的 NotoSansSC-Regular.ttf 字体
         const fontUrl = '/fonts/NotoSansSC-Regular.ttf'
         const res = await fetch(fontUrl)
         if (!res.ok) {
@@ -88,7 +129,6 @@ export default function ReportClient({ categories, users, session }: Props) {
         }
         const buffer = await res.arrayBuffer()
         
-        // ArrayBuffer to Base64
         let binary = ''
         const bytes = new Uint8Array(buffer)
         const len = bytes.byteLength
@@ -106,89 +146,70 @@ export default function ReportClient({ categories, users, session }: Props) {
 
   const handleSearch = async () => {
     setLoading(true)
-    const filter: ReportFilter = {
-      currency: currency,
-    }
+    const filter: ReportFilter = {}
     if (startDate) filter.startDate = new Date(startDate)
     if (endDate) {
-      // 包含结束日期当天的最后一秒
       const end = new Date(endDate)
       end.setHours(23, 59, 59, 999)
       filter.endDate = end
     }
     if (categoryId) filter.categoryId = categoryId
+    if (subCategoryId) filter.subCategoryId = subCategoryId
+    if (thirdCategoryId) filter.thirdCategoryId = thirdCategoryId
+    if (poolId) filter.poolId = poolId
     if (userId) filter.userId = userId
+    filter.status = status
 
     try {
       const data = await getReportRecords(filter)
       setRecords(data)
     } catch (err) {
       console.error(err)
-      alert('查询失败')
+      alert(t('queryFailed'))
     } finally {
       setLoading(false)
     }
   }
 
-  // 初始化 jsPDF 实例并注入中文字体
   const createPdfDoc = () => {
     const doc = new jsPDF()
     if (fontBase64) {
       doc.addFileToVFS('NotoSansSC-Regular.ttf', fontBase64)
       doc.addFont('NotoSansSC-Regular.ttf', 'NotoSansSC', 'normal')
-      doc.addFont('NotoSansSC-Regular.ttf', 'NotoSansSC', 'bold') // Fallback to normal for bold if no bold font is provided
+      doc.addFont('NotoSansSC-Regular.ttf', 'NotoSansSC', 'bold')
       doc.setFont('NotoSansSC')
     }
     return doc
   }
 
-  // 导出明细列表-PDF
   const exportListPdf = () => {
     if (records.length === 0) {
-      alert('暂无数据可导出')
+      alert(t('noDataToExport'))
       return
     }
 
-    let totalCount = records.length
-    let totalIncomeHKD = 0
-    let totalExpenseHKD = 0
-    let totalArHKD = 0
-    let totalApHKD = 0
-    let totalIncomeRMB = 0
-    let totalExpenseRMB = 0
-    let totalArRMB = 0
-    let totalApRMB = 0
+    const totalCount = records.length
+    let totalIncome = 0
+    let totalExpense = 0
 
     records.forEach(r => {
       const val = Math.abs(r.amount)
-      if (r.currency === 'HKD') {
-        if (r.type === 'INCOME') totalIncomeHKD += val
-        else if (r.type === 'EXPENSE') totalExpenseHKD += val
-        else if (r.type === 'AR') totalArHKD += val
-        else if (r.type === 'AP') totalApHKD += val
-      } else if (r.currency === 'RMB') {
-        if (r.type === 'INCOME') totalIncomeRMB += val
-        else if (r.type === 'EXPENSE') totalExpenseRMB += val
-        else if (r.type === 'AR') totalArRMB += val
-        else if (r.type === 'AP') totalApRMB += val
-      }
+      if (r.type === 'INCOME') totalIncome += val
+      else if (r.type === 'EXPENSE') totalExpense += val
     })
 
-    const balanceHKD = totalIncomeHKD - totalExpenseHKD
-    const balanceRMB = totalIncomeRMB - totalExpenseRMB
+    const balance = totalIncome - totalExpense
 
     const doc = createPdfDoc()
     
-    // 画个底色块当表头背景
-    doc.setFillColor(242, 242, 247) // iOS 浅灰
+    doc.setFillColor(242, 242, 247)
     doc.rect(0, 0, 210, 40, 'F')
 
     if (fontBase64) doc.setFont('NotoSansSC', 'bold')
     doc.setFontSize(24)
-    doc.setTextColor(0, 122, 255) // iOS 蓝色标题
-    doc.text('财务收支总汇报表', 105, 25, { align: 'center' })
+    doc.setTextColor(0, 122, 255)
+    doc.text(t('financeSummaryReport'), 105, 25, { align: 'center' })
     
-    // 画一条分割线
     doc.setDrawColor(200, 200, 200)
     doc.line(15, 45, 195, 45)
 
@@ -199,70 +220,41 @@ export default function ReportClient({ categories, users, session }: Props) {
     // 时间范围与总笔数
     const timeRangeStr = startDate && endDate 
       ? `${startDate} 至 ${endDate}` 
-      : (startDate ? `${startDate} 起` : (endDate ? `至 ${endDate}` : '所有时间'))
+      : (startDate ? `${startDate} -` : (endDate ? `- ${endDate}` : t('allTime')))
       
-    // 获取筛选条件名称
-    const categoryName = categoryId ? categories.find(c => c.id === categoryId)?.name || '未知' : '全部'
-    const roleName = userId ? users.find(u => u.id === userId)?.roleName || '未知' : '全部'
-    const currencyName = currency === 'ALL' ? '全部' : currency
+    const categoryName = categoryId ? categories.find(c => c.id === categoryId)?.name || t('unknown') : t('all')
+    const roleName = userId ? users.find(u => u.id === userId)?.roleName || t('unknown') : t('all')
 
-    doc.text(`统计周期: ${timeRangeStr}`, 15, 45)
-    doc.text(`总交易笔数: ${totalCount} 笔`, 150, 45)
+    doc.text(`${t('statisticsPeriod')}: ${timeRangeStr}`, 15, 45)
+    doc.text(`${t('totalTransactions')}: ${totalCount}`, 145, 45)
     
     doc.setTextColor(150, 150, 150)
-    doc.text(`筛选条件 -> 分类: [${categoryName}]   |   币种: [${currencyName}]   |   角色: [${roleName}]`, 15, 52)
+    doc.text(`${t('filterSummary')} -> ${t('category')}: [${categoryName}] | ${t('role')}: [${roleName}]`, 15, 52)
     
-    // ----------------------------------------
-    // HKD & RMB 资产统计卡片
-    // ----------------------------------------
     doc.setDrawColor(220, 220, 220)
     doc.setFillColor(250, 250, 252)
-    doc.roundedRect(15, 60, 85, 55, 3, 3, 'FD')
-    doc.roundedRect(110, 60, 85, 55, 3, 3, 'FD')
+    doc.roundedRect(15, 60, 180, 45, 3, 3, 'FD')
 
     if (fontBase64) doc.setFont('NotoSansSC', 'bold')
     doc.setFontSize(14)
     doc.setTextColor(50, 50, 50)
-    doc.text('HKD 统计', 57.5, 70, { align: 'center' })
-    doc.text('RMB 统计', 152.5, 70, { align: 'center' })
+    doc.text('HKD$', 105, 70, { align: 'center' })
 
     if (fontBase64) doc.setFont('NotoSansSC', 'normal')
     doc.setFontSize(11)
-    // HKD
-    doc.setTextColor(52, 199, 89) // Green
-    doc.text(`总收入: +${totalIncomeHKD.toFixed(2)}`, 20, 80)
-    doc.setTextColor(255, 59, 48) // Red
-    doc.text(`总支出: -${totalExpenseHKD.toFixed(2)}`, 20, 88)
-    doc.setTextColor(0, 122, 255) // Blue
-    doc.text(`应收: +${totalArHKD.toFixed(2)}`, 20, 96)
-    doc.setTextColor(255, 59, 48) // Red
-    doc.text(`应付: -${totalApHKD.toFixed(2)}`, 20, 104)
+    doc.setTextColor(52, 199, 89)
+    doc.text(`${t('totalIncome')}: ${totalIncome.toFixed(2)}`, 25, 85)
+    doc.setTextColor(255, 59, 48)
+    doc.text(`${t('totalExpense')}: ${totalExpense.toFixed(2)}`, 85, 85)
     doc.setTextColor(0, 0, 0)
     if (fontBase64) doc.setFont('NotoSansSC', 'bold')
-    doc.text(`期内结余: ${balanceHKD >= 0 ? '+' : ''}${balanceHKD.toFixed(2)}`, 20, 112)
+    doc.text(`${t('balance')}: ${balance >= 0 ? '+' : ''}${balance.toFixed(2)}`, 145, 85)
     
-    if (fontBase64) doc.setFont('NotoSansSC', 'normal')
-    // RMB
-    doc.setTextColor(52, 199, 89) // Green
-    doc.text(`总收入: +${totalIncomeRMB.toFixed(2)}`, 115, 80)
-    doc.setTextColor(255, 59, 48) // Red
-    doc.text(`总支出: -${totalExpenseRMB.toFixed(2)}`, 115, 88)
-    doc.setTextColor(0, 122, 255) // Blue
-    doc.text(`应收: +${totalArRMB.toFixed(2)}`, 115, 96)
-    doc.setTextColor(255, 59, 48) // Red
-    doc.text(`应付: -${totalApRMB.toFixed(2)}`, 115, 104)
-    doc.setTextColor(0, 0, 0)
-    if (fontBase64) doc.setFont('NotoSansSC', 'bold')
-    doc.text(`期内结余: ${balanceRMB >= 0 ? '+' : ''}${balanceRMB.toFixed(2)}`, 115, 112)
-    
-    // ----------------------------------------
-    // 分类支出占比 (文字 + 简单的柱状条)
-    // ----------------------------------------
-    doc.line(15, 125, 195, 125)
+    doc.line(15, 115, 195, 115)
     doc.setFontSize(14)
     doc.setTextColor(50, 50, 50)
     if (fontBase64) doc.setFont('NotoSansSC', 'bold')
-    doc.text('各项分类支出统计 (合并计价)', 15, 140)
+    doc.text(t('categoryExpenseStats'), 15, 130)
     
     if (fontBase64) doc.setFont('NotoSansSC', 'normal')
     doc.setFontSize(11)
@@ -270,93 +262,81 @@ export default function ReportClient({ categories, users, session }: Props) {
     const categoryStats: Record<string, number> = {}
     let totalExpenseMerged = 0
     records.filter(r => r.type === 'EXPENSE').forEach(r => {
-      const catName = r.category?.name || '未分类'
+      const catName = r.category?.name || t('uncategorized')
       const val = Math.abs(r.amount)
       categoryStats[catName] = (categoryStats[catName] || 0) + val
       totalExpenseMerged += val
     })
     
-    let yPos = 150
+    let yPos = 140
     Object.entries(categoryStats).sort((a, b) => b[1] - a[1]).forEach(([name, amount], index) => {
       const percentage = totalExpenseMerged > 0 ? (amount / totalExpenseMerged) : 0
       const percentStr = (percentage * 100).toFixed(1)
       
-      // 文字
       doc.setTextColor(80, 80, 80)
       doc.text(`${name}: ${amount.toFixed(2)} (${percentStr}%)`, 15, yPos)
       
-      // 画一个简单的进度条代替饼图
-      doc.setFillColor(230, 230, 230) // 进度条底色
+      doc.setFillColor(230, 230, 230)
       doc.roundedRect(100, yPos - 4, 80, 6, 2, 2, 'F')
       
-      // 不同的前五名颜色，后面统一灰色
       const colors = [
-        [0, 122, 255],   // iOS Blue
-        [52, 199, 89],   // iOS Green
-        [255, 149, 0],   // iOS Orange
-        [255, 59, 48],   // iOS Red
-        [88, 86, 214]    // iOS Purple
+        [0, 122, 255],
+        [52, 199, 89],
+        [255, 149, 0],
+        [255, 59, 48],
+        [88, 86, 214]
       ]
       const color = index < colors.length ? colors[index] : [142, 142, 147]
       doc.setFillColor(color[0], color[1], color[2])
       
-      // 进度条填充
-      const barWidth = Math.max(80 * percentage, 1) // 最小宽度 1
+      const barWidth = Math.max(80 * percentage, 1)
       doc.roundedRect(100, yPos - 4, barWidth, 6, 2, 2, 'F')
 
       yPos += 12
     })
 
-    // ----------------------------------------
-    // 2. 添加新一页，显示详细列表
-    // ----------------------------------------
     doc.addPage()
     doc.setFontSize(16)
     doc.setTextColor(0, 0, 0)
-    doc.text('明细列表报表', 14, 15)
+    doc.text(t('detailListReport'), 14, 15)
 
-    // 新增：在明细列表上方显示总计
     doc.setFontSize(10)
     doc.setTextColor(80, 80, 80)
-    const totalIncomeStr = (totalIncomeHKD > 0 ? `HKD +${totalIncomeHKD.toFixed(2)} ` : '') + (totalIncomeRMB > 0 ? `RMB +${totalIncomeRMB.toFixed(2)}` : '')
-    const totalExpenseStr = (totalExpenseHKD > 0 ? `HKD -${totalExpenseHKD.toFixed(2)} ` : '') + (totalExpenseRMB > 0 ? `RMB -${totalExpenseRMB.toFixed(2)}` : '')
-    const balanceStr = `HKD ${balanceHKD.toFixed(2)} / RMB ${balanceRMB.toFixed(2)}`
-    
-    doc.text(`期间总收入: ${totalIncomeStr || '0'}`, 14, 25)
-    doc.text(`期间总支出: ${totalExpenseStr || '0'}`, 85, 25)
-    doc.text(`期间结余: ${balanceStr}`, 155, 25)
+    doc.text(`${t('totalIncome')}: ${totalIncome.toFixed(2)}`, 14, 25)
+    doc.text(`${t('totalExpense')}: ${totalExpense.toFixed(2)}`, 80, 25)
+    doc.text(`${t('balance')}: ${balance.toFixed(2)}`, 150, 25)
 
     const tableData = records.map(r => [
-      new Date(r.date).toLocaleDateString(),
-      r.type === 'INCOME' ? '收入' : r.type === 'EXPENSE' ? '支出' : r.type === 'AR' ? '应收' : '应付',
+      new Date(r.date).toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK'),
+      r.type === 'INCOME' ? t('income') : t('expense'),
       r.category?.name || '-',
       r.user?.roleName || '-',
-      `${r.amount > 0 ? '+' : ''}${r.amount} ${r.currency}`,
-      r.note || '-'
+      formatCurrency(locale, r.amount),
+      r.note || '-',
+      r.status === 'PENDING' ? t('pendingApproval') : t('approvedStored')
     ])
 
     autoTable(doc, {
       startY: 35,
-      head: [['日期', '类型', '分类', '角色', '金额', '备注']],
+      head: [[t('date'), t('type'), t('category'), t('role'), t('amount'), t('note'), t('status')]],
       body: tableData,
       styles: { font: fontBase64 ? 'NotoSansSC' : 'helvetica' },
       headStyles: { fillColor: [66, 139, 202], font: fontBase64 ? 'NotoSansSC' : 'helvetica' }
     })
 
-    doc.save('财务报表.pdf')
+    doc.save(locale === 'en' ? 'financial-report.pdf' : '財務報表.pdf')
   }
 
-  // 导出会计明细-PDF (Zip)
   const exportAccountingPdfs = async () => {
     if (records.length === 0) {
-      alert('暂无数据可导出')
+      alert(t('noDataToExport'))
       return
     }
 
     setExporting(true)
     try {
       const zip = new JSZip()
-      const folder = zip.folder('会计明细')
+      const folder = zip.folder(locale === 'en' ? 'accounting-details' : '會計明細')
 
       for (let i = 0; i < records.length; i++) {
         const r = records[i]
@@ -364,50 +344,45 @@ export default function ReportClient({ categories, users, session }: Props) {
         
         doc.setFontSize(16)
         if (fontBase64) doc.setFont('NotoSansSC', 'bold')
-        doc.text('会计明细单', 105, 20, { align: 'center' })
+        doc.text(locale === 'en' ? 'Accounting Detail' : '會計明細單', 105, 20, { align: 'center' })
         
         doc.setFontSize(12)
         if (fontBase64) doc.setFont('NotoSansSC', 'normal')
-        doc.text(`日期: ${new Date(r.date).toLocaleDateString()}`, 20, 40)
-        doc.text(`类型: ${r.type === 'INCOME' ? '收入' : r.type === 'EXPENSE' ? '支出' : r.type === 'AR' ? '应收' : '应付'}`, 20, 50)
-        doc.text(`分类: ${r.category?.name || '-'}`, 20, 60)
-        doc.text(`金额: ${r.amount} ${r.currency}`, 20, 70)
-        doc.text(`角色: ${r.user?.roleName || '-'}`, 20, 80)
-        doc.text(`资金池: ${r.pool?.name || '-'}`, 20, 90)
-        doc.text(`备注: ${r.note || '-'}`, 20, 100)
+        doc.text(`${t('date')}: ${new Date(r.date).toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK')}`, 20, 40)
+        doc.text(`${t('type')}: ${r.type === 'INCOME' ? t('income') : t('expense')}`, 20, 50)
+        doc.text(`${t('category')}: ${[r.category?.name, r.subCategory?.name, r.thirdCategory?.name].filter(Boolean).join(' / ') || '-'}`, 20, 60)
+        doc.text(`${t('amount')}: ${formatCurrency(locale, r.amount)}`, 20, 70)
+        doc.text(`${t('role')}: ${r.user?.roleName || '-'}`, 20, 80)
+        doc.text(`${t('pool')}: ${r.pool?.name || '-'}`, 20, 90)
+        doc.text(`${t('status')}: ${r.status === 'PENDING' ? t('pendingApproval') : t('approvedStored')}`, 20, 100)
+        doc.text(`${t('note')}: ${r.note || '-'}`, 20, 110)
 
-        // 如果有附件，且是 Data URL 格式的图片，则添加到 PDF
-        if (r.attachmentUrl && r.attachmentUrl.startsWith('data:image')) {
-          doc.text('附件图片:', 20, 120)
+        const firstAttachment = r.attachments?.[0]?.fileUrl || r.attachmentUrl
+        if (firstAttachment && firstAttachment.startsWith('data:image')) {
+          doc.text(`${t('attachment')}:`, 20, 120)
           try {
-            // jspdf addImage 语法: addImage(imageData, format, x, y, width, height)
-            // 我们需要提取格式
-            const match = r.attachmentUrl.match(/^data:image\/(png|jpeg|jpg|gif);base64,/)
+            const match = firstAttachment.match(/^data:image\/(png|jpeg|jpg|gif);base64,/)
             const format = match ? (match[1].toUpperCase() === 'JPG' ? 'JPEG' : match[1].toUpperCase()) : 'JPEG'
-            
-            // 为了保持比例，简单设定一个最大宽高 150x150
-            doc.addImage(r.attachmentUrl, format, 20, 125, 150, 150, undefined, 'FAST')
+            doc.addImage(firstAttachment, format, 20, 125, 150, 150, undefined, 'FAST')
           } catch (e) {
             console.error('添加图片附件失败:', e)
-            doc.text('(图片加载失败)', 40, 120)
+            doc.text('(image failed to load)', 40, 120)
           }
         }
 
         const pdfBlob = doc.output('blob')
-        // 文件名规范化，避免非法字符
         const safeDate = new Date(r.date).toLocaleDateString().replace(/\//g, '-')
-        const fileName = `${safeDate}_${r.category?.name || '未分类'}_${i + 1}.pdf`
+        const fileName = `${safeDate}_${r.category?.name || t('uncategorized')}_${i + 1}.pdf`
         
         folder?.file(fileName, pdfBlob)
       }
 
       const zipContent = await zip.generateAsync({ type: 'blob' })
       
-      // 下载 zip
       const url = window.URL.createObjectURL(zipContent)
       const link = document.createElement('a')
       link.href = url
-      link.download = '会计明细.zip'
+      link.download = locale === 'en' ? 'accounting-details.zip' : '會計明細.zip'
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
@@ -415,7 +390,7 @@ export default function ReportClient({ categories, users, session }: Props) {
 
     } catch (err) {
       console.error(err)
-      alert('生成会计明细压缩包失败')
+      alert(t('zipExportFailed'))
     } finally {
       setExporting(false)
     }
@@ -425,10 +400,9 @@ export default function ReportClient({ categories, users, session }: Props) {
 
   return (
     <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-      {/* 筛选区域 */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div>
-          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">开始日期</label>
+          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('startDate')}</label>
           <input 
             type="date" 
             value={startDate} 
@@ -437,7 +411,7 @@ export default function ReportClient({ categories, users, session }: Props) {
           />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">结束日期</label>
+          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('endDate')}</label>
           <input 
             type="date" 
             value={endDate} 
@@ -446,41 +420,68 @@ export default function ReportClient({ categories, users, session }: Props) {
           />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">分类</label>
+          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('mainCategory')}</label>
           <select 
             value={categoryId} 
-            onChange={e => setCategoryId(e.target.value)}
+            onChange={e => {
+              setCategoryId(e.target.value)
+              setSubCategoryId('')
+              setThirdCategoryId('')
+            }}
             className={inputClass}
           >
-            <option value="">全部</option>
+            <option value="">{t('all')}</option>
             {categories.map(c => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
         </div>
         <div>
-          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">币种</label>
-          <select 
-            value={currency} 
-            onChange={e => setCurrency(e.target.value as any)}
-            className={inputClass}
-          >
-            <option value="ALL">全部</option>
-            <option value="HKD">HKD</option>
-            <option value="RMB">RMB</option>
+          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('subCategory')}</label>
+          <select value={subCategoryId} onChange={e => { setSubCategoryId(e.target.value); setThirdCategoryId('') }} className={inputClass} disabled={!currentCategory?.children?.length}>
+            <option value="">{t('all')}</option>
+            {currentCategory?.children?.map((sub: any) => (
+              <option key={sub.id} value={sub.id}>{sub.name}</option>
+            ))}
           </select>
         </div>
         <div>
-          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">角色</label>
+          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('grandCategory')}</label>
+          <select value={thirdCategoryId} onChange={e => setThirdCategoryId(e.target.value)} className={inputClass} disabled={!currentSubCategory?.children?.length}>
+            <option value="">{t('all')}</option>
+            {currentSubCategory?.children?.map((third: any) => (
+              <option key={third.id} value={third.id}>{third.name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('pool')}</label>
+          <select value={poolId} onChange={e => setPoolId(e.target.value)} className={inputClass}>
+            <option value="">{t('all')}</option>
+            {pools.map((pool: any) => (
+              <option key={pool.id} value={pool.id}>{pool.name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('role')}</label>
           <select 
             value={userId} 
             onChange={e => setUserId(e.target.value)}
             className={inputClass}
           >
-            <option value="">全部</option>
+            <option value="">{t('all')}</option>
             {users.map(u => (
               <option key={u.id} value={u.id}>{u.roleName}</option>
             ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('status')}</label>
+          <select value={status} onChange={e => setStatus(e.target.value as 'APPROVED' | 'PENDING' | 'ALL')} className={inputClass}>
+            <option value="APPROVED">{t('approvedStored')}</option>
+            <option value="PENDING">{t('pendingApproval')}</option>
+            <option value="ALL">{t('all')}</option>
           </select>
         </div>
       </div>
@@ -491,88 +492,90 @@ export default function ReportClient({ categories, users, session }: Props) {
           disabled={loading}
           className="px-6 py-2.5 bg-[#007AFF] text-white rounded-xl text-sm font-semibold hover:bg-[#0066CC] transition-colors shadow-sm disabled:opacity-50 disabled:shadow-none"
         >
-          {loading ? '查询中...' : '查询结果'}
+          {loading ? t('queryLoading') : t('queryResults')}
         </button>
         <button 
           onClick={exportListPdf}
           disabled={loading || exporting || records.length === 0}
           className="px-6 py-2.5 bg-[#34C759] text-white rounded-xl text-sm font-semibold hover:bg-[#2EB850] transition-colors shadow-sm disabled:opacity-50 disabled:shadow-none"
         >
-          导出明细列表-PDF
+          {t('exportListPdf')}
         </button>
         <button 
           onClick={exportAccountingPdfs}
           disabled={loading || exporting || records.length === 0}
           className="px-6 py-2.5 bg-[#5856D6] text-white rounded-xl text-sm font-semibold hover:bg-[#4B49B8] transition-colors shadow-sm disabled:opacity-50 disabled:shadow-none"
         >
-          {exporting ? '打包中...' : '导出会计明细-PDF (Zip)'}
+          {exporting ? t('exporting') : t('exportAccountingZip')}
         </button>
       </div>
 
-      {/* 结果表格 */}
       <div className="rounded-xl border border-gray-100 overflow-hidden">
         <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-sm text-gray-700">
             <thead className="bg-[#F2F2F7]/50 text-xs text-gray-500 uppercase tracking-wider">
               <tr>
-                <th className="px-6 py-3 font-medium">日期</th>
-                <th className="px-6 py-3 font-medium">类型</th>
-                <th className="px-6 py-3 font-medium">分类</th>
-                <th className="px-6 py-3 font-medium">角色</th>
-                <th className="px-6 py-3 font-medium">资金池</th>
-                <th className="px-6 py-3 font-medium">金额</th>
-                <th className="px-6 py-3 font-medium">备注</th>
-                <th className="px-6 py-3 font-medium">附件</th>
-                <th className="px-6 py-3 font-medium">操作</th>
+                <th className="px-6 py-3 font-medium">{t('date')}</th>
+                <th className="px-6 py-3 font-medium">{t('type')}</th>
+                <th className="px-6 py-3 font-medium">{t('category')}</th>
+                <th className="px-6 py-3 font-medium">{t('role')}</th>
+                <th className="px-6 py-3 font-medium">{t('pool')}</th>
+                <th className="px-6 py-3 font-medium">{t('amount')}</th>
+                <th className="px-6 py-3 font-medium">{t('note')}</th>
+                <th className="px-6 py-3 font-medium">{t('status')}</th>
+                <th className="px-6 py-3 font-medium">{t('modify')}</th>
+                <th className="px-6 py-3 font-medium">{t('detail')}</th>
+                <th className="px-6 py-3 font-medium">{t('delete')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {records.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="p-8 text-center text-gray-400 font-medium">暂无数据，请尝试查询</td>
+                  <td colSpan={11} className="p-8 text-center text-gray-400 font-medium">{t('noDataTrySearch')}</td>
                 </tr>
               ) : (
                 records.map(record => (
                   <tr key={record.id} className="hover:bg-gray-50/80 transition-colors">
-                    <td className="px-6 py-4 font-medium">{new Date(record.date).toLocaleDateString()}</td>
+                    <td className="px-6 py-4 font-medium">{new Date(record.date).toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK')}</td>
                     <td className="px-6 py-4">
                       <span className={`px-2.5 py-1 rounded-md text-xs font-semibold ${
-                        record.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 
-                        record.type === 'EXPENSE' ? 'bg-[#FF3B30]/10 text-[#FF3B30]' : 
-                        'bg-purple-100 text-purple-700'
+                        record.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 'bg-[#FF3B30]/10 text-[#FF3B30]'
                       }`}>
-                        {record.type === 'INCOME' ? '收入' : record.type === 'EXPENSE' ? '支出' : record.type === 'AR' ? '应收' : '应付'}
+                        {record.type === 'INCOME' ? t('income') : t('expense')}
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      {record.category?.name || '-'}
-                      {record.subCategory ? ` / ${record.subCategory.name}` : ''}
+                      {[record.category?.name, record.subCategory?.name, record.thirdCategory?.name].filter(Boolean).join(' / ') || '-'}
                     </td>
                     <td className="px-6 py-4">{record.user?.roleName || '-'}</td>
                     <td className="px-6 py-4">{record.pool?.name || '-'}</td>
-                    <td className={`px-6 py-4 font-bold ${record.type === 'INCOME' || record.type === 'AR' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
-                      {record.amount > 0 ? '+' : ''}{record.amount} {record.currency}
+                    <td className={`px-6 py-4 font-bold ${record.type === 'INCOME' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
+                      {formatCurrency(locale, record.amount)}
                     </td>
                     <td className="px-6 py-4 max-w-xs truncate text-gray-500" title={record.note || ''}>{record.note || '-'}</td>
                     <td className="px-6 py-4">
-                      {record.attachmentUrl ? (
-                        <span className="text-xs font-semibold text-[#34C759] bg-[#34C759]/10 px-2.5 py-1 rounded-md">有图</span>
-                      ) : (
-                        <span className="text-xs text-gray-400">-</span>
-                      )}
+                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-md ${record.status === 'PENDING' ? 'bg-[#FF9500]/10 text-[#FF9500]' : 'bg-[#34C759]/10 text-[#34C759]'}`}>
+                        {record.status === 'PENDING' ? t('pendingApproval') : t('approvedStored')}
+                      </span>
                     </td>
                     <td className="px-6 py-4">
-                      {(record.type === 'INCOME' || record.type === 'EXPENSE') && !record.isReviewing && (
+                      {!record.isReviewing && (
                         <button 
                           onClick={() => handleEditClick(record)}
                           className="text-[#007AFF] hover:underline font-medium text-sm"
                         >
-                          修改
+                          {t('modify')}
                         </button>
                       )}
                       {record.isReviewing && (
-                        <span className="text-xs text-[#FF9500] font-medium">修改待审中</span>
+                        <span className="text-xs text-[#FF9500] font-medium">{t('modifyPending')}</span>
                       )}
+                    </td>
+                    <td className="px-6 py-4">
+                      <button onClick={() => setSelectedRecord(record)} className="text-[#007AFF] hover:underline font-medium text-sm">{t('detail')}</button>
+                    </td>
+                    <td className="px-6 py-4">
+                      <button onClick={() => handleDeleteRecord(record.id)} className="text-[#FF3B30] hover:underline font-medium text-sm">{t('delete')}</button>
                     </td>
                   </tr>
                 ))
@@ -581,31 +584,28 @@ export default function ReportClient({ categories, users, session }: Props) {
           </table>
         </div>
 
-        {/* 移动端卡片视图 */}
         <div className="md:hidden divide-y divide-gray-100">
           {records.length === 0 ? (
-            <div className="p-8 text-center text-gray-400 font-medium">暂无数据，请尝试查询</div>
+            <div className="p-8 text-center text-gray-400 font-medium">{t('noDataTrySearch')}</div>
           ) : (
             records.map(record => (
               <div key={record.id} className="p-4 space-y-2">
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2">
-                    <span className="font-semibold text-gray-900 text-sm">{new Date(record.date).toLocaleDateString()}</span>
+                    <span className="font-semibold text-gray-900 text-sm">{new Date(record.date).toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK')}</span>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                        record.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 
-                        record.type === 'EXPENSE' ? 'bg-[#FF3B30]/10 text-[#FF3B30]' : 
-                        'bg-purple-100 text-purple-700'
+                        record.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 'bg-[#FF3B30]/10 text-[#FF3B30]'
                       }`}>
-                      {record.type === 'INCOME' ? '收入' : record.type === 'EXPENSE' ? '支出' : record.type === 'AR' ? '应收' : '应付'}
+                      {record.type === 'INCOME' ? t('income') : t('expense')}
                     </span>
                   </div>
-                  <span className={`font-bold text-sm ${record.type === 'INCOME' || record.type === 'AR' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
-                    {record.amount > 0 ? '+' : ''}{record.amount} {record.currency}
+                  <span className={`font-bold text-sm ${record.type === 'INCOME' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
+                    {formatCurrency(locale, record.amount)}
                   </span>
                 </div>
                 <div className="text-sm text-gray-600 flex justify-between">
                   <span>
-                    {record.category?.name || '-'} {record.subCategory ? `/ ${record.subCategory.name}` : ''}
+                    {[record.category?.name, record.subCategory?.name, record.thirdCategory?.name].filter(Boolean).join(' / ') || '-'}
                   </span>
                   <span className="text-xs text-gray-500">{record.user?.roleName || '-'}</span>
                 </div>
@@ -613,19 +613,13 @@ export default function ReportClient({ categories, users, session }: Props) {
                   <div className="text-xs text-gray-500 truncate">{record.note}</div>
                 )}
                 <div className="flex justify-between items-center pt-2 mt-2 border-t border-gray-50">
-                  <span className="text-xs text-gray-400">资金池: {record.pool?.name || '-'}</span>
-                  <div>
-                    {(record.type === 'INCOME' || record.type === 'EXPENSE') && !record.isReviewing && (
-                      <button 
-                        onClick={() => handleEditClick(record)}
-                        className="text-[#007AFF] font-medium text-xs bg-[#007AFF]/10 px-3 py-1 rounded"
-                      >
-                        修改
-                      </button>
+                  <span className="text-xs text-gray-400">{t('pool')}: {record.pool?.name || '-'} | {record.status === 'PENDING' ? t('pendingApproval') : t('approvedStored')}</span>
+                  <div className="flex gap-2">
+                    <button onClick={() => setSelectedRecord(record)} className="text-[#007AFF] font-medium text-xs bg-[#007AFF]/10 px-3 py-1 rounded">{t('detail')}</button>
+                    {!record.isReviewing && (
+                      <button onClick={() => handleEditClick(record)} className="text-[#007AFF] font-medium text-xs bg-[#007AFF]/10 px-3 py-1 rounded">{t('modify')}</button>
                     )}
-                    {record.isReviewing && (
-                      <span className="text-xs text-[#FF9500] font-medium">修改待审中</span>
-                    )}
+                    <button onClick={() => handleDeleteRecord(record.id)} className="text-[#FF3B30] font-medium text-xs bg-[#FF3B30]/10 px-3 py-1 rounded">{t('delete')}</button>
                   </div>
                 </div>
               </div>
@@ -634,12 +628,11 @@ export default function ReportClient({ categories, users, session }: Props) {
         </div>
       </div>
 
-      {/* 修改弹窗 */}
       {editingRecord && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-end md:items-center justify-center p-0 md:p-4 backdrop-blur-sm">
           <div className="bg-white rounded-t-3xl md:rounded-3xl w-full max-w-2xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="p-4 md:p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-              <h3 className="text-lg font-bold text-gray-900">修改记录申请</h3>
+              <h3 className="text-lg font-bold text-gray-900">{t('editRecordRequest')}</h3>
               <button onClick={() => setEditingRecord(null)} className="p-2 bg-gray-200 hover:bg-gray-300 rounded-full text-gray-600 transition-colors">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
               </button>
@@ -651,26 +644,26 @@ export default function ReportClient({ categories, users, session }: Props) {
                   className={`px-5 py-2 rounded-lg font-semibold text-sm transition-all shadow-sm ${editType === 'EXPENSE' ? 'bg-[#FF3B30] text-white' : 'bg-[#F2F2F7] text-gray-600'}`}
                   onClick={() => { setEditType('EXPENSE'); setEditCategoryId(''); setEditSubCategoryId(''); }}
                 >
-                  支出
+                  {t('expense')}
                 </button>
                 <button
                   className={`px-5 py-2 rounded-lg font-semibold text-sm transition-all shadow-sm ${editType === 'INCOME' ? 'bg-[#007AFF] text-white' : 'bg-[#F2F2F7] text-gray-600'}`}
                   onClick={() => { setEditType('INCOME'); setEditCategoryId(''); setEditSubCategoryId(''); }}
                 >
-                  收入
+                  {t('income')}
                 </button>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-5">
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">日期</label>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">{t('date')}</label>
                   <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} className={inputClass} />
                 </div>
                 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">主分类</label>
-                  <select value={editCategoryId} onChange={e => { setEditCategoryId(e.target.value); setEditSubCategoryId(''); }} className={inputClass}>
-                    <option value="">请选择...</option>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">{t('mainCategory')}</label>
+                  <select value={editCategoryId} onChange={e => { setEditCategoryId(e.target.value); setEditSubCategoryId(''); setEditThirdCategoryId(''); }} className={inputClass}>
+                    <option value="">{t('selectCategory')}</option>
                     {categories.filter(c => c.type === editType && !c.parentId).map(cat => (
                       <option key={cat.id} value={cat.id}>{cat.name}</option>
                     ))}
@@ -678,23 +671,39 @@ export default function ReportClient({ categories, users, session }: Props) {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">金额 ({editCurrency})</label>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">{t('amount')} (HKD$)</label>
                   <input type="number" step="0.01" value={editAmount} onChange={e => setEditAmount(e.target.value)} className={inputClass} />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">子分类</label>
-                  <select value={editSubCategoryId} onChange={e => setEditSubCategoryId(e.target.value)} className={inputClass}>
-                    <option value="">无</option>
-                    {categories.filter(c => c.parentId === editCategoryId).map((sub: any) => (
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">{t('subCategory')}</label>
+                  <select value={editSubCategoryId} onChange={e => { setEditSubCategoryId(e.target.value); setEditThirdCategoryId('') }} className={inputClass}>
+                    <option value="">{t('noSubCategory')}</option>
+                    {editCurrentCategory?.children?.map((sub: any) => (
                       <option key={sub.id} value={sub.id}>{sub.name}</option>
                     ))}
                   </select>
                 </div>
 
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">{t('grandCategory')}</label>
+                  <select value={editThirdCategoryId} onChange={e => setEditThirdCategoryId(e.target.value)} className={inputClass}>
+                    <option value="">{t('noGrandCategory')}</option>
+                    {editCurrentSubCategory?.children?.map((third: any) => (
+                      <option key={third.id} value={third.id}>{third.name}</option>
+                    ))}
+                  </select>
+                </div>
+
                 <div className="md:col-span-2">
-                  <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">备注</label>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">{t('note')}</label>
                   <input type="text" value={editNote} onChange={e => setEditNote(e.target.value)} className={inputClass} />
+                </div>
+
+                <div className="md:col-span-2 rounded-2xl border border-dashed border-gray-200 p-4 bg-[#F2F2F7]/50">
+                  <label className="block text-xs font-semibold text-gray-500 mb-2 uppercase">{t('appendAttachment')}</label>
+                  <input type="file" accept="image/*" onChange={handleEditAttachmentChange} className="w-full text-sm text-gray-600 file:mr-4 file:py-2.5 file:px-5 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-[#007AFF]/10 file:text-[#007AFF]" />
+                  <input type="text" value={editAttachmentNote} onChange={e => setEditAttachmentNote(e.target.value)} placeholder={t('attachmentNotePlaceholder')} className={`${inputClass} mt-3`} />
                 </div>
               </div>
 
@@ -703,19 +712,23 @@ export default function ReportClient({ categories, users, session }: Props) {
                   onClick={() => setEditingRecord(null)}
                   className="flex-1 py-3 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl font-semibold shadow-sm transition-colors"
                 >
-                  取消
+                  {t('cancel')}
                 </button>
                 <button
                   onClick={submitEdit}
                   disabled={isSubmittingEdit}
                   className="flex-1 py-3 bg-[#007AFF] hover:bg-[#0066CC] text-white rounded-xl font-semibold shadow-sm transition-colors disabled:opacity-50"
                 >
-                  保存并提交审核
+                  {t('saveAndSubmitReview')}
                 </button>
               </div>
             </div>
           </div>
         </div>
+      )}
+
+      {selectedRecord && (
+        <RecordDetailModal record={selectedRecord} locale={locale} onClose={() => setSelectedRecord(null)} />
       )}
     </div>
   )

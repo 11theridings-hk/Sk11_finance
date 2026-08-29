@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation'
 import { getSession } from '../actions/auth'
 import { getReviewRecords } from '../actions/review'
 import ReviewClient from './ReviewClient'
+import { getCurrentLocale } from '@/lib/locale'
+import { createTranslator } from '@/lib/i18n'
 
 export const metadata = {
   title: "审核",
@@ -12,6 +14,8 @@ export default async function ReviewPage() {
   if (!session || !session.isAdmin) {
     redirect('/')
   }
+  const locale = await getCurrentLocale()
+  const t = createTranslator(locale)
 
   const pendingRecords = await getReviewRecords('PENDING')
   const approvedRecords = await getReviewRecords('APPROVED')
@@ -22,5 +26,5 @@ export default async function ReviewPage() {
     new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
   )
 
-  return <ReviewClient pendingRecords={pendingRecords} reviewedRecords={reviewedRecords} />
+  return <ReviewClient pendingRecords={pendingRecords} reviewedRecords={reviewedRecords} locale={locale} title={t('reviewPage')} />
 }

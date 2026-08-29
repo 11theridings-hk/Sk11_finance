@@ -3,11 +3,15 @@
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { getSession, hashPassword } from './auth'
+import { getCurrentLocale } from '@/lib/locale'
+import { createTranslator } from '@/lib/i18n'
 
 async function checkAdmin() {
   const session = await getSession()
+  const locale = await getCurrentLocale()
+  const t = createTranslator(locale)
   if (!session || !session.isAdmin) {
-    throw new Error('权限不足')
+    throw new Error(t('unauthorized'))
   }
 }
 
