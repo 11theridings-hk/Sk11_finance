@@ -1,29 +1,87 @@
 'use client'
 
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { createRecord } from './actions/record'
 import { createCategory } from './actions/category'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
 import { compressImage, type ClientAttachment } from '@/lib/image'
 import RecordDetailModal from './RecordDetailModal'
 
-type Props = {
-  locale: Locale
-  session: any
-  stats: { balance: number }
-  initialRecords: any[]
-  categories: any[]
-  pools: any[]
+type SessionInfo = {
+  roleName: string
+  isAdmin?: boolean
 }
 
-export default function HomePageClient({ locale, session, stats, initialRecords, categories, pools }: Props) {
+type CategoryNode = {
+  id: string
+  name: string
+  type?: string
+  parentId?: string | null
+  children?: CategoryNode[]
+}
+
+type PoolInfo = {
+  id: string
+  name: string
+  isReviewRequired?: boolean
+}
+
+type RecordRelation = {
+  name: string
+}
+
+type RecordAttachment = {
+  id: string
+  fileUrl: string
+  createdAt: string | Date
+  note?: string | null
+  uploader?: {
+    roleName?: string | null
+  } | null
+}
+
+type RecordMemo = {
+  id: string
+  content: string
+  createdAt: string | Date
+  author?: {
+    roleName?: string | null
+  } | null
+}
+
+type RecordItem = {
+  id: string
+  date: string | Date
+  type: string
+  status?: string
+  amount: number
+  note?: string | null
+  category?: RecordRelation | null
+  subCategory?: RecordRelation | null
+  thirdCategory?: RecordRelation | null
+  pool?: RecordRelation | null
+  attachments?: RecordAttachment[]
+  memos?: RecordMemo[]
+}
+
+type Props = {
+  locale: Locale
+  session: SessionInfo
+  stats: { balance: number }
+  initialDate: string
+  initialRecords: RecordItem[]
+  categories: CategoryNode[]
+  pools: PoolInfo[]
+}
+
+export default function HomePageClient({ locale, session, stats, initialDate, initialRecords, categories, pools }: Props) {
   const t = createTranslator(locale)
-  const [isClient, setIsClient] = useState(false)
-  const [records, setRecords] = useState(initialRecords)
-  const [selectedRecord, setSelectedRecord] = useState<any>(null)
+  const router = useRouter()
+  const [selectedRecord, setSelectedRecord] = useState<RecordItem | null>(null)
 
   const [type, setType] = useState<'INCOME' | 'EXPENSE'>('EXPENSE')
-  const [date, setDate] = useState('')
+  const [date, setDate] = useState(initialDate)
   const [categoryId, setCategoryId] = useState('')
   const [subCategoryId, setSubCategoryId] = useState('')
   const [thirdCategoryId, setThirdCategoryId] = useState('')
@@ -37,12 +95,6 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
   const [countdown, setCountdown] = useState(0)
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
 
-  useEffect(() => {
-    setIsClient(true)
-    const today = new Date().toISOString().split('T')[0]
-    setDate(today)
-  }, [])
-
   const filteredCategories = useMemo(() => {
     return categories.filter(c => c.type === type && !c.parentId)
   }, [categories, type])
@@ -52,8 +104,12 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
   }, [filteredCategories, categoryId])
 
   const currentSubCategory = useMemo(() => {
-    return currentCategory?.children?.find((item: any) => item.id === subCategoryId)
+    return currentCategory?.children?.find((item) => item.id === subCategoryId)
   }, [currentCategory, subCategoryId])
+
+  const selectedThirdCategory = useMemo(() => {
+    return currentSubCategory?.children?.find((item) => item.id === thirdCategoryId)
+  }, [currentSubCategory, thirdCategoryId])
 
   const handleAddCategory = async (parentId?: string) => {
     const name = window.prompt(t('createNewCategoryPrompt'))
@@ -74,23 +130,11 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
       try {
         const compressed = await compressImage(file, 200)
         setAttachment(compressed)
-      } catch (err) {
+      } catch {
         alert(t('imageCompressionFailed'))
       }
     }
   }
-
-  useEffect(() => {
-    let timer: any
-    if (countdown > 0) {
-      timer = setTimeout(() => setCountdown(c => c - 1), 1000)
-    } else if (countdown === 0 && showConfirmDialog) {
-      // 倒计时结束，执行提交
-      setShowConfirmDialog(false)
-      executeSubmit()
-    }
-    return () => clearTimeout(timer)
-  }, [countdown, showConfirmDialog])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -109,7 +153,7 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
     setCountdown(5)
   }
 
-  const executeSubmit = async () => {
+  const executeSubmit = useCallback(async () => {
     setIsSubmitting(true)
     
     let finalAmount = parseFloat(amount)
@@ -138,15 +182,31 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
       alert(`${t('submitFailed')}: ${res.error}`)
       setIsSubmitting(false)
     }
-  }
+  }, [amount, attachment, attachmentNote, categoryId, date, note, poolId, subCategoryId, t, thirdCategoryId, type])
+
+  useEffect(() => {
+    if (!showConfirmDialog || countdown <= 0) {
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      if (countdown === 1) {
+        setShowConfirmDialog(false)
+        void executeSubmit()
+        return
+      }
+
+      setCountdown((current) => current - 1)
+    }, 1000)
+
+    return () => window.clearTimeout(timer)
+  }, [countdown, executeSubmit, showConfirmDialog])
 
   const formBgClass = type === 'INCOME' ? 'bg-[#F2F8FF]' : 'bg-[#FFF2F2]'
   const formBorderClass = type === 'INCOME' ? 'border-[#007AFF]/20' : 'border-[#FF3B30]/20'
   const submitBtnClass = type === 'INCOME' ? 'bg-[#007AFF] hover:bg-[#0066CC]' : 'bg-[#FF3B30] hover:bg-[#CC2E26]'
 
   const inputClass = "w-full border-transparent bg-white rounded-xl shadow-sm p-3 focus:bg-white focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] outline-none transition-all text-gray-900 placeholder-gray-400"
-  
-  if (!isClient) return <div className="min-h-screen bg-[#F2F2F7]"></div>
 
   return (
     <div className="space-y-4 sm:space-y-6 pt-4 sm:pt-6 overflow-x-hidden relative">
@@ -158,7 +218,7 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
           onClick={async () => {
             const { logout } = await import('./actions/auth');
             await logout();
-            window.location.href = '/login';
+            router.push('/login');
           }}
           className="absolute top-4 right-4 sm:top-5 sm:right-5 text-xs text-gray-500 hover:text-gray-800 font-medium flex items-center gap-1 transition-colors"
         >
@@ -251,7 +311,7 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
                   {!currentCategory ? t('selectMainCategoryFirst') : 
                    (currentCategory.children && currentCategory.children.length > 0) ? t('selectSubCategory') : t('noSubCategory')}
                 </option>
-                {currentCategory?.children?.map((sub: any) => (
+                {currentCategory?.children?.map((sub) => (
                   <option key={sub.id} value={sub.id}>{sub.name}</option>
                 ))}
               </select>
@@ -278,7 +338,7 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
                   {!currentSubCategory ? t('selectSubCategoryFirst') :
                    (currentSubCategory.children && currentSubCategory.children.length > 0) ? t('selectGrandCategory') : t('noGrandCategory')}
                 </option>
-                {currentSubCategory?.children?.map((third: any) => (
+                {currentSubCategory?.children?.map((third) => (
                   <option key={third.id} value={third.id}>{third.name}</option>
                 ))}
               </select>
@@ -390,12 +450,12 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {records.length === 0 ? (
+                {initialRecords.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="p-8 text-center text-gray-400 font-medium">{t('noRecords')}</td>
                   </tr>
                 ) : (
-                  records.map(record => (
+                  initialRecords.map(record => (
                     <tr key={record.id} className="hover:bg-gray-50/80 transition-colors">
                       <td className="px-6 py-4 font-medium">{new Date(record.date).toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK')}</td>
                       <td className="px-6 py-4">
@@ -427,10 +487,10 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
           </div>
           
           <div className="md:hidden divide-y divide-gray-100">
-            {records.length === 0 ? (
+            {initialRecords.length === 0 ? (
               <div className="p-8 text-center text-gray-400 font-medium">{t('noRecords')}</div>
             ) : (
-              records.map(record => (
+              initialRecords.map(record => (
                 <div key={record.id} className="p-4 space-y-2">
                   <div className="flex justify-between items-center">
                     <div className="flex items-center gap-2">
@@ -471,9 +531,9 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
               <p><span className="text-gray-500">{t('type')}:</span> <span className="font-semibold">{type === 'INCOME' ? t('income') : t('expense')}</span></p>
               <p><span className="text-gray-500">{t('amount')}:</span> <span className={`font-bold ${type === 'INCOME' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>{formatCurrency(locale, Number(amount || 0) * (type === 'EXPENSE' ? -1 : 1))}</span></p>
               <p><span className="text-gray-500">{t('date')}:</span> <span>{date}</span></p>
-              <p><span className="text-gray-500">{t('category')}:</span> <span>{[currentCategory?.name, currentSubCategory?.name, currentSubCategory?.children?.find((item: any) => item.id === thirdCategoryId)?.name].filter(Boolean).join(' / ')}</span></p>
+              <p><span className="text-gray-500">{t('category')}:</span> <span>{[currentCategory?.name, currentSubCategory?.name, selectedThirdCategory?.name].filter(Boolean).join(' / ')}</span></p>
               {poolId && (
-                <p><span className="text-gray-500">{t('pool')}:</span> <span>{pools.find((p: any) => p.id === poolId)?.name}</span></p>
+                <p><span className="text-gray-500">{t('pool')}:</span> <span>{pools.find((pool) => pool.id === poolId)?.name}</span></p>
               )}
             </div>
             

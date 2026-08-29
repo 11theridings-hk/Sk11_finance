@@ -100,7 +100,7 @@ export async function getSession() {
       roleName: user.roleName, 
       isAdmin: user.isAdmin 
     }
-  } catch (error) {
+  } catch {
     return null
   }
 }

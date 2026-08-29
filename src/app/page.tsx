@@ -14,6 +14,7 @@ export default async function HomePage() {
     redirect('/login')
   }
   const locale = await getCurrentLocale()
+  const initialDate = new Date().toISOString().split('T')[0]
 
   const [stats, initialRecords, categories, pools] = await Promise.all([
     getUserStats(session.userId),
@@ -28,6 +29,7 @@ export default async function HomePage() {
         locale={locale}
         session={session}
         stats={stats}
+        initialDate={initialDate}
         initialRecords={initialRecords}
         categories={categories}
         pools={pools}

@@ -4,7 +4,11 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { LOCALE_COOKIE, createTranslator, type Locale } from '@/lib/i18n'
 
-export default function TopNav({ session, pendingCount = 0, locale }: { session: any, pendingCount?: number, locale: Locale }) {
+type NavSession = {
+  isAdmin?: boolean
+}
+
+export default function TopNav({ session, pendingCount = 0, locale }: { session: NavSession | null, pendingCount?: number, locale: Locale }) {
   const pathname = usePathname()
   const t = createTranslator(locale)
   

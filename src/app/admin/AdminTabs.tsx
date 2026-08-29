@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { createCategory, updateCategory, deleteCategory } from "../actions/category";
-import { createCapitalPool, updateCapitalPool, deleteCapitalPool } from "../actions/pool";
-import { createUser, updateUser, deleteUser, toggleUserPool } from "../actions/user";
+import { createCategory, deleteCategory } from "../actions/category";
+import { createCapitalPool, deleteCapitalPool } from "../actions/pool";
+import { createUser, deleteUser, toggleUserPool } from "../actions/user";
 import { createTranslator, formatCurrency, type Locale } from "@/lib/i18n";
 
 export default function AdminTabs({ initialCategories, initialAttachments, initialPools, initialUsers, locale }: any) {
