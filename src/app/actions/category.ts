@@ -15,12 +15,34 @@ async function checkAdmin() {
   }
 }
 
-// 获取所有分类（包含子分类结构）
+async function getCategoryDepth(categoryId: string) {
+  let depth = 0
+  let current = await prisma.category.findUnique({
+    where: { id: categoryId },
+    select: { parentId: true }
+  })
+
+  while (current?.parentId) {
+    depth += 1
+    current = await prisma.category.findUnique({
+      where: { id: current.parentId },
+      select: { parentId: true }
+    })
+  }
+
+  return depth
+}
+
+// 获取所有分类（包含最多三级结构）
 export async function getCategories() {
   return await prisma.category.findMany({
     where: { parentId: null },
     include: {
-      children: true
+      children: {
+        include: {
+          children: true
+        }
+      }
     },
     orderBy: { createdAt: 'asc' }
   })
@@ -34,13 +56,13 @@ export async function getFlatCategories() {
 }
 
 // 确保存在“未分类”
-async function ensureUncategorized() {
+async function ensureUncategorized(type: 'INCOME' | 'EXPENSE' = 'EXPENSE') {
   let uncategorized = await prisma.category.findFirst({
-    where: { name: '未分类', parentId: null }
+    where: { name: '未分类', parentId: null, type }
   })
   if (!uncategorized) {
     uncategorized = await prisma.category.create({
-      data: { name: '未分类' }
+      data: { name: '未分类', type }
     })
   }
   return uncategorized
@@ -49,6 +71,8 @@ async function ensureUncategorized() {
 // 创建分类
 export async function createCategory(name: string, parentId?: string, type: 'INCOME' | 'EXPENSE' = 'EXPENSE') {
   try {
+    const locale = await getCurrentLocale()
+    const t = createTranslator(locale)
     await checkAdmin()
     
     let finalType = type
@@ -56,6 +80,11 @@ export async function createCategory(name: string, parentId?: string, type: 'INC
       const parent = await prisma.category.findUnique({ where: { id: parentId } })
       if (parent) {
         finalType = parent.type as 'INCOME' | 'EXPENSE'
+      }
+
+      const depth = await getCategoryDepth(parentId)
+      if (depth >= 2) {
+        return { success: false, error: t('categoryLevelLimitReached') }
       }
     }
 
@@ -95,25 +124,52 @@ export async function deleteCategory(id: string) {
     const locale = await getCurrentLocale()
     const t = createTranslator(locale)
     await checkAdmin()
-    const uncategorized = await ensureUncategorized()
+    const category = await prisma.category.findUnique({
+      where: { id },
+      select: { id: true, name: true, type: true, parentId: true }
+    })
+
+    if (!category) {
+      return { success: false, error: t('recordNotFound') }
+    }
+
+    const uncategorized = await ensureUncategorized(category.type as 'INCOME' | 'EXPENSE')
     
-    if (id === uncategorized.id) {
+    if (category.name === '未分类' && category.parentId === null) {
       return { success: false, error: t('deleteDefaultUncategorized') }
     }
 
-    // 将关联该分类的记录转入“未分类”
+    const childUpdateParentId = category.parentId || null
+
+    // 将关联该分类的记录与合约转入“未分类”或清空较深层级
     await prisma.$transaction([
       prisma.category.updateMany({
         where: { parentId: id },
-        data: { parentId: null }
+        data: { parentId: childUpdateParentId }
       }),
       prisma.record.updateMany({
         where: { categoryId: id },
-        data: { categoryId: uncategorized.id }
+        data: { categoryId: uncategorized.id, subCategoryId: null, thirdCategoryId: null }
       }),
       prisma.record.updateMany({
         where: { subCategoryId: id },
-        data: { subCategoryId: null }
+        data: { subCategoryId: null, thirdCategoryId: null }
+      }),
+      prisma.record.updateMany({
+        where: { thirdCategoryId: id },
+        data: { thirdCategoryId: null }
+      }),
+      prisma.contract.updateMany({
+        where: { categoryId: id },
+        data: { categoryId: uncategorized.id, subCategoryId: null, thirdCategoryId: null }
+      }),
+      prisma.contract.updateMany({
+        where: { subCategoryId: id },
+        data: { subCategoryId: null, thirdCategoryId: null }
+      }),
+      prisma.contract.updateMany({
+        where: { thirdCategoryId: id },
+        data: { thirdCategoryId: null }
       }),
       prisma.category.delete({
         where: { id }

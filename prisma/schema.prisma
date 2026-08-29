@@ -11,92 +11,153 @@ datasource db {
 }
 
 model User {
-  id           String        @id @default(uuid())
-  password     String        @unique // 明文密码作为登录凭证
-  roleName     String        // 角色名称
-  isAdmin      Boolean       @default(false) // 是否为管理员
-  poolEnabled  Boolean       @default(false) // 是否启用资金池
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  
+  id          String   @id @default(uuid())
+  password    String   @unique // 明文密码作为登录凭证
+  roleName    String // 角色名称
+  isAdmin     Boolean  @default(false) // 是否为管理员
+  poolEnabled Boolean  @default(false) // 是否启用资金池
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
   // 关系
   records      Record[]      @relation("UserRecords")
   attachments  Attachment[]  @relation("UserAttachments")
   capitalPools CapitalPool[] @relation("UserCapitalPools")
+  contracts    Contract[]    @relation("UserContracts")
+  memos        Memo[]        @relation("UserMemos")
 }
 
 model Category {
-  id           String        @id @default(uuid())
-  name         String        // 分类名称
-  type         String        @default("EXPENSE") // "INCOME" 或 "EXPENSE"
-  parentId     String?       // 父分类ID
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  
+  id        String   @id @default(uuid())
+  name      String // 分类名称
+  type      String   @default("EXPENSE") // "INCOME" 或 "EXPENSE"
+  parentId  String? // 父分类ID
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // 关系
-  parent       Category?     @relation("CategoryToCategory", fields: [parentId], references: [id])
-  children     Category[]    @relation("CategoryToCategory")
-  records      Record[]      @relation("CategoryRecords")
-  subRecords   Record[]      @relation("SubCategoryRecords")
-  attachments  Attachment[]  @relation("CategoryAttachments")
+  parent         Category?    @relation("CategoryToCategory", fields: [parentId], references: [id])
+  children       Category[]   @relation("CategoryToCategory")
+  records        Record[]     @relation("CategoryRecords")
+  subRecords     Record[]     @relation("SubCategoryRecords")
+  thirdRecords   Record[]     @relation("ThirdCategoryRecords")
+  contracts      Contract[]   @relation("CategoryContracts")
+  subContracts   Contract[]   @relation("SubCategoryContracts")
+  thirdContracts Contract[]   @relation("ThirdCategoryContracts")
+  attachments    Attachment[] @relation("CategoryAttachments")
 }
 
 model CapitalPool {
-  id               String        @id @default(uuid())
-  name             String        // 资金池名称
-  balanceHkd       Float         @default(0) // HKD 余额
-  userId           String?       // 关联角色ID（可选）
-  isReviewRequired Boolean       @default(false) // 是否为审核账户
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
-  
+  id               String   @id @default(uuid())
+  name             String // 资金池名称
+  balanceHkd       Float    @default(0) // HKD 余额
+  userId           String? // 关联角色ID（可选）
+  isReviewRequired Boolean  @default(false) // 是否为审核账户
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
   // 关系
-  user         User?         @relation("UserCapitalPools", fields: [userId], references: [id])
-  records      Record[]      @relation("CapitalPoolRecords")
+  user      User?      @relation("UserCapitalPools", fields: [userId], references: [id])
+  records   Record[]   @relation("CapitalPoolRecords")
+  contracts Contract[] @relation("CapitalPoolContracts")
 }
 
 model Record {
-  id               String        @id @default(uuid())
-  type             String        // "INCOME" | "EXPENSE"
-  status           String        @default("APPROVED") // "PENDING" (待审) | "APPROVED" (已审) | "REJECTED" (驳回)
-  date             DateTime      // 记录日期
-  note             String?       // 备注说明
-  amount           Float         // 金额（正数/负数）
-  attachmentUrl    String?      // 附件路径
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  id            String   @id @default(uuid())
+  type          String // "INCOME" | "EXPENSE"
+  status        String   @default("APPROVED") // "PENDING" (待审) | "APPROVED" (已审) | "REJECTED" (驳回)
+  date          DateTime // 记录日期
+  note          String? // 备注说明
+  amount        Float // 金额（正数/负数）
+  attachmentUrl String? // 附件路径
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   // 关联旧记录用于修改待审
   originalRecordId String?
-  isReviewing      Boolean       @default(false)
+  isReviewing      Boolean @default(false)
 
   // 外键
-  userId           String
-  categoryId       String
-  subCategoryId    String?
-  poolId           String?
+  userId          String
+  categoryId      String
+  subCategoryId   String?
+  thirdCategoryId String?
+  poolId          String?
 
   // 关系
-  user             User          @relation("UserRecords", fields: [userId], references: [id])
-  category         Category      @relation("CategoryRecords", fields: [categoryId], references: [id])
-  subCategory      Category?     @relation("SubCategoryRecords", fields: [subCategoryId], references: [id])
-  pool             CapitalPool?  @relation("CapitalPoolRecords", fields: [poolId], references: [id])
-  originalRecord   Record?       @relation("ModifiedRecord", fields: [originalRecordId], references: [id])
-  modifications    Record[]      @relation("ModifiedRecord")
+  user           User         @relation("UserRecords", fields: [userId], references: [id])
+  category       Category     @relation("CategoryRecords", fields: [categoryId], references: [id])
+  subCategory    Category?    @relation("SubCategoryRecords", fields: [subCategoryId], references: [id])
+  thirdCategory  Category?    @relation("ThirdCategoryRecords", fields: [thirdCategoryId], references: [id])
+  pool           CapitalPool? @relation("CapitalPoolRecords", fields: [poolId], references: [id])
+  originalRecord Record?      @relation("ModifiedRecord", fields: [originalRecordId], references: [id])
+  modifications  Record[]     @relation("ModifiedRecord")
+  attachments    Attachment[] @relation("RecordAttachments")
+  memos          Memo[]       @relation("RecordMemos")
+}
+
+model Contract {
+  id            String   @id @default(uuid())
+  title         String
+  type          String
+  effectiveDate DateTime
+  expiryDate    DateTime
+  note          String?
+  amount        Float
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // 外键
+  userId          String
+  categoryId      String
+  subCategoryId   String?
+  thirdCategoryId String?
+  poolId          String?
+
+  // 关系
+  user          User         @relation("UserContracts", fields: [userId], references: [id])
+  category      Category     @relation("CategoryContracts", fields: [categoryId], references: [id])
+  subCategory   Category?    @relation("SubCategoryContracts", fields: [subCategoryId], references: [id])
+  thirdCategory Category?    @relation("ThirdCategoryContracts", fields: [thirdCategoryId], references: [id])
+  pool          CapitalPool? @relation("CapitalPoolContracts", fields: [poolId], references: [id])
+  attachments   Attachment[] @relation("ContractAttachments")
+  memos         Memo[]       @relation("ContractMemos")
 }
 
 model Attachment {
-  id           String        @id @default(uuid())
-  fileUrl      String        // 文件路径
-  size         Int           // 文件大小(bytes)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id        String   @id @default(uuid())
+  fileUrl   String // 文件路径
+  size      Int // 文件大小(bytes)
+  note      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // 外键
-  uploaderId   String
-  categoryId   String?
+  uploaderId String
+  categoryId String?
+  recordId   String?
+  contractId String?
 
   // 关系
-  uploader     User          @relation("UserAttachments", fields: [uploaderId], references: [id])
-  category     Category?     @relation("CategoryAttachments", fields: [categoryId], references: [id])
+  uploader User      @relation("UserAttachments", fields: [uploaderId], references: [id])
+  category Category? @relation("CategoryAttachments", fields: [categoryId], references: [id])
+  record   Record?   @relation("RecordAttachments", fields: [recordId], references: [id])
+  contract Contract? @relation("ContractAttachments", fields: [contractId], references: [id])
+}
+
+model Memo {
+  id        String   @id @default(uuid())
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 外键
+  authorId   String
+  recordId   String?
+  contractId String?
+
+  // 关系
+  author   User      @relation("UserMemos", fields: [authorId], references: [id])
+  record   Record?   @relation("RecordMemos", fields: [recordId], references: [id])
+  contract Contract? @relation("ContractMemos", fields: [contractId], references: [id])
 }

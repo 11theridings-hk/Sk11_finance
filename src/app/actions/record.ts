@@ -6,16 +6,30 @@ import { getSession } from './auth'
 import { getCurrentLocale } from '@/lib/locale'
 import { createTranslator } from '@/lib/i18n'
 
+type AttachmentPayload = {
+  url: string
+  size: number
+  note?: string
+}
+
 export type CreateRecordInput = {
   type: 'INCOME' | 'EXPENSE'
   date: Date
   note?: string
   amount: number
-  attachmentUrl?: string
   categoryId: string
   subCategoryId?: string
+  thirdCategoryId?: string
   poolId?: string
-  attachmentSize?: number
+  attachment?: AttachmentPayload
+}
+
+function getDeepestCategoryId(data: {
+  categoryId: string
+  subCategoryId?: string | null
+  thirdCategoryId?: string | null
+}) {
+  return data.thirdCategoryId || data.subCategoryId || data.categoryId
 }
 
 export async function createRecord(data: CreateRecordInput) {
@@ -43,22 +57,25 @@ export async function createRecord(data: CreateRecordInput) {
           date: data.date,
           note: data.note,
           amount: data.amount, // 前端传过来的已处理好正负
-          attachmentUrl: data.attachmentUrl,
+          attachmentUrl: data.attachment?.url,
           categoryId: data.categoryId,
           subCategoryId: data.subCategoryId,
+          thirdCategoryId: data.thirdCategoryId,
           poolId: data.poolId,
           userId: session.userId,
         }
       })
 
       // 3. 记录附件（如果有）
-      if (data.attachmentUrl && data.attachmentSize) {
+      if (data.attachment) {
         await tx.attachment.create({
           data: {
-            fileUrl: data.attachmentUrl,
-            size: data.attachmentSize,
+            fileUrl: data.attachment.url,
+            size: data.attachment.size,
+            note: data.attachment.note,
             uploaderId: session.userId,
-            categoryId: data.categoryId
+            categoryId: getDeepestCategoryId(data),
+            recordId: record.id
           }
         })
       }
@@ -123,7 +140,20 @@ export async function getRecentRecords(userId?: string) {
     include: {
       category: { select: { name: true } },
       subCategory: { select: { name: true } },
-      user: { select: { roleName: true } }
+      thirdCategory: { select: { name: true } },
+      user: { select: { roleName: true } },
+      attachments: {
+        orderBy: { createdAt: 'desc' },
+        include: {
+          uploader: { select: { roleName: true } }
+        }
+      },
+      memos: {
+        orderBy: { createdAt: 'desc' },
+        include: {
+          author: { select: { roleName: true } }
+        }
+      }
     }
   })
 }
@@ -137,7 +167,145 @@ export async function getAttachments() {
     orderBy: { createdAt: 'desc' },
     include: {
       uploader: { select: { roleName: true } },
-      category: { select: { name: true } }
+      category: { select: { name: true } },
+      record: { select: { id: true, note: true, date: true } },
+      contract: { select: { id: true, title: true, expiryDate: true } }
     }
   })
+}
+
+async function assertRecordPermission(recordId: string) {
+  const locale = await getCurrentLocale()
+  const t = createTranslator(locale)
+  const session = await getSession()
+
+  if (!session) {
+    throw new Error(t('notLoggedIn'))
+  }
+
+  const record = await prisma.record.findUnique({
+    where: { id: recordId }
+  })
+
+  if (!record) {
+    throw new Error(t('recordNotFound'))
+  }
+
+  if (record.userId !== session.userId && !session.isAdmin) {
+    throw new Error(t('canOnlyModifyOwnRecord'))
+  }
+
+  return { session, record, t }
+}
+
+export async function addRecordAttachment(recordId: string, attachment: AttachmentPayload) {
+  try {
+    const { session, record } = await assertRecordPermission(recordId)
+
+    await prisma.$transaction(async (tx) => {
+      await tx.attachment.create({
+        data: {
+          fileUrl: attachment.url,
+          size: attachment.size,
+          note: attachment.note,
+          uploaderId: session.userId,
+          categoryId: getDeepestCategoryId(record),
+          recordId
+        }
+      })
+
+      if (!record.attachmentUrl) {
+        await tx.record.update({
+          where: { id: recordId },
+          data: { attachmentUrl: attachment.url }
+        })
+      }
+    })
+
+    revalidatePath('/')
+    revalidatePath('/report')
+    revalidatePath('/review')
+    revalidatePath('/admin')
+    return { success: true }
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
+}
+
+export async function addRecordMemo(recordId: string, content: string) {
+  try {
+    const { session } = await assertRecordPermission(recordId)
+
+    await prisma.memo.create({
+      data: {
+        content,
+        authorId: session.userId,
+        recordId
+      }
+    })
+
+    revalidatePath('/')
+    revalidatePath('/report')
+    revalidatePath('/review')
+    return { success: true }
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
+}
+
+export async function deleteRecord(recordId: string) {
+  try {
+    const { record, session } = await assertRecordPermission(recordId)
+
+    await prisma.$transaction(async (tx) => {
+      if (record.originalRecordId) {
+        await tx.memo.deleteMany({ where: { recordId } })
+        await tx.attachment.deleteMany({ where: { recordId } })
+        await tx.record.delete({ where: { id: recordId } })
+
+        if (record.status === 'PENDING') {
+          await tx.record.update({
+            where: { id: record.originalRecordId },
+            data: { isReviewing: false }
+          })
+        }
+        return
+      }
+
+      const modificationIds = await tx.record.findMany({
+        where: { originalRecordId: recordId },
+        select: { id: true }
+      })
+      const relatedIds = modificationIds.map((item) => item.id)
+
+      if (record.status === 'APPROVED' && record.poolId) {
+        await tx.capitalPool.update({
+          where: { id: record.poolId },
+          data: { balanceHkd: { decrement: record.amount } }
+        })
+      }
+
+      if (relatedIds.length > 0) {
+        await tx.memo.deleteMany({ where: { recordId: { in: relatedIds } } })
+        await tx.attachment.deleteMany({ where: { recordId: { in: relatedIds } } })
+        await tx.record.deleteMany({ where: { id: { in: relatedIds } } })
+      }
+
+      await tx.memo.deleteMany({ where: { recordId } })
+      await tx.attachment.deleteMany({ where: { recordId } })
+      await tx.record.delete({ where: { id: recordId } })
+
+      if (!session.isAdmin) {
+        revalidatePath('/')
+      }
+    })
+
+    revalidatePath('/')
+    revalidatePath('/report')
+    revalidatePath('/review')
+    revalidatePath('/admin')
+    return { success: true }
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
 }

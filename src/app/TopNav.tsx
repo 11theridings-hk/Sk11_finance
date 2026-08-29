@@ -16,6 +16,7 @@ export default function TopNav({ session, pendingCount = 0, locale }: { session:
     navItems.push({ name: t('review'), href: '/review' })
   }
   
+  navItems.push({ name: t('contracts'), href: '/contracts' })
   navItems.push({ name: t('report'), href: '/report' })
   
   if (session?.isAdmin) {

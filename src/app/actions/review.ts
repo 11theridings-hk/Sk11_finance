@@ -25,9 +25,22 @@ export async function getReviewRecords(status: 'PENDING' | 'APPROVED' | 'REJECTE
     include: {
       category: true,
       subCategory: true,
+      thirdCategory: true,
       user: true,
       pool: true,
-      originalRecord: true
+      originalRecord: true,
+      attachments: {
+        orderBy: { createdAt: 'desc' },
+        include: {
+          uploader: { select: { roleName: true } }
+        }
+      },
+      memos: {
+        orderBy: { createdAt: 'desc' },
+        include: {
+          author: { select: { roleName: true } }
+        }
+      }
     }
   })
 }
@@ -72,12 +85,19 @@ export async function reviewRecord(id: string, action: 'APPROVE' | 'REJECT') {
               amount: record.amount,
               categoryId: record.categoryId,
               subCategoryId: record.subCategoryId,
+              thirdCategoryId: record.thirdCategoryId,
               note: record.note,
               date: record.date,
               type: record.type,
               poolId: record.poolId,
+              attachmentUrl: record.attachmentUrl,
               isReviewing: false
             }
+          })
+
+          await tx.attachment.updateMany({
+            where: { recordId: record.id },
+            data: { recordId: record.originalRecordId }
           })
           // 删除 pending 的修改副本
           await tx.record.delete({ where: { id } })

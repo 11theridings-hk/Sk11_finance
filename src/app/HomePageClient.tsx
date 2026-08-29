@@ -4,6 +4,8 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { createRecord } from './actions/record'
 import { createCategory } from './actions/category'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
+import { compressImage, type ClientAttachment } from '@/lib/image'
+import RecordDetailModal from './RecordDetailModal'
 
 type Props = {
   locale: Locale
@@ -14,64 +16,21 @@ type Props = {
   pools: any[]
 }
 
-function compressImage(file: File, maxSizeKB: number = 200): Promise<{ url: string; size: number }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.readAsDataURL(file)
-    reader.onload = (event) => {
-      const img = new Image()
-      img.src = event.target?.result as string
-      img.onload = () => {
-        const canvas = document.createElement('canvas')
-        const ctx = canvas.getContext('2d')
-        if (!ctx) return reject(new Error('Canvas ctx not found'))
-        
-        let { width, height } = img
-        const maxDim = 1200
-        if (width > maxDim || height > maxDim) {
-          if (width > height) {
-            height = Math.round((height * maxDim) / width)
-            width = maxDim
-          } else {
-            width = Math.round((width * maxDim) / height)
-            height = maxDim
-          }
-        }
-        
-        canvas.width = width
-        canvas.height = height
-        ctx.drawImage(img, 0, 0, width, height)
-        
-        let quality = 0.9
-        let dataUrl = canvas.toDataURL('image/jpeg', quality)
-        let size = Math.round((dataUrl.length * 3) / 4)
-        
-        while (size > maxSizeKB * 1024 && quality > 0.1) {
-          quality -= 0.1
-          dataUrl = canvas.toDataURL('image/jpeg', quality)
-          size = Math.round((dataUrl.length * 3) / 4)
-        }
-        
-        resolve({ url: dataUrl, size })
-      }
-      img.onerror = reject
-    }
-    reader.onerror = reject
-  })
-}
-
 export default function HomePageClient({ locale, session, stats, initialRecords, categories, pools }: Props) {
   const t = createTranslator(locale)
   const [isClient, setIsClient] = useState(false)
   const [records, setRecords] = useState(initialRecords)
+  const [selectedRecord, setSelectedRecord] = useState<any>(null)
 
   const [type, setType] = useState<'INCOME' | 'EXPENSE'>('EXPENSE')
   const [date, setDate] = useState('')
   const [categoryId, setCategoryId] = useState('')
   const [subCategoryId, setSubCategoryId] = useState('')
+  const [thirdCategoryId, setThirdCategoryId] = useState('')
   const [amount, setAmount] = useState('')
   const [poolId, setPoolId] = useState('')
-  const [attachment, setAttachment] = useState<{ url: string; size: number } | null>(null)
+  const [attachment, setAttachment] = useState<ClientAttachment | null>(null)
+  const [attachmentNote, setAttachmentNote] = useState('')
   const [note, setNote] = useState('')
 
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -85,12 +44,16 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
   }, [])
 
   const filteredCategories = useMemo(() => {
-    return categories.filter(c => c.type === type)
+    return categories.filter(c => c.type === type && !c.parentId)
   }, [categories, type])
 
   const currentCategory = useMemo(() => {
     return filteredCategories.find(c => c.id === categoryId)
   }, [filteredCategories, categoryId])
+
+  const currentSubCategory = useMemo(() => {
+    return currentCategory?.children?.find((item: any) => item.id === subCategoryId)
+  }, [currentCategory, subCategoryId])
 
   const handleAddCategory = async (parentId?: string) => {
     const name = window.prompt(t('createNewCategoryPrompt'))
@@ -163,9 +126,9 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
       amount: finalAmount,
       categoryId,
       subCategoryId: subCategoryId || undefined,
+      thirdCategoryId: thirdCategoryId || undefined,
       poolId,
-      attachmentUrl: attachment?.url,
-      attachmentSize: attachment?.size,
+      attachment: attachment ? { ...attachment, note: attachmentNote || undefined } : undefined,
     })
 
     if (res.success) {
@@ -221,14 +184,14 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
           <button
             type="button"
             className={`px-5 py-2 rounded-lg font-semibold text-sm transition-all shadow-sm ${type === 'EXPENSE' ? 'bg-white text-[#FF3B30]' : 'bg-transparent text-gray-600 shadow-none'}`}
-            onClick={() => { setType('EXPENSE'); setCategoryId(''); setSubCategoryId(''); }}
+            onClick={() => { setType('EXPENSE'); setCategoryId(''); setSubCategoryId(''); setThirdCategoryId(''); }}
           >
             {t('expense')}
           </button>
           <button
             type="button"
             className={`px-5 py-2 rounded-lg font-semibold text-sm transition-all shadow-sm ${type === 'INCOME' ? 'bg-white text-[#007AFF]' : 'bg-transparent text-gray-600 shadow-none'}`}
-            onClick={() => { setType('INCOME'); setCategoryId(''); setSubCategoryId(''); }}
+            onClick={() => { setType('INCOME'); setCategoryId(''); setSubCategoryId(''); setThirdCategoryId(''); }}
           >
             {t('income')}
           </button>
@@ -257,7 +220,7 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
               <select
                 required
                 value={categoryId}
-                onChange={e => { setCategoryId(e.target.value); setSubCategoryId(''); }}
+                onChange={e => { setCategoryId(e.target.value); setSubCategoryId(''); setThirdCategoryId(''); }}
                 className={inputClass}
               >
                 <option value="" className="text-gray-400">{t('selectCategory')}</option>
@@ -280,7 +243,7 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
               </label>
               <select
                 value={subCategoryId}
-                onChange={e => setSubCategoryId(e.target.value)}
+                onChange={e => { setSubCategoryId(e.target.value); setThirdCategoryId(''); }}
                 className={inputClass}
                 disabled={!currentCategory || !currentCategory.children || currentCategory.children.length === 0}
               >
@@ -290,6 +253,33 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
                 </option>
                 {currentCategory?.children?.map((sub: any) => (
                   <option key={sub.id} value={sub.id}>{sub.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider flex justify-between">
+                <span>{t('grandCategory')}</span>
+                <button
+                  type="button"
+                  onClick={() => subCategoryId ? handleAddCategory(subCategoryId) : alert(t('chooseSubCategoryFirst'))}
+                  className={`${subCategoryId ? 'text-[#007AFF]' : 'text-gray-400'} text-xs font-semibold hover:opacity-80`}
+                >
+                  {t('addGrandCategory')}
+                </button>
+              </label>
+              <select
+                value={thirdCategoryId}
+                onChange={e => setThirdCategoryId(e.target.value)}
+                className={inputClass}
+                disabled={!currentSubCategory?.children || currentSubCategory.children.length === 0}
+              >
+                <option value="" className="text-gray-400">
+                  {!currentSubCategory ? t('selectSubCategoryFirst') :
+                   (currentSubCategory.children && currentSubCategory.children.length > 0) ? t('selectGrandCategory') : t('noGrandCategory')}
+                </option>
+                {currentSubCategory?.children?.map((third: any) => (
+                  <option key={third.id} value={third.id}>{third.name}</option>
                 ))}
               </select>
             </div>
@@ -352,6 +342,13 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
                 onChange={handleImageChange}
                 className="w-full text-sm text-gray-600 file:mr-4 file:py-2.5 file:px-5 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-[#007AFF]/10 file:text-[#007AFF] hover:file:bg-[#007AFF]/20 transition-colors cursor-pointer"
               />
+              <input
+                type="text"
+                value={attachmentNote}
+                onChange={e => setAttachmentNote(e.target.value)}
+                className={`${inputClass} mt-3`}
+                placeholder={t('attachmentNotePlaceholder')}
+              />
               {attachment && (
                 <div className="mt-3 flex items-center space-x-2 text-xs font-medium text-[#34C759] bg-[#34C759]/10 p-2 rounded-lg w-fit">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
@@ -389,12 +386,13 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
                   <th className="px-6 py-3 font-medium">{t('category')}</th>
                   <th className="px-6 py-3 font-medium">{t('amount')}</th>
                   <th className="px-6 py-3 font-medium">{t('note')}</th>
+                  <th className="px-6 py-3 font-medium">{t('detail')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {records.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="p-8 text-center text-gray-400 font-medium">{t('noRecords')}</td>
+                    <td colSpan={6} className="p-8 text-center text-gray-400 font-medium">{t('noRecords')}</td>
                   </tr>
                 ) : (
                   records.map(record => (
@@ -410,11 +408,17 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
                       <td className="px-6 py-4">
                         {record.category?.name || '-'}
                         {record.subCategory ? ` / ${record.subCategory.name}` : ''}
+                        {record.thirdCategory ? ` / ${record.thirdCategory.name}` : ''}
                       </td>
                       <td className={`px-6 py-4 font-bold ${record.type === 'INCOME' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
                         {formatCurrency(locale, record.amount)}
                       </td>
                       <td className="px-6 py-4 text-gray-500 truncate max-w-xs">{record.note || '-'}</td>
+                      <td className="px-6 py-4">
+                        <button onClick={() => setSelectedRecord(record)} className="text-[#007AFF] hover:underline font-medium text-sm">
+                          {t('detail')}
+                        </button>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -442,11 +446,16 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
                     </span>
                   </div>
                   <div className="text-sm text-gray-600">
-                    {record.category?.name || '-'} {record.subCategory ? `/ ${record.subCategory.name}` : ''}
+                    {[record.category?.name, record.subCategory?.name, record.thirdCategory?.name].filter(Boolean).join(' / ') || '-'}
                   </div>
                   {record.note && (
                     <div className="text-xs text-gray-500 truncate">{record.note}</div>
                   )}
+                  <div className="pt-1">
+                    <button onClick={() => setSelectedRecord(record)} className="text-[#007AFF] font-medium text-xs bg-[#007AFF]/10 px-3 py-1 rounded">
+                      {t('detail')}
+                    </button>
+                  </div>
                 </div>
               ))
             )}
@@ -462,7 +471,7 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
               <p><span className="text-gray-500">{t('type')}:</span> <span className="font-semibold">{type === 'INCOME' ? t('income') : t('expense')}</span></p>
               <p><span className="text-gray-500">{t('amount')}:</span> <span className={`font-bold ${type === 'INCOME' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>{formatCurrency(locale, Number(amount || 0) * (type === 'EXPENSE' ? -1 : 1))}</span></p>
               <p><span className="text-gray-500">{t('date')}:</span> <span>{date}</span></p>
-              <p><span className="text-gray-500">{t('category')}:</span> <span>{currentCategory?.name} {subCategoryId ? ' / ...' : ''}</span></p>
+              <p><span className="text-gray-500">{t('category')}:</span> <span>{[currentCategory?.name, currentSubCategory?.name, currentSubCategory?.children?.find((item: any) => item.id === thirdCategoryId)?.name].filter(Boolean).join(' / ')}</span></p>
               {poolId && (
                 <p><span className="text-gray-500">{t('pool')}:</span> <span>{pools.find((p: any) => p.id === poolId)?.name}</span></p>
               )}
@@ -486,6 +495,10 @@ export default function HomePageClient({ locale, session, stats, initialRecords,
             </div>
           </div>
         </div>
+      )}
+
+      {selectedRecord && (
+        <RecordDetailModal record={selectedRecord} locale={locale} onClose={() => setSelectedRecord(null)} />
       )}
 
     </div>

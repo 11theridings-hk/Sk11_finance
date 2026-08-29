@@ -85,10 +85,15 @@ export async function deleteCapitalPool(id: string) {
     const t = createTranslator(locale)
     await checkAdmin()
     // 检查是否有记录关联
-    const records = await prisma.record.count({
-      where: { poolId: id }
-    })
-    if (records > 0) {
+    const [records, contracts] = await Promise.all([
+      prisma.record.count({
+        where: { poolId: id }
+      }),
+      prisma.contract.count({
+        where: { poolId: id }
+      })
+    ])
+    if (records > 0 || contracts > 0) {
       return { success: false, error: t('poolHasRecords') }
     }
 

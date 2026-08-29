@@ -83,6 +83,75 @@ function CategoryTab({ categories, locale }: { categories: any[], locale: Locale
     }
   };
 
+  const renderCategoryNode = (cat: any, level: number = 0) => (
+    <div key={cat.id} className={`${level === 0 ? 'bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden' : ''}`}>
+      <div className={`flex items-center justify-between ${level === 0 ? 'p-4 bg-[#F2F2F7]/50' : 'p-2 hover:bg-gray-50 rounded-lg'} ${level > 0 ? 'ml-4 border-l-2 border-gray-100 pl-4' : ''}`}>
+        <div className="flex items-center gap-2">
+          <span className={`${level === 0 ? 'text-gray-900 font-semibold text-base' : 'text-gray-700 text-sm font-medium'}`}>{cat.name}</span>
+          {level === 0 && cat.name !== "未分类" && (
+            <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${cat.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 'bg-[#FF3B30]/10 text-[#FF3B30]'}`}>
+              {cat.type === 'INCOME' ? t('income') : t('expense')}
+            </span>
+          )}
+        </div>
+        <div className="flex gap-2">
+          {cat.name !== "未分类" && level < 2 && (
+            <button
+              onClick={() => setAddingSubCatTo(cat.id)}
+              className="text-[#007AFF] hover:text-[#0066CC] text-sm font-semibold px-2 py-1"
+            >
+              {level === 0 ? t('addSubCategory') : t('addGrandCategory')}
+            </button>
+          )}
+          {cat.name !== "未分类" && (
+            <button
+              onClick={() => handleDelete(cat.id)}
+              className="text-[#FF3B30] hover:text-[#CC2E26] text-sm font-semibold px-2 py-1"
+            >
+              {t('delete')}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className={`${level === 0 ? 'p-3 bg-white space-y-2' : 'space-y-2'}`}>
+        {addingSubCatTo === cat.id && (
+          <div className="flex gap-2 mb-3 ml-4 border-l-2 border-[#007AFF]/30 pl-4">
+            <input
+              type="text"
+              value={newSubCatName}
+              onChange={(e) => setNewSubCatName(e.target.value)}
+              placeholder={level === 0 ? t('subCategory') : t('grandCategory')}
+              className="flex-1 px-3 py-2 bg-[#F2F2F7] border-transparent rounded-lg focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900"
+              autoFocus
+            />
+            <button
+              onClick={() => handleCreateSub(cat.id)}
+              disabled={loading}
+              className="px-4 py-2 bg-[#007AFF] text-white rounded-lg text-sm font-semibold"
+            >
+              {t('save')}
+            </button>
+            <button
+              onClick={() => setAddingSubCatTo(null)}
+              className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-semibold"
+            >
+              {t('cancel')}
+            </button>
+          </div>
+        )}
+
+        {cat.children && cat.children.length > 0 ? (
+          <div className="space-y-1.5">
+            {cat.children.map((child: any) => renderCategoryNode(child, level + 1))}
+          </div>
+        ) : level === 0 ? (
+          <div className="text-xs text-gray-400 pl-4 py-1 italic">{t('noSubCategory')}</div>
+        ) : null}
+      </div>
+    </div>
+  );
+
   return (
     <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6">
       <h2 className="text-lg font-semibold text-gray-800 mb-6">{t('categoryManagement')}</h2>
@@ -115,84 +184,7 @@ function CategoryTab({ categories, locale }: { categories: any[], locale: Locale
 
       {/* 分类列表 */}
       <div className="space-y-4">
-        {categories.map((cat) => (
-          <div key={cat.id} className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="flex items-center justify-between p-4 bg-[#F2F2F7]/50">
-              <div className="flex items-center gap-2">
-                <span className="text-gray-900 font-semibold text-base">{cat.name}</span>
-                {cat.name !== "未分类" && (
-                  <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${cat.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 'bg-[#FF3B30]/10 text-[#FF3B30]'}`}>
-                    {cat.type === 'INCOME' ? t('income') : t('expense')}
-                  </span>
-                )}
-              </div>
-              <div className="flex gap-2">
-                {cat.name !== "未分类" && (
-                  <>
-                    <button
-                      onClick={() => setAddingSubCatTo(cat.id)}
-                      className="text-[#007AFF] hover:text-[#0066CC] text-sm font-semibold px-2 py-1"
-                    >
-                      {t('addSubCategory')}
-                    </button>
-                    <button
-                      onClick={() => handleDelete(cat.id)}
-                      className="text-[#FF3B30] hover:text-[#CC2E26] text-sm font-semibold px-2 py-1"
-                    >
-                      {t('delete')}
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-            
-            <div className="p-3 bg-white space-y-2">
-              {addingSubCatTo === cat.id && (
-                <div className="flex gap-2 mb-3 pl-4 border-l-2 border-[#007AFF]/30">
-                  <input
-                    type="text"
-                    value={newSubCatName}
-                    onChange={(e) => setNewSubCatName(e.target.value)}
-                    placeholder={t('subCategory')}
-                    className="flex-1 px-3 py-2 bg-[#F2F2F7] border-transparent rounded-lg focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900"
-                    autoFocus
-                  />
-                  <button
-                    onClick={() => handleCreateSub(cat.id)}
-                    disabled={loading}
-                    className="px-4 py-2 bg-[#007AFF] text-white rounded-lg text-sm font-semibold"
-                  >
-                    {t('save')}
-                  </button>
-                  <button
-                    onClick={() => setAddingSubCatTo(null)}
-                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-semibold"
-                  >
-                    {t('cancel')}
-                  </button>
-                </div>
-              )}
-              
-              {cat.children && cat.children.length > 0 ? (
-                <div className="space-y-1.5 pl-4 border-l-2 border-gray-100">
-                  {cat.children.map((sub: any) => (
-                    <div key={sub.id} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded-lg group">
-                      <span className="text-gray-700 text-sm font-medium">{sub.name}</span>
-                      <button
-                        onClick={() => handleDelete(sub.id)}
-                        className="text-[#FF3B30] hover:text-[#CC2E26] text-xs font-semibold opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        {t('delete')}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-xs text-gray-400 pl-4 py-1 italic">{t('noSubCategory')}</div>
-              )}
-            </div>
-          </div>
-        ))}
+        {categories.map((cat) => renderCategoryNode(cat))}
         {categories.length === 0 && (
           <p className="text-gray-500 text-center py-4 text-sm">{t('noCategoryData')}</p>
         )}
@@ -219,6 +211,8 @@ function AttachmentTab({ attachments, locale }: { attachments: any[], locale: Lo
             <div className="p-3 bg-white text-xs text-gray-500 flex flex-col gap-1.5">
               <span className="truncate font-medium text-gray-900">{att.uploader?.roleName || t('unknown')}</span>
               <span className="truncate">{t('attachmentCategory')}: {att.category?.name || t('unknown')}</span>
+              <span className="truncate">{t('detail')}: {att.record ? t('recordDetails') : att.contract ? att.contract.title : t('unknown')}</span>
+              <span className="truncate">{t('note')}: {att.note || '-'}</span>
               <span className="truncate">{t('attachmentSize')}: {(att.size / 1024).toFixed(1)} KB</span>
             </div>
           </div>

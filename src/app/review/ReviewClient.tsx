@@ -94,8 +94,7 @@ export default function ReviewClient({
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      {record.category?.name || '-'}
-                      {record.subCategory ? ` / ${record.subCategory.name}` : ''}
+                      {[record.category?.name, record.subCategory?.name, record.thirdCategory?.name].filter(Boolean).join(' / ') || '-'}
                     </td>
                     <td className="px-6 py-4 text-gray-500">{record.user?.roleName || '-'}</td>
                     <td className="px-6 py-4 text-gray-500">{record.pool?.name || '-'}</td>
@@ -133,7 +132,7 @@ export default function ReviewClient({
                 </div>
                 <div>
                   <span className="text-gray-500 block mb-1">{t('category')}</span>
-                  <span className="font-semibold text-gray-900">{modalRecord.category?.name} {modalRecord.subCategory ? `/ ${modalRecord.subCategory.name}` : ''}</span>
+                  <span className="font-semibold text-gray-900">{[modalRecord.category?.name, modalRecord.subCategory?.name, modalRecord.thirdCategory?.name].filter(Boolean).join(' / ') || '-'}</span>
                 </div>
                 <div>
                   <span className="text-gray-500 block mb-1">{t('pool')}</span>
@@ -155,6 +154,21 @@ export default function ReviewClient({
                 <div className="col-span-2">
                   <span className="text-gray-500 block mb-1">{t('note')}</span>
                   <span className="font-semibold text-gray-900">{modalRecord.note || '-'}</span>
+                </div>
+                <div className="col-span-2">
+                  <span className="text-gray-500 block mb-1">{t('attachmentsHistory')}</span>
+                  <div className="space-y-2">
+                    {(modalRecord.attachments || []).length === 0 ? (
+                      <span className="text-sm text-gray-400">{t('noAttachmentData')}</span>
+                    ) : (
+                      modalRecord.attachments.map((item: any) => (
+                        <div key={item.id} className="rounded-xl border border-gray-100 p-3">
+                          <a href={item.fileUrl} target="_blank" rel="noreferrer" className="text-[#007AFF] hover:underline font-medium">{t('viewAttachment')}</a>
+                          <div className="text-gray-500 mt-1">{item.note || '-'}</div>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               </div>
 

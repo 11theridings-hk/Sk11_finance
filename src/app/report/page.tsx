@@ -1,6 +1,7 @@
-import { getFlatCategories } from '../actions/category'
+import { getCategories } from '../actions/category'
 import { getUsers } from '../actions/user'
 import { getSession } from '../actions/auth'
+import { getCapitalPools } from '../actions/pool'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import ReportClient from './ReportClient'
@@ -19,8 +20,11 @@ export default async function ReportPage() {
   const locale = await getCurrentLocale()
   const t = createTranslator(locale)
 
-  const categories = await getFlatCategories()
-  const users = await getUsers()
+  const [categories, users, pools] = await Promise.all([
+    getCategories(),
+    getUsers(),
+    getCapitalPools(session.userId),
+  ])
 
   return (
     <div className="min-h-screen bg-[#F2F2F7]">
@@ -34,7 +38,7 @@ export default async function ReportPage() {
       </header>
 
       <main className="max-w-5xl mx-auto p-4 sm:px-6 lg:px-8 mt-4">
-        <ReportClient categories={categories} users={users} session={session} locale={locale} />
+        <ReportClient categories={categories} users={users} pools={pools} locale={locale} />
       </main>
     </div>
   );

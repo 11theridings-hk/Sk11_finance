@@ -3,23 +3,30 @@
 import React, { useState, useEffect } from 'react'
 import { getReportRecords, ReportFilter } from '../actions/report'
 import { requestModifyRecord } from '../actions/modify'
+import { deleteRecord } from '../actions/record'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import JSZip from 'jszip'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
+import { compressImage, type ClientAttachment } from '@/lib/image'
+import RecordDetailModal from '../RecordDetailModal'
 
 type Props = {
   categories: any[]
   users: any[]
-  session: any
+  pools: any[]
   locale: Locale
 }
 
-export default function ReportClient({ categories, users, session, locale }: Props) {
+export default function ReportClient({ categories, users, pools, locale }: Props) {
   const t = createTranslator(locale)
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [categoryId, setCategoryId] = useState('')
+  const [subCategoryId, setSubCategoryId] = useState('')
+  const [thirdCategoryId, setThirdCategoryId] = useState('')
+  const [poolId, setPoolId] = useState('')
+  const [status, setStatus] = useState<'APPROVED' | 'PENDING' | 'ALL'>('APPROVED')
   const [userId, setUserId] = useState('')
 
   const [records, setRecords] = useState<any[]>([])
@@ -29,13 +36,22 @@ export default function ReportClient({ categories, users, session, locale }: Pro
 
   // 修改记录相关状态
   const [editingRecord, setEditingRecord] = useState<any>(null)
+  const [selectedRecord, setSelectedRecord] = useState<any>(null)
   const [editDate, setEditDate] = useState('')
   const [editType, setEditType] = useState<'INCOME' | 'EXPENSE'>('EXPENSE')
   const [editCategoryId, setEditCategoryId] = useState('')
   const [editSubCategoryId, setEditSubCategoryId] = useState('')
+  const [editThirdCategoryId, setEditThirdCategoryId] = useState('')
   const [editAmount, setEditAmount] = useState('')
   const [editNote, setEditNote] = useState('')
+  const [editAttachment, setEditAttachment] = useState<ClientAttachment | null>(null)
+  const [editAttachmentNote, setEditAttachmentNote] = useState('')
   const [isSubmittingEdit, setIsSubmittingEdit] = useState(false)
+
+  const currentCategory = categories.find((item) => item.id === categoryId)
+  const currentSubCategory = currentCategory?.children?.find((item: any) => item.id === subCategoryId)
+  const editCurrentCategory = categories.find((item) => item.id === editCategoryId)
+  const editCurrentSubCategory = editCurrentCategory?.children?.find((item: any) => item.id === editSubCategoryId)
 
   const handleEditClick = (record: any) => {
     setEditingRecord(record)
@@ -43,8 +59,11 @@ export default function ReportClient({ categories, users, session, locale }: Pro
     setEditType(record.type as 'INCOME' | 'EXPENSE')
     setEditCategoryId(record.categoryId)
     setEditSubCategoryId(record.subCategoryId || '')
+    setEditThirdCategoryId(record.thirdCategoryId || '')
     setEditAmount(Math.abs(record.amount).toString())
     setEditNote(record.note || '')
+    setEditAttachment(null)
+    setEditAttachmentNote('')
   }
 
   const submitEdit = async () => {
@@ -60,9 +79,11 @@ export default function ReportClient({ categories, users, session, locale }: Pro
       date: editDate,
       categoryId: editCategoryId,
       subCategoryId: editSubCategoryId,
+      thirdCategoryId: editThirdCategoryId,
       amount: finalAmount,
       note: editNote,
-      poolId: editingRecord.poolId // 保持原资金池
+      poolId: editingRecord.poolId,
+      attachment: editAttachment ? { ...editAttachment, note: editAttachmentNote || undefined } : undefined
     })
 
     if (res.success) {
@@ -73,6 +94,29 @@ export default function ReportClient({ categories, users, session, locale }: Pro
       alert(`${t('submitFailed')}: ${res.error}`)
     }
     setIsSubmittingEdit(false)
+  }
+
+  const handleEditAttachmentChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    try {
+      const compressed = await compressImage(file, 200)
+      setEditAttachment(compressed)
+    } catch {
+      alert(t('imageCompressionFailed'))
+    }
+  }
+
+  const handleDeleteRecord = async (recordId: string) => {
+    if (!window.confirm(t('deleteRecordConfirm'))) return
+    setLoading(true)
+    const res = await deleteRecord(recordId)
+    if (res.success) {
+      handleSearch()
+      return
+    }
+    alert(res.error)
+    setLoading(false)
   }
 
   useEffect(() => {
@@ -110,7 +154,11 @@ export default function ReportClient({ categories, users, session, locale }: Pro
       filter.endDate = end
     }
     if (categoryId) filter.categoryId = categoryId
+    if (subCategoryId) filter.subCategoryId = subCategoryId
+    if (thirdCategoryId) filter.thirdCategoryId = thirdCategoryId
+    if (poolId) filter.poolId = poolId
     if (userId) filter.userId = userId
+    filter.status = status
 
     try {
       const data = await getReportRecords(filter)
@@ -140,7 +188,7 @@ export default function ReportClient({ categories, users, session, locale }: Pro
       return
     }
 
-    let totalCount = records.length
+    const totalCount = records.length
     let totalIncome = 0
     let totalExpense = 0
 
@@ -264,12 +312,13 @@ export default function ReportClient({ categories, users, session, locale }: Pro
       r.category?.name || '-',
       r.user?.roleName || '-',
       formatCurrency(locale, r.amount),
-      r.note || '-'
+      r.note || '-',
+      r.status === 'PENDING' ? t('pendingApproval') : t('approvedStored')
     ])
 
     autoTable(doc, {
       startY: 35,
-      head: [[t('date'), t('type'), t('category'), t('role'), t('amount'), t('note')]],
+      head: [[t('date'), t('type'), t('category'), t('role'), t('amount'), t('note'), t('status')]],
       body: tableData,
       styles: { font: fontBase64 ? 'NotoSansSC' : 'helvetica' },
       headStyles: { fillColor: [66, 139, 202], font: fontBase64 ? 'NotoSansSC' : 'helvetica' }
@@ -301,18 +350,20 @@ export default function ReportClient({ categories, users, session, locale }: Pro
         if (fontBase64) doc.setFont('NotoSansSC', 'normal')
         doc.text(`${t('date')}: ${new Date(r.date).toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK')}`, 20, 40)
         doc.text(`${t('type')}: ${r.type === 'INCOME' ? t('income') : t('expense')}`, 20, 50)
-        doc.text(`${t('category')}: ${r.category?.name || '-'}`, 20, 60)
+        doc.text(`${t('category')}: ${[r.category?.name, r.subCategory?.name, r.thirdCategory?.name].filter(Boolean).join(' / ') || '-'}`, 20, 60)
         doc.text(`${t('amount')}: ${formatCurrency(locale, r.amount)}`, 20, 70)
         doc.text(`${t('role')}: ${r.user?.roleName || '-'}`, 20, 80)
         doc.text(`${t('pool')}: ${r.pool?.name || '-'}`, 20, 90)
-        doc.text(`${t('note')}: ${r.note || '-'}`, 20, 100)
+        doc.text(`${t('status')}: ${r.status === 'PENDING' ? t('pendingApproval') : t('approvedStored')}`, 20, 100)
+        doc.text(`${t('note')}: ${r.note || '-'}`, 20, 110)
 
-        if (r.attachmentUrl && r.attachmentUrl.startsWith('data:image')) {
+        const firstAttachment = r.attachments?.[0]?.fileUrl || r.attachmentUrl
+        if (firstAttachment && firstAttachment.startsWith('data:image')) {
           doc.text(`${t('attachment')}:`, 20, 120)
           try {
-            const match = r.attachmentUrl.match(/^data:image\/(png|jpeg|jpg|gif);base64,/)
+            const match = firstAttachment.match(/^data:image\/(png|jpeg|jpg|gif);base64,/)
             const format = match ? (match[1].toUpperCase() === 'JPG' ? 'JPEG' : match[1].toUpperCase()) : 'JPEG'
-            doc.addImage(r.attachmentUrl, format, 20, 125, 150, 150, undefined, 'FAST')
+            doc.addImage(firstAttachment, format, 20, 125, 150, 150, undefined, 'FAST')
           } catch (e) {
             console.error('添加图片附件失败:', e)
             doc.text('(image failed to load)', 40, 120)
@@ -349,7 +400,7 @@ export default function ReportClient({ categories, users, session, locale }: Pro
 
   return (
     <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div>
           <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('startDate')}</label>
           <input 
@@ -369,15 +420,46 @@ export default function ReportClient({ categories, users, session, locale }: Pro
           />
         </div>
         <div>
-          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('category')}</label>
+          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('mainCategory')}</label>
           <select 
             value={categoryId} 
-            onChange={e => setCategoryId(e.target.value)}
+            onChange={e => {
+              setCategoryId(e.target.value)
+              setSubCategoryId('')
+              setThirdCategoryId('')
+            }}
             className={inputClass}
           >
             <option value="">{t('all')}</option>
             {categories.map(c => (
               <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('subCategory')}</label>
+          <select value={subCategoryId} onChange={e => { setSubCategoryId(e.target.value); setThirdCategoryId('') }} className={inputClass} disabled={!currentCategory?.children?.length}>
+            <option value="">{t('all')}</option>
+            {currentCategory?.children?.map((sub: any) => (
+              <option key={sub.id} value={sub.id}>{sub.name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('grandCategory')}</label>
+          <select value={thirdCategoryId} onChange={e => setThirdCategoryId(e.target.value)} className={inputClass} disabled={!currentSubCategory?.children?.length}>
+            <option value="">{t('all')}</option>
+            {currentSubCategory?.children?.map((third: any) => (
+              <option key={third.id} value={third.id}>{third.name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('pool')}</label>
+          <select value={poolId} onChange={e => setPoolId(e.target.value)} className={inputClass}>
+            <option value="">{t('all')}</option>
+            {pools.map((pool: any) => (
+              <option key={pool.id} value={pool.id}>{pool.name}</option>
             ))}
           </select>
         </div>
@@ -392,6 +474,14 @@ export default function ReportClient({ categories, users, session, locale }: Pro
             {users.map(u => (
               <option key={u.id} value={u.id}>{u.roleName}</option>
             ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('status')}</label>
+          <select value={status} onChange={e => setStatus(e.target.value as 'APPROVED' | 'PENDING' | 'ALL')} className={inputClass}>
+            <option value="APPROVED">{t('approvedStored')}</option>
+            <option value="PENDING">{t('pendingApproval')}</option>
+            <option value="ALL">{t('all')}</option>
           </select>
         </div>
       </div>
@@ -432,14 +522,16 @@ export default function ReportClient({ categories, users, session, locale }: Pro
                 <th className="px-6 py-3 font-medium">{t('pool')}</th>
                 <th className="px-6 py-3 font-medium">{t('amount')}</th>
                 <th className="px-6 py-3 font-medium">{t('note')}</th>
-                <th className="px-6 py-3 font-medium">{t('attachment')}</th>
+                <th className="px-6 py-3 font-medium">{t('status')}</th>
                 <th className="px-6 py-3 font-medium">{t('modify')}</th>
+                <th className="px-6 py-3 font-medium">{t('detail')}</th>
+                <th className="px-6 py-3 font-medium">{t('delete')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {records.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="p-8 text-center text-gray-400 font-medium">{t('noDataTrySearch')}</td>
+                  <td colSpan={11} className="p-8 text-center text-gray-400 font-medium">{t('noDataTrySearch')}</td>
                 </tr>
               ) : (
                 records.map(record => (
@@ -453,8 +545,7 @@ export default function ReportClient({ categories, users, session, locale }: Pro
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      {record.category?.name || '-'}
-                      {record.subCategory ? ` / ${record.subCategory.name}` : ''}
+                      {[record.category?.name, record.subCategory?.name, record.thirdCategory?.name].filter(Boolean).join(' / ') || '-'}
                     </td>
                     <td className="px-6 py-4">{record.user?.roleName || '-'}</td>
                     <td className="px-6 py-4">{record.pool?.name || '-'}</td>
@@ -463,11 +554,9 @@ export default function ReportClient({ categories, users, session, locale }: Pro
                     </td>
                     <td className="px-6 py-4 max-w-xs truncate text-gray-500" title={record.note || ''}>{record.note || '-'}</td>
                     <td className="px-6 py-4">
-                      {record.attachmentUrl ? (
-                        <span className="text-xs font-semibold text-[#34C759] bg-[#34C759]/10 px-2.5 py-1 rounded-md">{t('attachment')}</span>
-                      ) : (
-                        <span className="text-xs text-gray-400">-</span>
-                      )}
+                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-md ${record.status === 'PENDING' ? 'bg-[#FF9500]/10 text-[#FF9500]' : 'bg-[#34C759]/10 text-[#34C759]'}`}>
+                        {record.status === 'PENDING' ? t('pendingApproval') : t('approvedStored')}
+                      </span>
                     </td>
                     <td className="px-6 py-4">
                       {!record.isReviewing && (
@@ -481,6 +570,12 @@ export default function ReportClient({ categories, users, session, locale }: Pro
                       {record.isReviewing && (
                         <span className="text-xs text-[#FF9500] font-medium">{t('modifyPending')}</span>
                       )}
+                    </td>
+                    <td className="px-6 py-4">
+                      <button onClick={() => setSelectedRecord(record)} className="text-[#007AFF] hover:underline font-medium text-sm">{t('detail')}</button>
+                    </td>
+                    <td className="px-6 py-4">
+                      <button onClick={() => handleDeleteRecord(record.id)} className="text-[#FF3B30] hover:underline font-medium text-sm">{t('delete')}</button>
                     </td>
                   </tr>
                 ))
@@ -510,7 +605,7 @@ export default function ReportClient({ categories, users, session, locale }: Pro
                 </div>
                 <div className="text-sm text-gray-600 flex justify-between">
                   <span>
-                    {record.category?.name || '-'} {record.subCategory ? `/ ${record.subCategory.name}` : ''}
+                    {[record.category?.name, record.subCategory?.name, record.thirdCategory?.name].filter(Boolean).join(' / ') || '-'}
                   </span>
                   <span className="text-xs text-gray-500">{record.user?.roleName || '-'}</span>
                 </div>
@@ -518,19 +613,13 @@ export default function ReportClient({ categories, users, session, locale }: Pro
                   <div className="text-xs text-gray-500 truncate">{record.note}</div>
                 )}
                 <div className="flex justify-between items-center pt-2 mt-2 border-t border-gray-50">
-                  <span className="text-xs text-gray-400">{t('pool')}: {record.pool?.name || '-'}</span>
-                  <div>
+                  <span className="text-xs text-gray-400">{t('pool')}: {record.pool?.name || '-'} | {record.status === 'PENDING' ? t('pendingApproval') : t('approvedStored')}</span>
+                  <div className="flex gap-2">
+                    <button onClick={() => setSelectedRecord(record)} className="text-[#007AFF] font-medium text-xs bg-[#007AFF]/10 px-3 py-1 rounded">{t('detail')}</button>
                     {!record.isReviewing && (
-                      <button 
-                        onClick={() => handleEditClick(record)}
-                        className="text-[#007AFF] font-medium text-xs bg-[#007AFF]/10 px-3 py-1 rounded"
-                      >
-                        {t('modify')}
-                      </button>
+                      <button onClick={() => handleEditClick(record)} className="text-[#007AFF] font-medium text-xs bg-[#007AFF]/10 px-3 py-1 rounded">{t('modify')}</button>
                     )}
-                    {record.isReviewing && (
-                      <span className="text-xs text-[#FF9500] font-medium">{t('modifyPending')}</span>
-                    )}
+                    <button onClick={() => handleDeleteRecord(record.id)} className="text-[#FF3B30] font-medium text-xs bg-[#FF3B30]/10 px-3 py-1 rounded">{t('delete')}</button>
                   </div>
                 </div>
               </div>
@@ -573,7 +662,7 @@ export default function ReportClient({ categories, users, session, locale }: Pro
                 
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">{t('mainCategory')}</label>
-                  <select value={editCategoryId} onChange={e => { setEditCategoryId(e.target.value); setEditSubCategoryId(''); }} className={inputClass}>
+                  <select value={editCategoryId} onChange={e => { setEditCategoryId(e.target.value); setEditSubCategoryId(''); setEditThirdCategoryId(''); }} className={inputClass}>
                     <option value="">{t('selectCategory')}</option>
                     {categories.filter(c => c.type === editType && !c.parentId).map(cat => (
                       <option key={cat.id} value={cat.id}>{cat.name}</option>
@@ -588,10 +677,20 @@ export default function ReportClient({ categories, users, session, locale }: Pro
 
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">{t('subCategory')}</label>
-                  <select value={editSubCategoryId} onChange={e => setEditSubCategoryId(e.target.value)} className={inputClass}>
+                  <select value={editSubCategoryId} onChange={e => { setEditSubCategoryId(e.target.value); setEditThirdCategoryId('') }} className={inputClass}>
                     <option value="">{t('noSubCategory')}</option>
-                    {categories.filter(c => c.parentId === editCategoryId).map((sub: any) => (
+                    {editCurrentCategory?.children?.map((sub: any) => (
                       <option key={sub.id} value={sub.id}>{sub.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">{t('grandCategory')}</label>
+                  <select value={editThirdCategoryId} onChange={e => setEditThirdCategoryId(e.target.value)} className={inputClass}>
+                    <option value="">{t('noGrandCategory')}</option>
+                    {editCurrentSubCategory?.children?.map((third: any) => (
+                      <option key={third.id} value={third.id}>{third.name}</option>
                     ))}
                   </select>
                 </div>
@@ -599,6 +698,12 @@ export default function ReportClient({ categories, users, session, locale }: Pro
                 <div className="md:col-span-2">
                   <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">{t('note')}</label>
                   <input type="text" value={editNote} onChange={e => setEditNote(e.target.value)} className={inputClass} />
+                </div>
+
+                <div className="md:col-span-2 rounded-2xl border border-dashed border-gray-200 p-4 bg-[#F2F2F7]/50">
+                  <label className="block text-xs font-semibold text-gray-500 mb-2 uppercase">{t('appendAttachment')}</label>
+                  <input type="file" accept="image/*" onChange={handleEditAttachmentChange} className="w-full text-sm text-gray-600 file:mr-4 file:py-2.5 file:px-5 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-[#007AFF]/10 file:text-[#007AFF]" />
+                  <input type="text" value={editAttachmentNote} onChange={e => setEditAttachmentNote(e.target.value)} placeholder={t('attachmentNotePlaceholder')} className={`${inputClass} mt-3`} />
                 </div>
               </div>
 
@@ -620,6 +725,10 @@ export default function ReportClient({ categories, users, session, locale }: Pro
             </div>
           </div>
         </div>
+      )}
+
+      {selectedRecord && (
+        <RecordDetailModal record={selectedRecord} locale={locale} onClose={() => setSelectedRecord(null)} />
       )}
     </div>
   )

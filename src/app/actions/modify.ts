@@ -6,7 +6,13 @@ import { getSession } from './auth'
 import { getCurrentLocale } from '@/lib/locale'
 import { createTranslator } from '@/lib/i18n'
 
-export async function requestModifyRecord(originalId: string, data: any) {
+type ModifyAttachmentInput = {
+  url: string
+  size: number
+  note?: string
+}
+
+export async function requestModifyRecord(originalId: string, data: any & { thirdCategoryId?: string, attachment?: ModifyAttachmentInput }) {
   try {
     const locale = await getCurrentLocale()
     const t = createTranslator(locale)
@@ -40,9 +46,24 @@ export async function requestModifyRecord(originalId: string, data: any) {
           amount: data.amount,
           categoryId: data.categoryId,
           subCategoryId: data.subCategoryId || undefined,
+          thirdCategoryId: data.thirdCategoryId || undefined,
+          attachmentUrl: data.attachment?.url,
           poolId: data.poolId || undefined,
           userId: originalRecord.userId, // 保持原作者
           originalRecordId: originalId,
+        }
+      }).then(async (pendingRecord) => {
+        if (data.attachment) {
+          await tx.attachment.create({
+            data: {
+              fileUrl: data.attachment.url,
+              size: data.attachment.size,
+              note: data.attachment.note,
+              uploaderId: session.userId,
+              categoryId: data.thirdCategoryId || data.subCategoryId || data.categoryId,
+              recordId: pendingRecord.id,
+            }
+          })
         }
       })
     })
