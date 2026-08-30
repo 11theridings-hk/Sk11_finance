@@ -258,12 +258,12 @@ export default function PrivateLedgerClient({
                   </div>
                 </div>
                 <div>
-                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('privateCategoryLabel')}</label>
+                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('category')}</label>
                   <input
                     value={customCategory}
                     onChange={(e) => setCustomCategory(e.target.value)}
                     className={inputClass}
-                    placeholder={t('privateCategoryPlaceholder')}
+                    placeholder={locale === 'en' ? 'Enter a private category' : '手動輸入私帳分類'}
                   />
                 </div>
                 <div className="md:col-span-2">
