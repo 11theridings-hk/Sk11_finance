@@ -37,10 +37,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const session = await getSession();
   const locale = await getCurrentLocale();
   let pendingCount = 0;
+
   if (session?.isAdmin) {
     pendingCount = await getPendingReviewCount();
   }
-  
+
   return (
     <html
       lang={locale}
@@ -58,4 +59,4 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       </body>
     </html>
   );
-} to
+}
