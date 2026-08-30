@@ -6,6 +6,8 @@ import { usePathname, useRouter } from 'next/navigation'
 import { logout } from './actions/auth'
 import { LOCALE_COOKIE, createTranslator, type Locale } from '@/lib/i18n'
 import { hasPublicLedgerAccess } from '@/lib/access'
+import BrandLogo from '@/components/BrandLogo'
+import BrandMark from '@/components/BrandMark'
 
 type NavSession = {
   userId: string
@@ -61,9 +63,14 @@ export default function TopNav({ session, pendingCount = 0, locale }: { session:
     <>
       <div className="sticky top-0 z-30 -mx-4 border-b border-gray-200 bg-[#F2F2F7]/95 backdrop-blur sm:hidden">
         <div className="flex items-center justify-between px-4 py-3">
-          <div className="min-w-0">
-            <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-gray-400">{session?.roleName}</div>
-            <div className="truncate text-base font-semibold text-gray-900">{currentPageName}</div>
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#0B1736] text-white shadow-sm">
+              <BrandMark className="h-8 w-8" strokeWidth={16} />
+            </div>
+            <div className="min-w-0">
+              <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-gray-400">{session?.roleName}</div>
+              <div className="truncate text-base font-semibold text-gray-900">{currentPageName}</div>
+            </div>
           </div>
           <button
             type="button"
@@ -76,7 +83,9 @@ export default function TopNav({ session, pendingCount = 0, locale }: { session:
       </div>
 
       <div className="hidden items-center justify-between gap-4 border-b border-gray-200 bg-[#F2F2F7] pb-3 px-4 pt-2 text-lg font-semibold sm:flex sm:px-0">
-        <nav className="hide-scrollbar flex min-w-0 space-x-6 overflow-x-auto whitespace-nowrap">
+        <div className="flex min-w-0 items-center gap-6">
+          <BrandLogo className="shrink-0" compact />
+          <nav className="hide-scrollbar flex min-w-0 space-x-6 overflow-x-auto whitespace-nowrap">
           {desktopNavItems.map((item) => {
             const isActive = isPathActive(item.href)
             return (
@@ -94,7 +103,8 @@ export default function TopNav({ session, pendingCount = 0, locale }: { session:
               </Link>
             )
           })}
-        </nav>
+          </nav>
+        </div>
         <div className="flex shrink-0 items-center gap-3">
           <label className="flex items-center gap-2 text-sm font-medium text-gray-600">
             <span>{t('language')}</span>
