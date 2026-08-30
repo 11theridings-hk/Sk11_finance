@@ -37,16 +37,15 @@ export default async function SharedPrivateLedgerPage({
   return (
     <div className="min-h-screen bg-[#F2F2F7]">
       <PrivateLedgerClient
-        locale={locale}
-        initialDate={new Date().toISOString().split('T')[0]}
-        categories={[]}
-        initialRecords={records}
-        owner={owner}
-        balance={summary.balance}
-        visibility={(owner.privateLedgerVisibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE')}
-        canManage={false}
-        sharedUsers={[]}
-      />
+  locale={locale}
+  initialDate={new Date().toISOString().split('T')[0]}
+  initialRecords={records}
+  owner={owner}
+  balance={summary.balance}
+  visibility={(owner.privateLedgerVisibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE')}
+  canManage={false}
+  sharedUsers={[]}
+/>
     </div>
   )
 }
