@@ -10,6 +10,7 @@ export function normalizeLocale(value?: string | null): Locale {
 const messages = {
   'zh-HK': {
     language: '語言',
+    more: '更多',
     traditionalChinese: '繁體中文',
     english: 'English',
     currentRole: '目前角色',
@@ -248,6 +249,7 @@ const messages = {
   },
   en: {
     language: 'Language',
+    more: 'More',
     traditionalChinese: 'Traditional Chinese',
     english: 'English',
     currentRole: 'Current Role',
