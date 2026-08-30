@@ -82,9 +82,9 @@ export default function PrivateRecordDetailModal({
             </div>
             <div>
               <div className="mb-1 text-gray-500">{t('category')}</div>
-              <div>
-  <div className="mb-1 text-gray-500">{t('category')}</div>
-  <div className="font-semibold text-gray-900">{record.customCategory?.trim() || [record.category?.name, record.subCategory?.name, record.thirdCategory?.name].filter(Boolean).join(' / ') || t('uncategorized')}</div>
+              <div className="font-semibold text-gray-900">
+                {record.customCategory?.trim() || [record.category?.name, record.subCategory?.name, record.thirdCategory?.name].filter(Boolean).join(' / ') || t('uncategorized')}
+              </div>
             </div>
             <div>
               <div className="mb-1 text-gray-500">{t('amount')}</div>
