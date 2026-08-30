@@ -34,6 +34,23 @@ export default function ContractsClient({ locale, categories, pools, initialCont
   const mainCategories = useMemo(() => categories.filter((item) => item.type === type), [categories, type])
   const currentCategory = useMemo(() => mainCategories.find((item) => item.id === categoryId), [mainCategories, categoryId])
   const currentSubCategory = useMemo(() => currentCategory?.children?.find((item: any) => item.id === subCategoryId), [currentCategory, subCategoryId])
+  const expiringContracts = useMemo(() => {
+    const today = new Date()
+    const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+
+    return initialContracts
+      .map((contract) => {
+        const expiry = new Date(contract.expiryDate)
+        const expiryDay = new Date(expiry.getFullYear(), expiry.getMonth(), expiry.getDate())
+        const daysUntilExpiry = Math.ceil((expiryDay.getTime() - startOfToday.getTime()) / 86400000)
+
+        return {
+          ...contract,
+          daysUntilExpiry,
+        }
+      })
+      .filter((contract) => contract.daysUntilExpiry >= 0 && contract.daysUntilExpiry <= 15)
+  }, [initialContracts])
 
   const handleAddCategory = async (parentId?: string) => {
     const name = window.prompt(t('createNewCategoryPrompt'))
@@ -94,6 +111,36 @@ export default function ContractsClient({ locale, categories, pools, initialCont
 
   return (
     <div className="space-y-4 sm:space-y-6 pt-4 sm:pt-6 overflow-x-hidden relative">
+      {expiringContracts.length > 0 && (
+        <section className="rounded-2xl sm:rounded-3xl border border-[#FF9500]/20 bg-[#FFF7ED] px-4 py-4 shadow-sm sm:px-5">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 rounded-full bg-[#FF9500]/10 p-2 text-[#FF9500]">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-base font-semibold text-[#9A3412]">{t('contractExpiryReminder')}</h2>
+              <p className="mt-1 text-sm text-[#C2410C]">{t('contractsExpireWithin15Days')}</p>
+              <div className="mt-3 space-y-2">
+                {expiringContracts.slice(0, 3).map((contract) => (
+                  <div key={contract.id} className="flex flex-col gap-1 rounded-xl bg-white/80 px-3 py-2 text-sm text-gray-700 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="font-medium text-gray-900">{contract.title}</div>
+                    <div className="flex items-center gap-2 text-xs sm:text-sm">
+                      <span>{new Date(contract.expiryDate).toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK')}</span>
+                      <span className="rounded-full bg-[#FFEDD5] px-2 py-0.5 font-medium text-[#C2410C]">
+                        {contract.daysUntilExpiry === 0 ? (locale === 'en' ? 'Expires today' : '今天到期') : (locale === 'en' ? `${contract.daysUntilExpiry} days left` : `尚餘 ${contract.daysUntilExpiry} 天`)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {expiringContracts.length > 3 && (
+                <p className="mt-3 text-xs text-[#9A3412]">{t('moreExpiringContracts')}</p>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
       <section className="bg-white p-4 sm:p-5 rounded-2xl sm:rounded-3xl shadow-sm border border-gray-100">
         <h2 className="text-xl font-semibold text-gray-900">{t('contractsPage')}</h2>
         <p className="text-sm text-gray-500 mt-2">{t('contractsPageHint')}</p>

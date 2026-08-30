@@ -4,6 +4,7 @@ import { getReviewRecords } from '../actions/review'
 import ReviewClient from './ReviewClient'
 import { getCurrentLocale } from '@/lib/locale'
 import { createTranslator } from '@/lib/i18n'
+import { getDefaultHomePath } from '@/lib/access'
 
 export const metadata = {
   title: "审核",
@@ -12,7 +13,7 @@ export const metadata = {
 export default async function ReviewPage() {
   const session = await getSession()
   if (!session || !session.isAdmin) {
-    redirect('/')
+    redirect(session ? getDefaultHomePath(session) : '/login')
   }
   const locale = await getCurrentLocale()
   const t = createTranslator(locale)

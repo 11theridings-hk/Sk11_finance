@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { getSession, hashPassword } from './auth'
 import { getCurrentLocale } from '@/lib/locale'
 import { createTranslator } from '@/lib/i18n'
+import type { PublicLedgerRole } from '@/lib/access'
 
 async function checkAdmin() {
   const session = await getSession()
@@ -31,7 +32,7 @@ export async function getUsers() {
 }
 
 // 创建白名单用户
-export async function createUser(data: { password: string; roleName: string; isAdmin: boolean }) {
+export async function createUser(data: { password: string; roleName: string; isAdmin: boolean; publicLedgerRole?: PublicLedgerRole }) {
   try {
     await checkAdmin()
     const user = await prisma.user.create({
@@ -40,6 +41,7 @@ export async function createUser(data: { password: string; roleName: string; isA
         roleName: data.roleName,
         isAdmin: data.isAdmin,
         poolEnabled: false,
+        publicLedgerRole: data.isAdmin ? 'MEMBER' : (data.publicLedgerRole ?? 'NONE'),
       }
     })
     revalidatePath('/admin')
@@ -50,12 +52,15 @@ export async function createUser(data: { password: string; roleName: string; isA
 }
 
 // 更新用户
-export async function updateUser(id: string, data: { password?: string; roleName?: string; isAdmin?: boolean }) {
+export async function updateUser(id: string, data: { password?: string; roleName?: string; isAdmin?: boolean; publicLedgerRole?: PublicLedgerRole }) {
   try {
     await checkAdmin()
     const updateData: any = { ...data }
     if (data.password) {
       updateData.password = await hashPassword(data.password)
+    }
+    if (data.isAdmin) {
+      updateData.publicLedgerRole = 'MEMBER'
     }
 
     const user = await prisma.$transaction(async (tx) => {
@@ -75,6 +80,7 @@ export async function updateUser(id: string, data: { password?: string; roleName
     })
     
     revalidatePath('/admin')
+    revalidatePath('/')
     return { success: true, user }
   } catch (error: any) {
     return { success: false, error: error.message }

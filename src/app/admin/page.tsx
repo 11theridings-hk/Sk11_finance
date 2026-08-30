@@ -8,6 +8,7 @@ import { getUsers } from "../actions/user";
 import AdminTabs from "./AdminTabs";
 import { getCurrentLocale } from "@/lib/locale";
 import { createTranslator } from "@/lib/i18n";
+import { getDefaultHomePath } from "@/lib/access";
 
 export const metadata = {
   title: "管理后台",
@@ -19,7 +20,7 @@ export default async function AdminPage() {
     redirect('/login');
   }
   if (!session.isAdmin) {
-    redirect('/');
+    redirect(getDefaultHomePath(session));
   }
   const locale = await getCurrentLocale();
   const t = createTranslator(locale);

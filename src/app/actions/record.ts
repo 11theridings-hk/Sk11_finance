@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { getSession } from './auth'
 import { getCurrentLocale } from '@/lib/locale'
 import { createTranslator } from '@/lib/i18n'
+import { hasPublicLedgerAccess } from '@/lib/access'
 
 type AttachmentPayload = {
   url: string
@@ -32,12 +33,22 @@ function getDeepestCategoryId(data: {
   return data.thirdCategoryId || data.subCategoryId || data.categoryId
 }
 
+async function assertPublicLedgerAccess() {
+  const locale = await getCurrentLocale()
+  const t = createTranslator(locale)
+  const session = await getSession()
+
+  if (!session) throw new Error(t('notLoggedIn'))
+  if (!hasPublicLedgerAccess(session)) throw new Error(t('unauthorized'))
+
+  return session
+}
+
 export async function createRecord(data: CreateRecordInput) {
   try {
     const locale = await getCurrentLocale()
     const t = createTranslator(locale)
-    const session = await getSession()
-    if (!session) throw new Error(t('notLoggedIn'))
+    const session = await assertPublicLedgerAccess()
     
     const result = await prisma.$transaction(async (tx) => {
       // 1. 判断是否需要审核
@@ -103,7 +114,7 @@ export async function createRecord(data: CreateRecordInput) {
 
 export async function getUserStats(userId: string) {
   const session = await getSession()
-  if (!session) return { balance: 0 }
+  if (!session || !hasPublicLedgerAccess(session)) return { balance: 0 }
   if (session.userId !== userId && !session.isAdmin) {
     const locale = await getCurrentLocale()
     const t = createTranslator(locale)
@@ -124,7 +135,7 @@ export async function getUserStats(userId: string) {
 
 export async function getRecentRecords(userId?: string) {
   const session = await getSession()
-  if (!session) return []
+  if (!session || !hasPublicLedgerAccess(session)) return []
   if (userId && session.userId !== userId && !session.isAdmin) {
     const locale = await getCurrentLocale()
     const t = createTranslator(locale)
@@ -160,7 +171,7 @@ export async function getRecentRecords(userId?: string) {
 
 export async function getAttachments() {
   const session = await getSession()
-  if (!session) return []
+  if (!session || (!session.isAdmin && !hasPublicLedgerAccess(session))) return []
   
   return await prisma.attachment.findMany({
     where: !session.isAdmin ? { uploaderId: session.userId } : undefined,
@@ -181,6 +192,9 @@ async function assertRecordPermission(recordId: string) {
 
   if (!session) {
     throw new Error(t('notLoggedIn'))
+  }
+  if (!hasPublicLedgerAccess(session)) {
+    throw new Error(t('unauthorized'))
   }
 
   const record = await prisma.record.findUnique({

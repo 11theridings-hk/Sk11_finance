@@ -16,7 +16,7 @@ export type ReportFilter = {
 
 export async function getReportRecords(filter: ReportFilter) {
   const session = await getSession()
-  if (!session) return []
+  if (!session?.isAdmin) return []
 
   const where: any = {}
 
@@ -26,10 +26,7 @@ export async function getReportRecords(filter: ReportFilter) {
     where.status = 'APPROVED'
   }
 
-  // B02: 普通用户默认只允许查自己的记录
-  if (!session.isAdmin) {
-    where.userId = session.userId
-  } else if (filter.userId) {
+  if (filter.userId) {
     where.userId = filter.userId
   }
   if (filter.startDate || filter.endDate) {

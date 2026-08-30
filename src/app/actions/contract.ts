@@ -42,6 +42,9 @@ async function assertContractPermission(contractId: string) {
   if (!session) {
     throw new Error(t('notLoggedIn'))
   }
+  if (!session.isAdmin) {
+    throw new Error(t('unauthorized'))
+  }
 
   const contract = await prisma.contract.findUnique({
     where: { id: contractId }
@@ -60,7 +63,7 @@ async function assertContractPermission(contractId: string) {
 
 export async function getContracts() {
   const session = await getSession()
-  if (!session) return []
+  if (!session?.isAdmin) return []
 
   return await prisma.contract.findMany({
     where: session.isAdmin ? undefined : { userId: session.userId },
@@ -97,6 +100,9 @@ export async function createContract(data: CreateContractInput) {
     const session = await getSession()
     if (!session) {
       throw new Error(t('notLoggedIn'))
+    }
+    if (!session.isAdmin) {
+      throw new Error(t('unauthorized'))
     }
 
     const result = await prisma.$transaction(async (tx) => {

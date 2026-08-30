@@ -1,0 +1,411 @@
+'use client'
+
+import Link from 'next/link'
+import React, { useEffect, useMemo, useState } from 'react'
+import { jsPDF } from 'jspdf'
+import autoTable from 'jspdf-autotable'
+import { createPrivateRecord, updatePrivateLedgerVisibility } from '../actions/private-record'
+import { createCategory } from '../actions/category'
+import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
+import { compressImage, type ClientAttachment } from '@/lib/image'
+import PrivateRecordDetailModal from '../PrivateRecordDetailModal'
+
+type CategoryNode = {
+  id: string
+  name: string
+  type?: string
+  parentId?: string | null
+  children?: CategoryNode[]
+}
+
+type PrivateRecordItem = {
+  id: string
+  date: string | Date
+  type: string
+  amount: number
+  note?: string | null
+  category?: { name: string } | null
+  subCategory?: { name: string } | null
+  thirdCategory?: { name: string } | null
+  attachments?: Array<{
+    id: string
+    fileUrl: string
+    note?: string | null
+    createdAt: string | Date
+    uploader?: { roleName?: string | null } | null
+  }>
+}
+
+type Props = {
+  locale: Locale
+  initialDate: string
+  categories: CategoryNode[]
+  initialRecords: PrivateRecordItem[]
+  owner: { id: string; roleName: string; privateLedgerVisibility?: string | null }
+  balance: number
+  visibility: 'PRIVATE' | 'PUBLIC'
+  canManage: boolean
+  sharedUsers: Array<{ id: string; roleName: string }>
+}
+
+export default function PrivateLedgerClient({
+  locale,
+  initialDate,
+  categories,
+  initialRecords,
+  owner,
+  balance,
+  visibility,
+  canManage,
+  sharedUsers,
+}: Props) {
+  const t = createTranslator(locale)
+  const [selectedRecord, setSelectedRecord] = useState<PrivateRecordItem | null>(null)
+  const [type, setType] = useState<'INCOME' | 'EXPENSE'>('EXPENSE')
+  const [date, setDate] = useState(initialDate)
+  const [categoryId, setCategoryId] = useState('')
+  const [subCategoryId, setSubCategoryId] = useState('')
+  const [thirdCategoryId, setThirdCategoryId] = useState('')
+  const [amount, setAmount] = useState('')
+  const [note, setNote] = useState('')
+  const [attachment, setAttachment] = useState<ClientAttachment | null>(null)
+  const [attachmentNote, setAttachmentNote] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [currentVisibility, setCurrentVisibility] = useState<'PRIVATE' | 'PUBLIC'>(visibility)
+  const [isSavingVisibility, setIsSavingVisibility] = useState(false)
+  const [fontBase64, setFontBase64] = useState<string | null>(null)
+
+  const filteredCategories = useMemo(() => categories.filter((item) => item.type === type && !item.parentId), [categories, type])
+  const currentCategory = useMemo(() => filteredCategories.find((item) => item.id === categoryId), [filteredCategories, categoryId])
+  const currentSubCategory = useMemo(() => currentCategory?.children?.find((item) => item.id === subCategoryId), [currentCategory, subCategoryId])
+
+  useEffect(() => {
+    const loadFont = async () => {
+      try {
+        const res = await fetch('/fonts/NotoSansSC-Regular.ttf')
+        if (!res.ok) throw new Error('font not found')
+        const buffer = await res.arrayBuffer()
+        let binary = ''
+        const bytes = new Uint8Array(buffer)
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i])
+        }
+        setFontBase64(window.btoa(binary))
+      } catch (error) {
+        console.error('Private ledger font load failed:', error)
+      }
+    }
+    loadFont()
+  }, [])
+
+  const handleAddCategory = async (parentId?: string) => {
+    const name = window.prompt(t('createNewCategoryPrompt'))
+    if (!name?.trim()) return
+    const res = await createCategory(name.trim(), parentId, type)
+    if (res.success) {
+      window.location.reload()
+      return
+    }
+    alert(res.error)
+  }
+
+  const handleImageChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    try {
+      const compressed = await compressImage(file, 200)
+      setAttachment(compressed)
+    } catch {
+      alert(t('imageCompressionFailed'))
+    }
+  }
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!titleOrAmountReady()) return
+
+    setIsSubmitting(true)
+    const numericAmount = type === 'EXPENSE' ? -Math.abs(Number(amount)) : Math.abs(Number(amount))
+    const res = await createPrivateRecord({
+      type,
+      date: new Date(date),
+      note,
+      amount: numericAmount,
+      categoryId,
+      subCategoryId: subCategoryId || undefined,
+      thirdCategoryId: thirdCategoryId || undefined,
+      attachment: attachment ? { ...attachment, note: attachmentNote || undefined } : undefined,
+    })
+
+    if (res.success) {
+      window.location.reload()
+      return
+    }
+
+    alert(`${t('submitFailed')}: ${res.error}`)
+    setIsSubmitting(false)
+  }
+
+  const titleOrAmountReady = () => {
+    if (!categoryId || !amount || !date) {
+      alert(t('fillRequiredFields'))
+      return false
+    }
+    return true
+  }
+
+  const handleVisibilityChange = async (nextValue: 'PRIVATE' | 'PUBLIC') => {
+    setCurrentVisibility(nextValue)
+    setIsSavingVisibility(true)
+    const res = await updatePrivateLedgerVisibility(nextValue)
+    if (!res.success) {
+      alert(res.error)
+      setCurrentVisibility(visibility)
+    }
+    setIsSavingVisibility(false)
+  }
+
+  const createPdfDoc = () => {
+    const doc = new jsPDF()
+    if (fontBase64) {
+      doc.addFileToVFS('NotoSansSC-Regular.ttf', fontBase64)
+      doc.addFont('NotoSansSC-Regular.ttf', 'NotoSansSC', 'normal')
+      doc.addFont('NotoSansSC-Regular.ttf', 'NotoSansSC', 'bold')
+      doc.setFont('NotoSansSC')
+    }
+    return doc
+  }
+
+  const exportPrivateLedgerPdf = () => {
+    if (initialRecords.length === 0) {
+      alert(t('noDataToExport'))
+      return
+    }
+
+    const doc = createPdfDoc()
+    const totalIncome = initialRecords.filter((item) => item.type === 'INCOME').reduce((sum, item) => sum + Math.abs(item.amount), 0)
+    const totalExpense = initialRecords.filter((item) => item.type === 'EXPENSE').reduce((sum, item) => sum + Math.abs(item.amount), 0)
+
+    if (fontBase64) doc.setFont('NotoSansSC', 'bold')
+    doc.setFontSize(18)
+    doc.text(t('privateLedgerPage'), 105, 18, { align: 'center' })
+
+    if (fontBase64) doc.setFont('NotoSansSC', 'normal')
+    doc.setFontSize(11)
+    doc.text(`${t('privateLedgerOwner')}: ${owner.roleName}`, 14, 30)
+    doc.text(`${t('totalIncome')}: ${totalIncome.toFixed(2)}`, 14, 38)
+    doc.text(`${t('totalExpense')}: ${totalExpense.toFixed(2)}`, 80, 38)
+    doc.text(`${t('balance')}: ${balance.toFixed(2)}`, 150, 38)
+
+    autoTable(doc, {
+      startY: 46,
+      head: [[t('date'), t('type'), t('category'), t('amount'), t('note')]],
+      body: initialRecords.map((item) => [
+        new Date(item.date).toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK'),
+        item.type === 'INCOME' ? t('income') : t('expense'),
+        [item.category?.name, item.subCategory?.name, item.thirdCategory?.name].filter(Boolean).join(' / ') || '-',
+        formatCurrency(locale, item.amount),
+        item.note || '-',
+      ]),
+      styles: { font: fontBase64 ? 'NotoSansSC' : 'helvetica' },
+      headStyles: { fillColor: [66, 139, 202], font: fontBase64 ? 'NotoSansSC' : 'helvetica' },
+    })
+
+    doc.save(locale === 'en' ? 'private-ledger.pdf' : '私帳報表.pdf')
+  }
+
+  const inputClass = 'w-full rounded-xl border-transparent bg-white p-3 text-gray-900 shadow-sm outline-none transition-all placeholder-gray-400 focus:border-[#007AFF] focus:bg-white focus:ring-2 focus:ring-[#007AFF]/30'
+
+  return (
+    <div className="space-y-4 pt-4 sm:space-y-6 sm:pt-6">
+      <section className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">{canManage ? t('myPrivateLedger') : `${owner.roleName} - ${t('privateLedger')}`}</h2>
+            <p className="mt-2 text-sm text-gray-500">{t('privateLedgerPageHint')}</p>
+          </div>
+          <button onClick={exportPrivateLedgerPdf} className="rounded-xl bg-[#007AFF] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#0066CC]">
+            {t('exportPrivateLedgerPdf')}
+          </button>
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="rounded-2xl bg-[#F2F2F7] p-4">
+            <div className="text-xs font-semibold uppercase tracking-wider text-gray-500">{t('privateLedgerOwner')}</div>
+            <div className="mt-2 text-lg font-semibold text-gray-900">{owner.roleName}</div>
+          </div>
+          <div className="rounded-2xl bg-[#F2F2F7] p-4">
+            <div className="text-xs font-semibold uppercase tracking-wider text-gray-500">{t('balance')}</div>
+            <div className="mt-2 text-lg font-semibold text-gray-900">{formatCurrency(locale, balance)}</div>
+          </div>
+          <div className="rounded-2xl bg-[#F2F2F7] p-4">
+            <div className="text-xs font-semibold uppercase tracking-wider text-gray-500">{t('privateLedgerVisibility')}</div>
+            {canManage ? (
+              <select
+                value={currentVisibility}
+                onChange={(e) => handleVisibilityChange(e.target.value as 'PRIVATE' | 'PUBLIC')}
+                disabled={isSavingVisibility}
+                className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none"
+              >
+                <option value="PRIVATE">{t('privateLedgerPrivate')}</option>
+                <option value="PUBLIC">{t('privateLedgerPublic')}</option>
+              </select>
+            ) : (
+              <div className="mt-2 text-sm font-semibold text-gray-900">{currentVisibility === 'PUBLIC' ? t('privateLedgerPublic') : t('privateLedgerPrivate')}</div>
+            )}
+          </div>
+        </div>
+        {canManage && <p className="mt-3 text-xs text-gray-400">{t('privateLedgerVisibilityHint')}</p>}
+      </section>
+
+      {canManage && (
+        <>
+          <section className={`rounded-2xl border p-4 shadow-sm sm:rounded-3xl sm:p-6 ${type === 'INCOME' ? 'border-[#007AFF]/20 bg-[#F2F8FF]' : 'border-[#FF3B30]/20 bg-[#FFF2F2]'}`}>
+            <div className="mb-5 flex w-fit space-x-2 rounded-xl bg-gray-200/50 p-1 sm:space-x-3 sm:mb-6">
+              <button type="button" className={`rounded-lg px-5 py-2 text-sm font-semibold transition-all shadow-sm ${type === 'EXPENSE' ? 'bg-white text-[#FF3B30]' : 'bg-transparent text-gray-600 shadow-none'}`} onClick={() => { setType('EXPENSE'); setCategoryId(''); setSubCategoryId(''); setThirdCategoryId('') }}>
+                {t('expense')}
+              </button>
+              <button type="button" className={`rounded-lg px-5 py-2 text-sm font-semibold transition-all shadow-sm ${type === 'INCOME' ? 'bg-white text-[#007AFF]' : 'bg-transparent text-gray-600 shadow-none'}`} onClick={() => { setType('INCOME'); setCategoryId(''); setSubCategoryId(''); setThirdCategoryId('') }}>
+                {t('income')}
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('date')}</label>
+                  <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClass} />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('amount')}</label>
+                  <div className="flex rounded-xl bg-white shadow-sm">
+                    <div className="shrink-0 rounded-l-xl bg-transparent py-3 pl-3 pr-4 text-sm font-medium text-gray-900 sm:text-base">HKD$</div>
+                    <div className="my-2 w-px shrink-0 bg-gray-100" />
+                    <input type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" className="w-full min-w-0 flex-1 rounded-r-xl border-transparent bg-transparent px-2 py-3 text-sm font-semibold text-gray-900 outline-none sm:px-3 sm:text-base" />
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1.5 flex justify-between text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <span>{t('mainCategory')}</span>
+                    <button type="button" onClick={() => handleAddCategory()} className="text-xs font-semibold text-[#007AFF] hover:opacity-80">{t('addMainCategory')}</button>
+                  </label>
+                  <select value={categoryId} onChange={(e) => { setCategoryId(e.target.value); setSubCategoryId(''); setThirdCategoryId('') }} className={inputClass}>
+                    <option value="">{t('selectCategory')}</option>
+                    {filteredCategories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1.5 flex justify-between text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <span>{t('subCategory')}</span>
+                    <button type="button" onClick={() => categoryId ? handleAddCategory(categoryId) : alert(t('chooseMainCategoryFirst'))} className={`${categoryId ? 'text-[#007AFF]' : 'text-gray-400'} text-xs font-semibold hover:opacity-80`}>{t('addSubCategory')}</button>
+                  </label>
+                  <select value={subCategoryId} onChange={(e) => { setSubCategoryId(e.target.value); setThirdCategoryId('') }} className={inputClass} disabled={!currentCategory?.children?.length}>
+                    <option value="">{!currentCategory ? t('selectMainCategoryFirst') : t('selectSubCategory')}</option>
+                    {currentCategory?.children?.map((sub) => <option key={sub.id} value={sub.id}>{sub.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1.5 flex justify-between text-xs font-semibold uppercase tracking-wider text-gray-500">
+                    <span>{t('grandCategory')}</span>
+                    <button type="button" onClick={() => subCategoryId ? handleAddCategory(subCategoryId) : alert(t('chooseSubCategoryFirst'))} className={`${subCategoryId ? 'text-[#007AFF]' : 'text-gray-400'} text-xs font-semibold hover:opacity-80`}>{t('addGrandCategory')}</button>
+                  </label>
+                  <select value={thirdCategoryId} onChange={(e) => setThirdCategoryId(e.target.value)} className={inputClass} disabled={!currentSubCategory?.children?.length}>
+                    <option value="">{!currentSubCategory ? t('selectSubCategoryFirst') : t('selectGrandCategory')}</option>
+                    {currentSubCategory?.children?.map((third) => <option key={third.id} value={third.id}>{third.name}</option>)}
+                  </select>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('noteOptional')}</label>
+                  <input value={note} onChange={(e) => setNote(e.target.value)} className={inputClass} placeholder={t('notePlaceholder')} />
+                </div>
+                <div className="space-y-3 rounded-2xl border border-dashed border-gray-300 bg-white/50 p-4 md:col-span-2">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('attachment')}</label>
+                  <input type="file" accept="image/*" onChange={handleImageChange} className="w-full text-sm text-gray-600 file:mr-4 file:rounded-xl file:border-0 file:bg-[#007AFF]/10 file:px-5 file:py-2.5 file:text-sm file:font-semibold file:text-[#007AFF]" />
+                  <input value={attachmentNote} onChange={(e) => setAttachmentNote(e.target.value)} placeholder={t('attachmentNotePlaceholder')} className={inputClass} />
+                </div>
+              </div>
+
+              <button type="submit" disabled={isSubmitting} className={`mt-6 w-full rounded-xl py-4 font-semibold text-white shadow-sm transition-all ${isSubmitting ? 'cursor-not-allowed bg-gray-300 text-gray-500 shadow-none' : type === 'INCOME' ? 'bg-[#007AFF] hover:bg-[#0066CC]' : 'bg-[#FF3B30] hover:bg-[#CC2E26]'}`}>
+                {isSubmitting ? t('submitting') : t('submitRecord')}
+              </button>
+            </form>
+          </section>
+
+          <section className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
+            <h3 className="text-lg font-semibold text-gray-800">{t('sharedPrivateLedgers')}</h3>
+            <div className="mt-4 space-y-3">
+              {sharedUsers.length === 0 ? (
+                <div className="text-sm text-gray-400">{t('noPublicPrivateLedgers')}</div>
+              ) : (
+                sharedUsers.map((user) => (
+                  <div key={user.id} className="flex items-center justify-between rounded-2xl border border-gray-100 p-4">
+                    <div className="font-medium text-gray-900">{user.roleName}</div>
+                    <Link href={`/private-ledger/${user.id}`} className="rounded-lg bg-[#007AFF]/10 px-3 py-1.5 text-sm font-semibold text-[#007AFF]">
+                      {t('viewLedger')}
+                    </Link>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+        </>
+      )}
+
+      <section className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm sm:rounded-3xl">
+        <div className="border-b border-gray-100 p-4 pb-3 sm:p-6 sm:pb-4">
+          <h2 className="text-lg font-semibold text-gray-800">{t('recentRecords')}</h2>
+        </div>
+        <div className="hidden overflow-x-auto md:block">
+          <table className="w-full text-left text-sm text-gray-700">
+            <thead className="bg-[#F2F2F7]/50 text-xs uppercase tracking-wider text-gray-500">
+              <tr>
+                <th className="px-6 py-3 font-medium">{t('date')}</th>
+                <th className="px-6 py-3 font-medium">{t('type')}</th>
+                <th className="px-6 py-3 font-medium">{t('category')}</th>
+                <th className="px-6 py-3 font-medium">{t('amount')}</th>
+                <th className="px-6 py-3 font-medium">{t('detail')}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {initialRecords.length === 0 ? (
+                <tr><td colSpan={5} className="p-8 text-center font-medium text-gray-400">{t('noPrivateRecords')}</td></tr>
+              ) : (
+                initialRecords.map((record) => (
+                  <tr key={record.id} className="transition-colors hover:bg-gray-50/80">
+                    <td className="px-6 py-4">{new Date(record.date).toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK')}</td>
+                    <td className="px-6 py-4">{record.type === 'INCOME' ? t('income') : t('expense')}</td>
+                    <td className="px-6 py-4">{[record.category?.name, record.subCategory?.name, record.thirdCategory?.name].filter(Boolean).join(' / ') || '-'}</td>
+                    <td className={`px-6 py-4 font-bold ${record.amount > 0 ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>{formatCurrency(locale, record.amount)}</td>
+                    <td className="px-6 py-4"><button onClick={() => setSelectedRecord(record)} className="text-sm font-medium text-[#007AFF] hover:underline">{t('detail')}</button></td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="divide-y divide-gray-100 md:hidden">
+          {initialRecords.length === 0 ? (
+            <div className="p-8 text-center font-medium text-gray-400">{t('noPrivateRecords')}</div>
+          ) : (
+            initialRecords.map((record) => (
+              <div key={record.id} className="space-y-2 p-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold text-gray-900">{new Date(record.date).toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK')}</div>
+                  <div className={`text-sm font-bold ${record.amount > 0 ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>{formatCurrency(locale, record.amount)}</div>
+                </div>
+                <div className="text-sm text-gray-600">{[record.category?.name, record.subCategory?.name, record.thirdCategory?.name].filter(Boolean).join(' / ') || '-'}</div>
+                <div className="flex items-center justify-between border-t border-gray-50 pt-2">
+                  <span className="text-xs text-gray-400">{record.type === 'INCOME' ? t('income') : t('expense')}</span>
+                  <button onClick={() => setSelectedRecord(record)} className="rounded bg-[#007AFF]/10 px-3 py-1 text-xs font-medium text-[#007AFF]">{t('detail')}</button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+
+      {selectedRecord && (
+        <PrivateRecordDetailModal record={selectedRecord} locale={locale} canManage={canManage} onClose={() => setSelectedRecord(null)} />
+      )}
+    </div>
+  )
+}
