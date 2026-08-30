@@ -3,27 +3,32 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { LOCALE_COOKIE, createTranslator, type Locale } from '@/lib/i18n'
+import { hasPublicLedgerAccess } from '@/lib/access'
 
 type NavSession = {
-  isAdmin?: boolean
+  userId: string
+  roleName: string
+  isAdmin: boolean
+  publicLedgerRole?: string | null
 }
 
 export default function TopNav({ session, pendingCount = 0, locale }: { session: NavSession | null, pendingCount?: number, locale: Locale }) {
   const pathname = usePathname()
   const t = createTranslator(locale)
   
-  const navItems = [
-    { name: t('home'), href: '/' },
-  ]
+  const navItems: Array<{ name: string; href: string }> = []
+
+  if (hasPublicLedgerAccess(session)) {
+    navItems.push({ name: t('publicLedger'), href: '/' })
+  }
+
+  navItems.push({ name: t('privateLedger'), href: '/private-ledger' })
+  navItems.push({ name: t('activities'), href: '/activities' })
   
   if (session?.isAdmin) {
     navItems.push({ name: t('review'), href: '/review' })
-  }
-  
-  navItems.push({ name: t('contracts'), href: '/contracts' })
-  navItems.push({ name: t('report'), href: '/report' })
-  
-  if (session?.isAdmin) {
+    navItems.push({ name: t('contracts'), href: '/contracts' })
+    navItems.push({ name: t('report'), href: '/report' })
     navItems.push({ name: t('admin'), href: '/admin' })
   }
 

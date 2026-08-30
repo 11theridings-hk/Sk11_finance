@@ -5,6 +5,7 @@ import { getCapitalPools } from '../actions/pool'
 import { getContracts } from '../actions/contract'
 import ContractsClient from './ContractsClient'
 import { getCurrentLocale } from '@/lib/locale'
+import { getDefaultHomePath } from '@/lib/access'
 
 export const metadata = {
   title: 'Contracts',
@@ -14,6 +15,9 @@ export default async function ContractsPage() {
   const session = await getSession()
   if (!session) {
     redirect('/login')
+  }
+  if (!session.isAdmin) {
+    redirect(getDefaultHomePath(session))
   }
 
   const locale = await getCurrentLocale()

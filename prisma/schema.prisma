@@ -11,20 +11,24 @@ datasource db {
 }
 
 model User {
-  id          String   @id @default(uuid())
-  password    String   @unique // 明文密码作为登录凭证
-  roleName    String // 角色名称
-  isAdmin     Boolean  @default(false) // 是否为管理员
-  poolEnabled Boolean  @default(false) // 是否启用资金池
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                     String   @id @default(uuid())
+  password               String   @unique // 明文密码作为登录凭证
+  roleName               String // 角色名称
+  isAdmin                Boolean  @default(false) // 是否为管理员
+  poolEnabled            Boolean  @default(false) // 是否启用资金池
+  publicLedgerRole       String   @default("NONE") // "NONE" | "MEMBER"
+  privateLedgerVisibility String  @default("PRIVATE") // "PRIVATE" | "PUBLIC"
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   // 关系
-  records      Record[]      @relation("UserRecords")
-  attachments  Attachment[]  @relation("UserAttachments")
-  capitalPools CapitalPool[] @relation("UserCapitalPools")
-  contracts    Contract[]    @relation("UserContracts")
-  memos        Memo[]        @relation("UserMemos")
+  records        Record[]        @relation("UserRecords")
+  privateRecords PrivateRecord[] @relation("UserPrivateRecords")
+  activities     Activity[]      @relation("UserActivities")
+  attachments    Attachment[]    @relation("UserAttachments")
+  capitalPools   CapitalPool[]   @relation("UserCapitalPools")
+  contracts      Contract[]      @relation("UserContracts")
+  memos          Memo[]          @relation("UserMemos")
 }
 
 model Category {
@@ -41,6 +45,9 @@ model Category {
   records        Record[]     @relation("CategoryRecords")
   subRecords     Record[]     @relation("SubCategoryRecords")
   thirdRecords   Record[]     @relation("ThirdCategoryRecords")
+  privateRecords PrivateRecord[] @relation("CategoryPrivateRecords")
+  subPrivateRecords PrivateRecord[] @relation("SubCategoryPrivateRecords")
+  thirdPrivateRecords PrivateRecord[] @relation("ThirdCategoryPrivateRecords")
   contracts      Contract[]   @relation("CategoryContracts")
   subContracts   Contract[]   @relation("SubCategoryContracts")
   thirdContracts Contract[]   @relation("ThirdCategoryContracts")
@@ -96,6 +103,30 @@ model Record {
   memos          Memo[]       @relation("RecordMemos")
 }
 
+model PrivateRecord {
+  id            String   @id @default(uuid())
+  type          String // "INCOME" | "EXPENSE"
+  date          DateTime
+  note          String?
+  amount        Float
+  attachmentUrl String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // 外键
+  userId          String
+  categoryId      String
+  subCategoryId   String?
+  thirdCategoryId String?
+
+  // 关系
+  user          User       @relation("UserPrivateRecords", fields: [userId], references: [id])
+  category      Category   @relation("CategoryPrivateRecords", fields: [categoryId], references: [id])
+  subCategory   Category?  @relation("SubCategoryPrivateRecords", fields: [subCategoryId], references: [id])
+  thirdCategory Category?  @relation("ThirdCategoryPrivateRecords", fields: [thirdCategoryId], references: [id])
+  attachments   Attachment[] @relation("PrivateRecordAttachments")
+}
+
 model Contract {
   id            String   @id @default(uuid())
   title         String
@@ -124,6 +155,24 @@ model Contract {
   memos         Memo[]       @relation("ContractMemos")
 }
 
+model Activity {
+  id           String   @id @default(uuid())
+  title        String
+  note         String?
+  eventDate    DateTime
+  reminderDays Int      @default(15)
+  visibility   String   @default("PUBLIC") // "PUBLIC" | "PRIVATE"
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // 外键
+  userId String
+
+  // 关系
+  user        User         @relation("UserActivities", fields: [userId], references: [id])
+  attachments Attachment[] @relation("ActivityAttachments")
+}
+
 model Attachment {
   id        String   @id @default(uuid())
   fileUrl   String // 文件路径
@@ -136,13 +185,17 @@ model Attachment {
   uploaderId String
   categoryId String?
   recordId   String?
+  privateRecordId String?
   contractId String?
+  activityId String?
 
   // 关系
-  uploader User      @relation("UserAttachments", fields: [uploaderId], references: [id])
-  category Category? @relation("CategoryAttachments", fields: [categoryId], references: [id])
-  record   Record?   @relation("RecordAttachments", fields: [recordId], references: [id])
-  contract Contract? @relation("ContractAttachments", fields: [contractId], references: [id])
+  uploader      User          @relation("UserAttachments", fields: [uploaderId], references: [id])
+  category      Category?     @relation("CategoryAttachments", fields: [categoryId], references: [id])
+  record        Record?       @relation("RecordAttachments", fields: [recordId], references: [id])
+  privateRecord PrivateRecord? @relation("PrivateRecordAttachments", fields: [privateRecordId], references: [id])
+  contract      Contract?     @relation("ContractAttachments", fields: [contractId], references: [id])
+  activity      Activity?     @relation("ActivityAttachments", fields: [activityId], references: [id])
 }
 
 model Memo {

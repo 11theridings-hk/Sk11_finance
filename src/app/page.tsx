@@ -7,11 +7,15 @@ import { getCategories } from './actions/category'
 import { getCapitalPools } from './actions/pool'
 import HomePageClient from './HomePageClient'
 import { getCurrentLocale } from '@/lib/locale'
+import { getDefaultHomePath, hasPublicLedgerAccess } from '@/lib/access'
 
 export default async function HomePage() {
   const session = await getSession()
   if (!session) {
     redirect('/login')
+  }
+  if (!hasPublicLedgerAccess(session)) {
+    redirect(getDefaultHomePath(session))
   }
   const locale = await getCurrentLocale()
   const initialDate = new Date().toISOString().split('T')[0]
