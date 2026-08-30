@@ -61,16 +61,16 @@ export default function PrivateRecordDetailModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 p-5">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+      <div className="flex h-[100dvh] w-full max-w-3xl flex-col overflow-hidden bg-white shadow-xl sm:h-auto sm:max-h-[90vh] sm:rounded-3xl">
+        <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 p-4 sm:p-5">
           <h3 className="text-lg font-bold text-gray-900">{t('privateLedgerDetails')}</h3>
           <button onClick={onClose} className="rounded-full bg-gray-200 p-2 text-gray-600 transition-colors hover:bg-gray-300">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
           </button>
         </div>
 
-        <div className="space-y-6 overflow-y-auto p-6">
+        <div className="space-y-6 overflow-y-auto p-4 sm:p-6">
           <div className="grid grid-cols-1 gap-4 text-sm md:grid-cols-2">
             <div>
               <div className="mb-1 text-gray-500">{t('date')}</div>
@@ -129,15 +129,15 @@ export default function PrivateRecordDetailModal({
           </div>
         </div>
 
-        <div className="flex justify-between gap-3 border-t border-gray-100 bg-white p-5">
+        <div className="mobile-safe-sheet flex flex-col-reverse gap-3 border-t border-gray-100 bg-white p-4 sm:flex-row sm:justify-between sm:p-5">
+          <button onClick={onClose} className="w-full rounded-xl bg-gray-200 px-5 py-3 font-semibold text-gray-700 sm:w-auto">
+            {t('close')}
+          </button>
           {canManage ? (
             <button onClick={handleDelete} disabled={loading} className="rounded-xl bg-[#FF3B30] px-5 py-3 font-semibold text-white disabled:opacity-50">
               {t('deleteRecord')}
             </button>
           ) : <div />}
-          <button onClick={onClose} className="rounded-xl bg-gray-200 px-5 py-3 font-semibold text-gray-700">
-            {t('close')}
-          </button>
         </div>
       </div>
     </div>

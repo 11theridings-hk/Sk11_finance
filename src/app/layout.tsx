@@ -38,11 +38,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     >
       <body className="min-h-full flex flex-col bg-[#F2F2F7]">
         {session && (
-          <div className="max-w-4xl mx-auto w-full pt-2 px-4 sm:px-0">
+          <div className="max-w-4xl mx-auto w-full px-4 sm:px-0 sm:pt-2">
             <TopNav session={session} pendingCount={pendingCount} locale={locale} />
           </div>
         )}
-        <div className="flex-1 max-w-4xl mx-auto w-full px-4 sm:px-0 pb-10">
+        <div className="flex-1 max-w-4xl mx-auto w-full px-4 pb-10 mobile-safe-pb sm:px-0 sm:pb-10">
           {children}
         </div>
       </body>

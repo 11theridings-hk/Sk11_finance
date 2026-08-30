@@ -72,16 +72,16 @@ export default function RecordDetailModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-      <div className="bg-white rounded-3xl w-full max-w-3xl max-h-[90vh] overflow-hidden shadow-xl flex flex-col">
-        <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-gray-50">
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end justify-center p-0 backdrop-blur-sm sm:items-center sm:p-4">
+      <div className="bg-white w-full h-[100dvh] sm:h-auto sm:max-h-[90vh] max-w-3xl overflow-hidden shadow-xl flex flex-col sm:rounded-3xl">
+        <div className="p-4 sm:p-5 border-b border-gray-100 flex items-center justify-between bg-gray-50">
           <h3 className="text-lg font-bold text-gray-900">{t('recordDetails')}</h3>
           <button onClick={onClose} className="p-2 bg-gray-200 hover:bg-gray-300 rounded-full text-gray-600 transition-colors">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
           </button>
         </div>
 
-        <div className="overflow-y-auto p-6 space-y-6">
+        <div className="overflow-y-auto p-4 sm:p-6 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
             <div>
               <div className="text-gray-500 mb-1">{t('date')}</div>
@@ -167,7 +167,7 @@ export default function RecordDetailModal({
                 ))
               )}
             </div>
-            <div className="flex gap-3 pt-3 border-t border-gray-100">
+            <div className="flex flex-col gap-3 pt-3 border-t border-gray-100 sm:flex-row">
               <input value={memoContent} onChange={(e) => setMemoContent(e.target.value)} placeholder={t('memoPlaceholder')} className="flex-1 rounded-xl bg-[#F2F2F7] px-3 py-3 text-sm text-gray-900 outline-none" />
               <button onClick={handleAddMemo} disabled={loading || !memoContent.trim()} className="px-5 py-3 bg-[#34C759] text-white rounded-xl font-semibold disabled:opacity-50">
                 {t('addMemo')}
@@ -176,12 +176,12 @@ export default function RecordDetailModal({
           </div>
         </div>
 
-        <div className="p-5 border-t border-gray-100 bg-white flex justify-between gap-3">
+        <div className="mobile-safe-sheet p-4 sm:p-5 border-t border-gray-100 bg-white flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
+          <button onClick={onClose} className="w-full px-5 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold sm:w-auto">
+            {t('close')}
+          </button>
           <button onClick={handleDelete} disabled={loading} className="px-5 py-3 bg-[#FF3B30] text-white rounded-xl font-semibold disabled:opacity-50">
             {t('deleteRecord')}
-          </button>
-          <button onClick={onClose} className="px-5 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold">
-            {t('close')}
           </button>
         </div>
       </div>
