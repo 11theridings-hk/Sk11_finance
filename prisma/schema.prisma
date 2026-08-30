@@ -108,6 +108,7 @@ model PrivateRecord {
   type          String // "INCOME" | "EXPENSE"
   date          DateTime
   note          String?
+  customCategory String?
   amount        Float
   attachmentUrl String?
   createdAt     DateTime @default(now())

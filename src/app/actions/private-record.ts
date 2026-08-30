@@ -17,8 +17,9 @@ export type CreatePrivateRecordInput = {
   type: 'INCOME' | 'EXPENSE'
   date: Date
   note?: string
+  customCategory?: string
   amount: number
-  categoryId: string
+  categoryId?: string
   subCategoryId?: string
   thirdCategoryId?: string
   attachment?: AttachmentPayload
@@ -30,6 +31,25 @@ function getDeepestCategoryId(data: {
   thirdCategoryId?: string | null
 }) {
   return data.thirdCategoryId || data.subCategoryId || data.categoryId
+}
+
+async function ensureUncategorizedCategory(
+  tx: Pick<typeof prisma, 'category'>,
+  type: 'INCOME' | 'EXPENSE'
+) {
+  const existing = await tx.category.findFirst({
+    where: { name: '未分類', parentId: null, type },
+    select: { id: true },
+  })
+
+  if (existing) {
+    return existing
+  }
+
+  return tx.category.create({
+    data: { name: '未分類', type },
+    select: { id: true },
+  })
 }
 
 async function getPrivateLedgerOwnerOrThrow(ownerId: string) {
@@ -191,17 +211,28 @@ export async function createPrivateRecord(data: CreatePrivateRecordInput) {
       throw new Error(t('notLoggedIn'))
     }
 
+    const customCategory = data.customCategory?.trim()
+    if (!data.categoryId && !customCategory) {
+      throw new Error(t('fillRequiredFields'))
+    }
+
     const record = await prisma.$transaction(async (tx) => {
+      const uncategorized = await ensureUncategorizedCategory(tx, data.type)
+      const resolvedCategoryId = data.categoryId || uncategorized.id
+      const resolvedSubCategoryId = data.categoryId ? data.subCategoryId : undefined
+      const resolvedThirdCategoryId = data.categoryId ? data.thirdCategoryId : undefined
+
       const created = await tx.privateRecord.create({
         data: {
           type: data.type,
           date: data.date,
           note: data.note,
+          customCategory: customCategory || null,
           amount: data.amount,
           attachmentUrl: data.attachment?.url,
-          categoryId: data.categoryId,
-          subCategoryId: data.subCategoryId,
-          thirdCategoryId: data.thirdCategoryId,
+          categoryId: resolvedCategoryId,
+          subCategoryId: resolvedSubCategoryId,
+          thirdCategoryId: resolvedThirdCategoryId,
           userId: session.userId,
         },
       })
@@ -213,7 +244,11 @@ export async function createPrivateRecord(data: CreatePrivateRecordInput) {
             size: data.attachment.size,
             note: data.attachment.note,
             uploaderId: session.userId,
-            categoryId: getDeepestCategoryId(data),
+            categoryId: getDeepestCategoryId({
+              categoryId: resolvedCategoryId,
+              subCategoryId: resolvedSubCategoryId,
+              thirdCategoryId: resolvedThirdCategoryId,
+            }),
             privateRecordId: created.id,
           },
         })

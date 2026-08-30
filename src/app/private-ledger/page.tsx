@@ -1,6 +1,5 @@
 import { redirect } from 'next/navigation'
 import { getSession } from '../actions/auth'
-import { getCategories } from '../actions/category'
 import { getCurrentLocale } from '@/lib/locale'
 import {
   getPrivateLedgerOwner,
@@ -23,8 +22,7 @@ export default async function PrivateLedgerPage() {
   const locale = await getCurrentLocale()
   const initialDate = new Date().toISOString().split('T')[0]
 
-  const [categories, owner, summary, records, sharedUsers] = await Promise.all([
-    getCategories(),
+  const [owner, summary, records, sharedUsers] = await Promise.all([
     getPrivateLedgerOwner(),
     getPrivateLedgerSummary(),
     getPrivateRecords(),
@@ -40,7 +38,6 @@ export default async function PrivateLedgerPage() {
       <PrivateLedgerClient
         locale={locale}
         initialDate={initialDate}
-        categories={categories}
         initialRecords={records}
         owner={owner}
         balance={summary.balance}

@@ -39,7 +39,6 @@ export default async function SharedPrivateLedgerPage({
       <PrivateLedgerClient
         locale={locale}
         initialDate={new Date().toISOString().split('T')[0]}
-        categories={[]}
         initialRecords={records}
         owner={owner}
         balance={summary.balance}
