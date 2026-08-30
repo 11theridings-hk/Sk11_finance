@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { getSession } from "./actions/auth";
@@ -19,8 +19,18 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "FINNE18",
-  description: "Finance Management System",
+  title: "SK11 Finance",
+  description: "SK11 finance management system",
+  applicationName: "SK11 Finance",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "SK11",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0B1736",
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
