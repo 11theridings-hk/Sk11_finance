@@ -139,7 +139,8 @@ export default function ActivitiesClient({ locale, currentUserId, isAdmin, initi
       </section>
 
       <section className="rounded-2xl border border-gray-100 bg-[#F2F8FF] p-4 shadow-sm sm:rounded-3xl sm:p-6">
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <div className="mb-3 text-sm font-medium text-gray-500 sm:hidden">{t('createActivity')}</div>
+        <form id="activity-form" onSubmit={handleSubmit} className="space-y-5 pb-24 md:pb-0">
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
             <div className="md:col-span-2">
               <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('activityTitle')}</label>
@@ -170,11 +171,24 @@ export default function ActivitiesClient({ locale, currentUserId, isAdmin, initi
               <input value={attachmentNote} onChange={(e) => setAttachmentNote(e.target.value)} placeholder={t('attachmentNotePlaceholder')} className={inputClass} />
             </div>
           </div>
-          <button type="submit" disabled={isSubmitting} className={`mt-6 w-full rounded-xl py-4 font-semibold text-white shadow-sm transition-all ${isSubmitting ? 'cursor-not-allowed bg-gray-300 text-gray-500 shadow-none' : 'bg-[#007AFF] hover:bg-[#0066CC]'}`}>
+          <button type="submit" disabled={isSubmitting} className={`mt-6 hidden w-full rounded-xl py-4 font-semibold text-white shadow-sm transition-all md:block ${isSubmitting ? 'cursor-not-allowed bg-gray-300 text-gray-500 shadow-none' : 'bg-[#007AFF] hover:bg-[#0066CC]'}`}>
             {isSubmitting ? t('submitting') : t('createActivity')}
           </button>
         </form>
       </section>
+
+      <div className="mobile-safe-action fixed inset-x-0 z-20 px-4 md:hidden">
+        <div className="mx-auto max-w-4xl rounded-2xl border border-gray-200 bg-white/95 p-3 shadow-lg backdrop-blur">
+          <button
+            type="submit"
+            form="activity-form"
+            disabled={isSubmitting}
+            className={`w-full rounded-xl py-4 text-sm font-semibold text-white transition-all ${isSubmitting ? 'cursor-not-allowed bg-gray-300 text-gray-500' : 'bg-[#007AFF] hover:bg-[#0066CC]'}`}
+          >
+            {isSubmitting ? t('submitting') : t('createActivity')}
+          </button>
+        </div>
+      </div>
 
       <section className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm sm:rounded-3xl">
         <div className="border-b border-gray-100 p-4 pb-3 sm:p-6 sm:pb-4">

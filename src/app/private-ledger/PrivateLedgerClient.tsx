@@ -224,11 +224,13 @@ export default function PrivateLedgerClient({
             <h2 className="text-xl font-semibold text-gray-900">{canManage ? t('myPrivateLedger') : `${owner.roleName} - ${t('privateLedger')}`}</h2>
             <p className="mt-2 text-sm text-gray-500">{t('privateLedgerPageHint')}</p>
           </div>
-          <button onClick={exportPrivateLedgerPdf} className="rounded-xl bg-[#007AFF] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#0066CC]">
-            {t('exportPrivateLedgerPdf')}
-          </button>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button onClick={exportPrivateLedgerPdf} className="rounded-xl bg-[#007AFF] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#0066CC]">
+              {t('exportPrivateLedgerPdf')}
+            </button>
+          </div>
         </div>
-        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div className="rounded-2xl bg-[#F2F2F7] p-4">
             <div className="text-xs font-semibold uppercase tracking-wider text-gray-500">{t('privateLedgerOwner')}</div>
             <div className="mt-2 text-lg font-semibold text-gray-900">{owner.roleName}</div>
@@ -260,7 +262,8 @@ export default function PrivateLedgerClient({
       {canManage && (
         <>
           <section className={`rounded-2xl border p-4 shadow-sm sm:rounded-3xl sm:p-6 ${type === 'INCOME' ? 'border-[#007AFF]/20 bg-[#F2F8FF]' : 'border-[#FF3B30]/20 bg-[#FFF2F2]'}`}>
-            <div className="mb-5 flex w-fit space-x-2 rounded-xl bg-gray-200/50 p-1 sm:space-x-3 sm:mb-6">
+            <div className="mb-3 text-sm font-medium text-gray-500 sm:hidden">{t('submitRecord')}</div>
+            <div className="mb-5 flex w-full space-x-2 rounded-xl bg-gray-200/50 p-1 sm:mb-6 sm:w-fit sm:space-x-3">
               <button type="button" className={`rounded-lg px-5 py-2 text-sm font-semibold transition-all shadow-sm ${type === 'EXPENSE' ? 'bg-white text-[#FF3B30]' : 'bg-transparent text-gray-600 shadow-none'}`} onClick={() => { setType('EXPENSE'); setCategoryId(''); setSubCategoryId(''); setThirdCategoryId('') }}>
                 {t('expense')}
               </button>
@@ -269,7 +272,7 @@ export default function PrivateLedgerClient({
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-5">
+            <form id="private-ledger-form" onSubmit={handleSubmit} className="space-y-5 pb-24 md:pb-0">
               <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
                 <div>
                   <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('date')}</label>
@@ -324,11 +327,24 @@ export default function PrivateLedgerClient({
                 </div>
               </div>
 
-              <button type="submit" disabled={isSubmitting} className={`mt-6 w-full rounded-xl py-4 font-semibold text-white shadow-sm transition-all ${isSubmitting ? 'cursor-not-allowed bg-gray-300 text-gray-500 shadow-none' : type === 'INCOME' ? 'bg-[#007AFF] hover:bg-[#0066CC]' : 'bg-[#FF3B30] hover:bg-[#CC2E26]'}`}>
+              <button type="submit" disabled={isSubmitting} className={`mt-6 hidden w-full rounded-xl py-4 font-semibold text-white shadow-sm transition-all md:block ${isSubmitting ? 'cursor-not-allowed bg-gray-300 text-gray-500 shadow-none' : type === 'INCOME' ? 'bg-[#007AFF] hover:bg-[#0066CC]' : 'bg-[#FF3B30] hover:bg-[#CC2E26]'}`}>
                 {isSubmitting ? t('submitting') : t('submitRecord')}
               </button>
             </form>
           </section>
+
+          <div className="mobile-safe-action fixed inset-x-0 z-20 px-4 md:hidden">
+            <div className="mx-auto max-w-4xl rounded-2xl border border-gray-200 bg-white/95 p-3 shadow-lg backdrop-blur">
+              <button
+                type="submit"
+                form="private-ledger-form"
+                disabled={isSubmitting}
+                className={`w-full rounded-xl py-4 text-sm font-semibold text-white transition-all ${isSubmitting ? 'cursor-not-allowed bg-gray-300 text-gray-500' : type === 'INCOME' ? 'bg-[#007AFF] hover:bg-[#0066CC]' : 'bg-[#FF3B30] hover:bg-[#CC2E26]'}`}
+              >
+                {isSubmitting ? t('submitting') : t('submitRecord')}
+              </button>
+            </div>
+          </div>
 
           <section className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6">
             <h3 className="text-lg font-semibold text-gray-800">{t('sharedPrivateLedgers')}</h3>

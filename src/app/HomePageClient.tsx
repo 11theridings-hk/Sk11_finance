@@ -1,7 +1,6 @@
 'use client'
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
 import { createRecord } from './actions/record'
 import { createCategory } from './actions/category'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
@@ -77,7 +76,6 @@ type Props = {
 
 export default function HomePageClient({ locale, session, stats, initialDate, initialRecords, categories, pools }: Props) {
   const t = createTranslator(locale)
-  const router = useRouter()
   const [selectedRecord, setSelectedRecord] = useState<RecordItem | null>(null)
 
   const [type, setType] = useState<'INCOME' | 'EXPENSE'>('EXPENSE')
@@ -211,22 +209,17 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
   return (
     <div className="space-y-4 sm:space-y-6 pt-4 sm:pt-6 overflow-x-hidden relative">
       <section className="bg-white p-4 sm:p-5 rounded-2xl sm:rounded-3xl shadow-sm border border-gray-100 text-center w-full max-w-full overflow-hidden relative">
-        <div className="absolute top-4 left-4 sm:top-5 sm:left-5 text-xs text-gray-500 font-medium flex items-center gap-1">
-          {t('currentRole')}: <span className="text-gray-800 font-semibold">{session.roleName}</span>
+        <div className="mb-4 flex items-start justify-between gap-3 text-left sm:mb-6">
+          <div className="min-w-0">
+            <div className="text-xs font-medium uppercase tracking-[0.16em] text-gray-400">{t('currentRole')}</div>
+            <div className="mt-1 truncate text-sm font-semibold text-gray-800 sm:text-base">{session.roleName}</div>
+          </div>
+          <div className="shrink-0 rounded-full bg-[#F2F2F7] px-3 py-1 text-xs font-semibold text-gray-500">
+            HKD
+          </div>
         </div>
-        <button 
-          onClick={async () => {
-            const { logout } = await import('./actions/auth');
-            await logout();
-            router.push('/login');
-          }}
-          className="absolute top-4 right-4 sm:top-5 sm:right-5 text-xs text-gray-500 hover:text-gray-800 font-medium flex items-center gap-1 transition-colors"
-        >
-          {t('logout')}
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-        </button>
 
-        <div className="flex items-center justify-center gap-3 mb-4 sm:mb-6 mt-6 sm:mt-4">
+        <div className="mb-4 flex items-center justify-center gap-3 sm:mb-6">
           <h2 className="text-lg font-semibold text-gray-800">{t('totalBalance')}</h2>
         </div>
         <div className="flex justify-center">
@@ -240,24 +233,25 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
       </section>
 
       <section className={`p-4 sm:p-6 rounded-2xl sm:rounded-3xl shadow-sm border ${formBgClass} ${formBorderClass} transition-colors`}>
-        <div className="flex space-x-2 sm:space-x-3 mb-5 sm:mb-6 bg-gray-200/50 p-1 rounded-xl w-fit">
+        <div className="mb-3 text-sm font-medium text-gray-500 sm:hidden">{t('submitRecord')}</div>
+        <div className="flex space-x-2 sm:space-x-3 mb-5 sm:mb-6 bg-gray-200/50 p-1 rounded-xl w-full sm:w-fit">
           <button
             type="button"
-            className={`px-5 py-2 rounded-lg font-semibold text-sm transition-all shadow-sm ${type === 'EXPENSE' ? 'bg-white text-[#FF3B30]' : 'bg-transparent text-gray-600 shadow-none'}`}
+            className={`flex-1 px-5 py-2 rounded-lg font-semibold text-sm transition-all shadow-sm sm:flex-none ${type === 'EXPENSE' ? 'bg-white text-[#FF3B30]' : 'bg-transparent text-gray-600 shadow-none'}`}
             onClick={() => { setType('EXPENSE'); setCategoryId(''); setSubCategoryId(''); setThirdCategoryId(''); }}
           >
             {t('expense')}
           </button>
           <button
             type="button"
-            className={`px-5 py-2 rounded-lg font-semibold text-sm transition-all shadow-sm ${type === 'INCOME' ? 'bg-white text-[#007AFF]' : 'bg-transparent text-gray-600 shadow-none'}`}
+            className={`flex-1 px-5 py-2 rounded-lg font-semibold text-sm transition-all shadow-sm sm:flex-none ${type === 'INCOME' ? 'bg-white text-[#007AFF]' : 'bg-transparent text-gray-600 shadow-none'}`}
             onClick={() => { setType('INCOME'); setCategoryId(''); setSubCategoryId(''); setThirdCategoryId(''); }}
           >
             {t('income')}
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form id="public-ledger-form" onSubmit={handleSubmit} className="space-y-5 pb-24 md:pb-0">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div>
               <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('date')}</label>
@@ -421,9 +415,9 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
           <button
             type="submit"
             disabled={isSubmitting || countdown > 0}
-            className={`w-full py-4 mt-6 text-white font-semibold rounded-xl shadow-sm transition-all ${
-              isSubmitting || countdown > 0 
-                ? 'bg-gray-300 text-gray-500 cursor-not-allowed shadow-none' 
+            className={`hidden w-full py-4 mt-6 text-white font-semibold rounded-xl shadow-sm transition-all md:block ${
+              isSubmitting || countdown > 0
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed shadow-none'
                 : submitBtnClass
             }`}
           >
@@ -431,6 +425,23 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
           </button>
         </form>
       </section>
+
+      <div className="mobile-safe-action fixed inset-x-0 z-20 px-4 md:hidden">
+        <div className="mx-auto max-w-4xl rounded-2xl border border-gray-200 bg-white/95 p-3 shadow-lg backdrop-blur">
+          <button
+            type="submit"
+            form="public-ledger-form"
+            disabled={isSubmitting || countdown > 0}
+            className={`w-full rounded-xl py-4 text-sm font-semibold text-white transition-all ${
+              isSubmitting || countdown > 0
+                ? 'cursor-not-allowed bg-gray-300 text-gray-500'
+                : submitBtnClass
+            }`}
+          >
+            {countdown > 0 ? `${t('submitting')} (${countdown}s)` : isSubmitting ? t('submitting') : t('submitRecord')}
+          </button>
+        </div>
+      </div>
       
       <section className="bg-white rounded-2xl sm:rounded-3xl shadow-sm border border-gray-100 overflow-hidden mb-10">
         <div className="p-4 sm:p-6 pb-3 sm:pb-4 border-b border-gray-100 flex justify-between items-center">
