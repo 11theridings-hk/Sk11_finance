@@ -22,6 +22,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
   const t = createTranslator(locale)
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
+  const [noteKeyword, setNoteKeyword] = useState('')
   const [categoryId, setCategoryId] = useState('')
   const [subCategoryId, setSubCategoryId] = useState('')
   const [thirdCategoryId, setThirdCategoryId] = useState('')
@@ -158,6 +159,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     if (thirdCategoryId) filter.thirdCategoryId = thirdCategoryId
     if (poolId) filter.poolId = poolId
     if (userId) filter.userId = userId
+    if (noteKeyword.trim()) filter.noteKeyword = noteKeyword.trim()
     filter.status = status
 
     try {
@@ -224,37 +226,39 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       
     const categoryName = categoryId ? categories.find(c => c.id === categoryId)?.name || t('unknown') : t('all')
     const roleName = userId ? users.find(u => u.id === userId)?.roleName || t('unknown') : t('all')
+    const noteKeywordLabel = noteKeyword.trim() || t('all')
 
     doc.text(`${t('statisticsPeriod')}: ${timeRangeStr}`, 15, 45)
     doc.text(`${t('totalTransactions')}: ${totalCount}`, 145, 45)
     
     doc.setTextColor(150, 150, 150)
     doc.text(`${t('filterSummary')} -> ${t('category')}: [${categoryName}] | ${t('role')}: [${roleName}]`, 15, 52)
+    doc.text(`${t('reportNoteSearch')}: [${noteKeywordLabel}]`, 15, 58)
     
     doc.setDrawColor(220, 220, 220)
     doc.setFillColor(250, 250, 252)
-    doc.roundedRect(15, 60, 180, 45, 3, 3, 'FD')
+    doc.roundedRect(15, 66, 180, 45, 3, 3, 'FD')
 
     if (fontBase64) doc.setFont('NotoSansSC', 'bold')
     doc.setFontSize(14)
     doc.setTextColor(50, 50, 50)
-    doc.text('HKD$', 105, 70, { align: 'center' })
+    doc.text('HKD$', 105, 76, { align: 'center' })
 
     if (fontBase64) doc.setFont('NotoSansSC', 'normal')
     doc.setFontSize(11)
     doc.setTextColor(52, 199, 89)
-    doc.text(`${t('totalIncome')}: ${totalIncome.toFixed(2)}`, 25, 85)
+    doc.text(`${t('totalIncome')}: ${totalIncome.toFixed(2)}`, 25, 91)
     doc.setTextColor(255, 59, 48)
-    doc.text(`${t('totalExpense')}: ${totalExpense.toFixed(2)}`, 85, 85)
+    doc.text(`${t('totalExpense')}: ${totalExpense.toFixed(2)}`, 85, 91)
     doc.setTextColor(0, 0, 0)
     if (fontBase64) doc.setFont('NotoSansSC', 'bold')
-    doc.text(`${t('balance')}: ${balance >= 0 ? '+' : ''}${balance.toFixed(2)}`, 145, 85)
+    doc.text(`${t('balance')}: ${balance >= 0 ? '+' : ''}${balance.toFixed(2)}`, 145, 91)
     
-    doc.line(15, 115, 195, 115)
+    doc.line(15, 121, 195, 121)
     doc.setFontSize(14)
     doc.setTextColor(50, 50, 50)
     if (fontBase64) doc.setFont('NotoSansSC', 'bold')
-    doc.text(t('categoryExpenseStats'), 15, 130)
+    doc.text(t('categoryExpenseStats'), 15, 136)
     
     if (fontBase64) doc.setFont('NotoSansSC', 'normal')
     doc.setFontSize(11)
@@ -268,7 +272,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       totalExpenseMerged += val
     })
     
-    let yPos = 140
+    let yPos = 146
     Object.entries(categoryStats).sort((a, b) => b[1] - a[1]).forEach(([name, amount], index) => {
       const percentage = totalExpenseMerged > 0 ? (amount / totalExpenseMerged) : 0
       const percentStr = (percentage * 100).toFixed(1)
@@ -416,6 +420,16 @@ export default function ReportClient({ categories, users, pools, locale }: Props
             type="date" 
             value={endDate} 
             onChange={e => setEndDate(e.target.value)}
+            className={inputClass}
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('reportNoteSearch')}</label>
+          <input
+            type="text"
+            value={noteKeyword}
+            onChange={e => setNoteKeyword(e.target.value)}
+            placeholder={t('reportNoteSearchPlaceholder')}
             className={inputClass}
           />
         </div>

@@ -11,6 +11,7 @@ export type ReportFilter = {
   thirdCategoryId?: string
   poolId?: string
   userId?: string
+  noteKeyword?: string
   status?: 'PENDING' | 'APPROVED' | 'ALL'
 }
 
@@ -75,6 +76,13 @@ export async function getReportRecords(filter: ReportFilter) {
 
   if (filter.poolId) {
     where.poolId = filter.poolId
+  }
+
+  if (filter.noteKeyword?.trim()) {
+    where.note = {
+      contains: filter.noteKeyword.trim(),
+      mode: 'insensitive',
+    }
   }
 
   return await prisma.record.findMany({
