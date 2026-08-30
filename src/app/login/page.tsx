@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { login } from "../actions/auth";
 import { LOCALE_COOKIE, createTranslator, normalizeLocale, type Locale } from "@/lib/i18n";
+import { getDefaultHomePath } from "@/lib/access";
 
 export default function LoginPage() {
   const initialLocale = typeof document === "undefined"
@@ -24,11 +25,16 @@ export default function LoginPage() {
 
     try {
       const res = await login(password, isAdminTab);
-      if (res.success) {
+      if (res.success && res.user) {
         if (isAdminTab) {
           router.push("/admin");
         } else {
-          router.push("/");
+          router.push(getDefaultHomePath({
+            userId: res.user.id,
+            roleName: res.user.roleName,
+            isAdmin: res.user.isAdmin,
+            publicLedgerRole: res.user.publicLedgerRole,
+          }));
         }
       } else {
         setError(res.error || t('loginFailed'));

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { createCategory, deleteCategory } from "../actions/category";
 import { createCapitalPool, deleteCapitalPool } from "../actions/pool";
-import { createUser, deleteUser, toggleUserPool } from "../actions/user";
+import { createUser, updateUser, deleteUser, toggleUserPool } from "../actions/user";
 import { createTranslator, formatCurrency, type Locale } from "@/lib/i18n";
 
 export default function AdminTabs({ initialCategories, initialAttachments, initialPools, initialUsers, locale }: any) {
@@ -340,7 +340,9 @@ function UserTab({ users, locale }: { users: any[], locale: Locale }) {
   const [newPassword, setNewPassword] = useState("");
   const [newRoleName, setNewRoleName] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
+  const [newPublicLedgerRole, setNewPublicLedgerRole] = useState<'NONE' | 'MEMBER'>("NONE");
   const [loading, setLoading] = useState(false);
+  const [savingUserId, setSavingUserId] = useState<string | null>(null);
 
   const handleCreate = async () => {
     if (!newPassword.trim() || !newRoleName.trim()) return;
@@ -348,13 +350,15 @@ function UserTab({ users, locale }: { users: any[], locale: Locale }) {
     const res = await createUser({
       password: newPassword.trim(),
       roleName: newRoleName.trim(),
-      isAdmin
+      isAdmin,
+      publicLedgerRole: isAdmin ? 'MEMBER' : newPublicLedgerRole,
     });
     if (!res.success) alert(res.error);
     else {
       setNewPassword("");
       setNewRoleName("");
       setIsAdmin(false);
+      setNewPublicLedgerRole("NONE");
     }
     setLoading(false);
   };
@@ -369,6 +373,13 @@ function UserTab({ users, locale }: { users: any[], locale: Locale }) {
   const handleTogglePool = async (id: string, enabled: boolean) => {
     const res = await toggleUserPool(id, enabled);
     if (!res.success) alert(res.error);
+  };
+
+  const handleUpdatePublicLedgerRole = async (id: string, publicLedgerRole: 'NONE' | 'MEMBER') => {
+    setSavingUserId(id);
+    const res = await updateUser(id, { publicLedgerRole });
+    if (!res.success) alert(res.error);
+    setSavingUserId(null);
   };
 
   return (
@@ -395,15 +406,29 @@ function UserTab({ users, locale }: { users: any[], locale: Locale }) {
           />
         </div>
         <div className="flex items-center justify-between">
-          <label className="flex items-center text-sm font-medium text-gray-700 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={isAdmin}
-              onChange={(e) => setIsAdmin(e.target.checked)}
-              className="mr-2.5 rounded text-[#007AFF] focus:ring-[#007AFF]"
-            />
-            {t('setAdmin')}
-          </label>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <label className="flex items-center text-sm font-medium text-gray-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isAdmin}
+                onChange={(e) => setIsAdmin(e.target.checked)}
+                className="mr-2.5 rounded text-[#007AFF] focus:ring-[#007AFF]"
+              />
+              {t('setAdmin')}
+            </label>
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <span>{t('publicLedgerPermission')}</span>
+              <select
+                value={isAdmin ? 'MEMBER' : newPublicLedgerRole}
+                onChange={(e) => setNewPublicLedgerRole(e.target.value as 'NONE' | 'MEMBER')}
+                disabled={isAdmin}
+                className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm text-gray-700 outline-none disabled:bg-gray-100"
+              >
+                <option value="NONE">{t('denyPublicLedger')}</option>
+                <option value="MEMBER">{t('allowPublicLedger')}</option>
+              </select>
+            </label>
+          </div>
           <button
             onClick={handleCreate}
             disabled={loading}
@@ -446,6 +471,18 @@ function UserTab({ users, locale }: { users: any[], locale: Locale }) {
                 />
                 <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#34C759]"></div>
               </label>
+            </div>
+            <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
+              <span className="text-sm font-medium text-gray-500">{t('publicLedgerPermission')}</span>
+              <select
+                value={user.isAdmin ? 'MEMBER' : (user.publicLedgerRole || 'NONE')}
+                onChange={(e) => handleUpdatePublicLedgerRole(user.id, e.target.value as 'NONE' | 'MEMBER')}
+                disabled={user.isAdmin || savingUserId === user.id}
+                className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none disabled:bg-gray-100"
+              >
+                <option value="NONE">{t('denyPublicLedger')}</option>
+                <option value="MEMBER">{t('allowPublicLedger')}</option>
+              </select>
             </div>
           </div>
         ))}
