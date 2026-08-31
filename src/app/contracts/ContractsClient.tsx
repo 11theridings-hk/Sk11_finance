@@ -10,7 +10,7 @@ import OcrNoteButton from '@/components/OcrNoteButton'
 type ContractItem = {
   id: string
   title: string
-  type: 'INCOME' | 'EXPENSE'
+  type: string
   effectiveDate: string | Date
   expiryDate: string | Date
   reminderDays: number

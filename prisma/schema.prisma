@@ -17,6 +17,7 @@ model User {
   isAdmin                Boolean  @default(false) // 是否为管理员
   poolEnabled            Boolean  @default(false) // 是否启用资金池
   publicLedgerRole       String   @default("NONE") // "NONE" | "MEMBER"
+  ocrEnabled             Boolean  @default(true) // 是否允許使用圖片辨識
   privateLedgerVisibility String  @default("PRIVATE") // "PRIVATE" | "PUBLIC"
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt

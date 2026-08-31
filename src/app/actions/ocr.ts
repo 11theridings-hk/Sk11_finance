@@ -1,5 +1,6 @@
 'use server'
 
+import prisma from '@/lib/prisma'
 import { getSession } from './auth'
 import { getCurrentLocale } from '@/lib/locale'
 import { createTranslator, normalizeLocale } from '@/lib/i18n'
@@ -48,6 +49,14 @@ export async function recognizeAttachmentNote(input: RecognizeAttachmentInput) {
 
     if (!session) {
       throw new Error(t('notLoggedIn'))
+    }
+
+    const currentUser = await prisma.user.findUnique({
+      where: { id: session.userId },
+      select: { ocrEnabled: true },
+    })
+    if (!currentUser?.ocrEnabled) {
+      throw new Error(t('ocrPermissionDenied'))
     }
 
     if (!input.imageDataUrl?.startsWith('data:image/')) {

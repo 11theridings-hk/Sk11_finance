@@ -37,7 +37,7 @@ export default function OcrNoteButton({
     })
 
     if (result.success) {
-      onResolved(result.noteText)
+      onResolved(result.noteText || '')
       alert(t('ocrFilledNote'))
     } else {
       alert(`${t('ocrActionLabel')}: ${result.error}`)

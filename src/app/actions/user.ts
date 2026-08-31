@@ -32,7 +32,7 @@ export async function getUsers() {
 }
 
 // 创建白名单用户
-export async function createUser(data: { password: string; roleName: string; isAdmin: boolean; publicLedgerRole?: PublicLedgerRole }) {
+export async function createUser(data: { password: string; roleName: string; isAdmin: boolean; publicLedgerRole?: PublicLedgerRole; ocrEnabled?: boolean }) {
   try {
     await checkAdmin()
     const user = await prisma.user.create({
@@ -42,6 +42,7 @@ export async function createUser(data: { password: string; roleName: string; isA
         isAdmin: data.isAdmin,
         poolEnabled: false,
         publicLedgerRole: data.isAdmin ? 'MEMBER' : (data.publicLedgerRole ?? 'NONE'),
+        ocrEnabled: data.ocrEnabled ?? true,
       }
     })
     revalidatePath('/admin')
@@ -52,7 +53,7 @@ export async function createUser(data: { password: string; roleName: string; isA
 }
 
 // 更新用户
-export async function updateUser(id: string, data: { password?: string; roleName?: string; isAdmin?: boolean; publicLedgerRole?: PublicLedgerRole }) {
+export async function updateUser(id: string, data: { password?: string; roleName?: string; isAdmin?: boolean; publicLedgerRole?: PublicLedgerRole; ocrEnabled?: boolean }) {
   try {
     await checkAdmin()
     const updateData: any = { ...data }

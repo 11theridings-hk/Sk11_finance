@@ -89,7 +89,7 @@ export default function ActivityDetailModal({
   }
 
   const appendRecognizedText = (recognizedText: string) => {
-    setNote((current) => (current.trim() ? `${current.trim()}\n${recognizedText}` : recognizedText))
+    setNote((current: string) => (current.trim() ? `${current.trim()}\n${recognizedText}` : recognizedText))
   }
 
   const readOnlyFieldClass = 'font-semibold text-gray-900'

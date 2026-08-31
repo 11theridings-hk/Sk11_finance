@@ -3,7 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { getSession } from "./actions/auth";
 import { getPendingReviewCount } from "./actions/review";
-import { getReminderOverview } from "./actions/reminder";
+import { getReminderOverview, type ReminderItem } from "./actions/reminder";
 import TopNav from "./TopNav";
 import { getCurrentLocale } from "@/lib/locale";
 import ReminderOverview from "@/components/ReminderOverview";
@@ -34,7 +34,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const session = await getSession();
   const locale = await getCurrentLocale();
   let pendingCount = 0;
-  let reminderOverview = { contracts: [], activities: [], contractCount: 0, activityCount: 0 };
+  let reminderOverview: {
+    contracts: ReminderItem[];
+    activities: ReminderItem[];
+    contractCount: number;
+    activityCount: number;
+  } = { contracts: [], activities: [], contractCount: 0, activityCount: 0 };
   if (session?.isAdmin) {
     pendingCount = await getPendingReviewCount();
   }

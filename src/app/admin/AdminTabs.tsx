@@ -5,8 +5,18 @@ import { createCategory, deleteCategory } from "../actions/category";
 import { createCapitalPool, deleteCapitalPool } from "../actions/pool";
 import { createUser, updateUser, deleteUser, toggleUserPool } from "../actions/user";
 import { createTranslator, formatCurrency, type Locale } from "@/lib/i18n";
+import { updateAISettings, type AISettings } from "../actions/settings";
 
-export default function AdminTabs({ initialCategories, initialAttachments, initialPools, initialUsers, locale }: any) {
+type AdminTabsProps = {
+  initialCategories: any[]
+  initialAttachments: any[]
+  initialPools: any[]
+  initialUsers: any[]
+  initialAISettings: AISettings
+  locale: Locale
+}
+
+export default function AdminTabs({ initialCategories, initialAttachments, initialPools, initialUsers, initialAISettings, locale }: AdminTabsProps) {
   const t = createTranslator(locale as Locale);
   const [activeTab, setActiveTab] = useState("category");
   
@@ -15,6 +25,7 @@ export default function AdminTabs({ initialCategories, initialAttachments, initi
     { id: "attachment", label: t('attachmentManagement') },
     { id: "pool", label: t('poolManagement') },
     { id: "user", label: t('userManagement') },
+    { id: "ai-settings", label: t('aiSettings') },
   ];
 
   return (
@@ -46,6 +57,7 @@ export default function AdminTabs({ initialCategories, initialAttachments, initi
         {activeTab === "attachment" && <AttachmentTab attachments={initialAttachments} locale={locale} />}
         {activeTab === "pool" && <PoolTab pools={initialPools} users={initialUsers} locale={locale} />}
         {activeTab === "user" && <UserTab users={initialUsers} locale={locale} />}
+        {activeTab === "ai-settings" && <AISettingsTab initialSettings={initialAISettings} locale={locale} />}
       </div>
     </div>
   );
@@ -341,6 +353,7 @@ function UserTab({ users, locale }: { users: any[], locale: Locale }) {
   const [newRoleName, setNewRoleName] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [newPublicLedgerRole, setNewPublicLedgerRole] = useState<'NONE' | 'MEMBER'>("NONE");
+  const [newOcrEnabled, setNewOcrEnabled] = useState(true);
   const [loading, setLoading] = useState(false);
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
 
@@ -352,6 +365,7 @@ function UserTab({ users, locale }: { users: any[], locale: Locale }) {
       roleName: newRoleName.trim(),
       isAdmin,
       publicLedgerRole: isAdmin ? 'MEMBER' : newPublicLedgerRole,
+      ocrEnabled: newOcrEnabled,
     });
     if (!res.success) alert(res.error);
     else {
@@ -359,6 +373,7 @@ function UserTab({ users, locale }: { users: any[], locale: Locale }) {
       setNewRoleName("");
       setIsAdmin(false);
       setNewPublicLedgerRole("NONE");
+      setNewOcrEnabled(true);
     }
     setLoading(false);
   };
@@ -378,6 +393,13 @@ function UserTab({ users, locale }: { users: any[], locale: Locale }) {
   const handleUpdatePublicLedgerRole = async (id: string, publicLedgerRole: 'NONE' | 'MEMBER') => {
     setSavingUserId(id);
     const res = await updateUser(id, { publicLedgerRole });
+    if (!res.success) alert(res.error);
+    setSavingUserId(null);
+  };
+
+  const handleUpdateOcrPermission = async (id: string, ocrEnabled: boolean) => {
+    setSavingUserId(id);
+    const res = await updateUser(id, { ocrEnabled });
     if (!res.success) alert(res.error);
     setSavingUserId(null);
   };
@@ -426,6 +448,17 @@ function UserTab({ users, locale }: { users: any[], locale: Locale }) {
               >
                 <option value="NONE">{t('denyPublicLedger')}</option>
                 <option value="MEMBER">{t('allowPublicLedger')}</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <span>{t('ocrPermission')}</span>
+              <select
+                value={newOcrEnabled ? 'ENABLED' : 'DISABLED'}
+                onChange={(e) => setNewOcrEnabled(e.target.value === 'ENABLED')}
+                className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm text-gray-700 outline-none"
+              >
+                <option value="ENABLED">{t('enabled')}</option>
+                <option value="DISABLED">{t('disabled')}</option>
               </select>
             </label>
           </div>
@@ -484,11 +517,115 @@ function UserTab({ users, locale }: { users: any[], locale: Locale }) {
                 <option value="MEMBER">{t('allowPublicLedger')}</option>
               </select>
             </div>
+            <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
+              <span className="text-sm font-medium text-gray-500">{t('ocrPermission')}</span>
+              <select
+                value={user.ocrEnabled === false ? 'DISABLED' : 'ENABLED'}
+                onChange={(e) => handleUpdateOcrPermission(user.id, e.target.value === 'ENABLED')}
+                disabled={savingUserId === user.id}
+                className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none disabled:bg-gray-100"
+              >
+                <option value="ENABLED">{t('enabled')}</option>
+                <option value="DISABLED">{t('disabled')}</option>
+              </select>
+            </div>
           </div>
         ))}
         {users.length === 0 && (
           <p className="text-gray-500 text-center py-4 text-sm">{t('noUserData')}</p>
         )}
+      </div>
+    </div>
+  );
+}
+
+function AISettingsTab({ initialSettings, locale }: { initialSettings: AISettings; locale: Locale }) {
+  const t = createTranslator(locale);
+  const [enabled, setEnabled] = useState(initialSettings.enabled);
+  const [model, setModel] = useState(initialSettings.model);
+  const [systemPrompt, setSystemPrompt] = useState(initialSettings.systemPrompt);
+  const [userPrompt, setUserPrompt] = useState(initialSettings.userPrompt);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    const res = await updateAISettings({
+      enabled,
+      model,
+      systemPrompt,
+      userPrompt,
+    });
+    if (!res.success) {
+      alert(res.error);
+      setSaving(false);
+      return;
+    }
+    alert(t('aiSettingsSaved'));
+    setSaving(false);
+  };
+
+  return (
+    <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-5">
+      <div>
+        <h2 className="text-lg font-semibold text-gray-800">{t('aiSettings')}</h2>
+        <p className="mt-2 text-sm text-gray-500">{t('aiSettingsHint')}</p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-5">
+        <div className="rounded-2xl bg-[#F2F2F7] p-4">
+          <label className="flex items-center justify-between gap-3 text-sm font-medium text-gray-700">
+            <span>{t('ocrGlobalEnabled')}</span>
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+              className="h-4 w-4 rounded text-[#007AFF] focus:ring-[#007AFF]"
+            />
+          </label>
+          <p className="mt-2 text-xs text-gray-500">{t('ocrPermissionHint')}</p>
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('ocrModel')}</label>
+          <input
+            type="text"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 outline-none focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/30"
+            placeholder="gpt-4.1-mini"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('ocrSystemPrompt')}</label>
+          <textarea
+            value={systemPrompt}
+            onChange={(e) => setSystemPrompt(e.target.value)}
+            rows={5}
+            className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 outline-none focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/30"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('ocrUserPrompt')}</label>
+          <textarea
+            value={userPrompt}
+            onChange={(e) => setUserPrompt(e.target.value)}
+            rows={6}
+            className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-900 outline-none focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/30"
+          />
+          <p className="mt-2 text-xs text-gray-500">{t('ocrPromptVariableHint')}</p>
+        </div>
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="rounded-xl bg-[#007AFF] px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#0066CC] disabled:opacity-50"
+        >
+          {saving ? t('saving') : t('saveAiSettings')}
+        </button>
       </div>
     </div>
   );

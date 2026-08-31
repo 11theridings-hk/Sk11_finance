@@ -28,11 +28,11 @@ export type CreateContractInput = {
 }
 
 function getDeepestCategoryId(data: {
-  categoryId: string
+  categoryId?: string | null
   subCategoryId?: string | null
   thirdCategoryId?: string | null
 }) {
-  return data.thirdCategoryId || data.subCategoryId || data.categoryId
+  return data.thirdCategoryId || data.subCategoryId || data.categoryId || undefined
 }
 
 async function assertContractPermission(contractId: string) {

@@ -17,6 +17,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Ignore bundled vendor assets used by generated docs.
+    "docs/**/assets/**",
   ]),
 ]);
 
