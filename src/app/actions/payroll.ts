@@ -10,9 +10,13 @@ import {
 } from '@/lib/payroll/calc';
 import {
   generatePayslipPdf,
+  generateFallbackEnPdf,
   type SystemSettingMap,
+  type FontPack,
 } from '@/lib/payroll/pdf';
 import JSZip from 'jszip';
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 export type PayrollStatus = 'DRAFT' | 'SUBMITTED' | 'CONFIRMED' | 'PAID' | 'REJECTED';
 export type SalaryCycleStatus = 'OPEN' | 'LOCKED' | 'SETTLED';
@@ -517,56 +521,157 @@ export async function listMyPayrolls(userId: string) {
 }
 
 // ---------- PDF ----------
+async function loadCJKFontPackRailwaySafe(): Promise<FontPack> {
+  // Try 1: local fs (dev / bundled standalone correctly)
+  const candidates = [
+    join(process.cwd(), 'public', 'fonts'),
+    join(process.cwd(), '.next', 'standalone', 'public', 'fonts'),
+    join(process.cwd(), '..', 'public', 'fonts'),
+  ];
+  const tryFs = (fname: string): Uint8Array | null => {
+    for (const d of candidates) {
+      try {
+        const p = join(d, fname);
+        if (existsSync(p)) return new Uint8Array(readFileSync(p));
+      } catch { /* ignore */ }
+    }
+    return null;
+  };
+  const r1 = tryFs('NotoSansSC-Regular.ttf');
+  const b1 = tryFs('msyh.ttf');
+  if (r1) {
+    return {
+      regular: r1,
+      bold: b1 || r1,
+      regularFamily: 'NotoSansSC',
+      boldFamily: b1 ? 'MSYaHei' : 'NotoSansSC',
+      cjkAvailable: true,
+    };
+  }
+  // Try 2: HTTP self-fetch (Railway serves /fonts/*.ttf as static files)
+  const baseUrls = [
+    process.env.NEXT_PUBLIC_SITE_URL,
+    process.env.RAILWAY_STATIC_URL,
+    process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : null,
+  ].filter(Boolean) as string[];
+  for (const base of baseUrls) {
+    try {
+      const u = base.endsWith('/') ? base.slice(0, -1) : base;
+      const resp = await fetch(`${u}/fonts/NotoSansSC-Regular.ttf`, {
+        cache: 'force-cache',
+        headers: { 'Accept': 'font/ttf' },
+      });
+      if (resp.ok && resp.body) {
+        const buf = new Uint8Array(await resp.arrayBuffer());
+        let boldBuf: Uint8Array | null = null;
+        try {
+          const resp2 = await fetch(`${u}/fonts/msyh.ttf`, { cache: 'force-cache' });
+          if (resp2.ok) boldBuf = new Uint8Array(await resp2.arrayBuffer());
+        } catch { /* ignore */ }
+        return {
+          regular: buf,
+          bold: boldBuf || buf,
+          regularFamily: 'NotoSansSC',
+          boldFamily: boldBuf ? 'MSYaHei' : 'NotoSansSC',
+          cjkAvailable: true,
+        };
+      }
+    } catch (_e) { /* try next */ }
+  }
+  return { regular: null, bold: null, regularFamily: 'helvetica', boldFamily: 'helvetica', cjkAvailable: false };
+}
+
 async function buildPdfForPayroll(payrollId: string, { isAdmin, sessionUserId }: { isAdmin: boolean; sessionUserId: string }) {
-  const p = await prisma.payroll.findUnique({
-    where: { id: payrollId },
-    include: {
-      cycle: true,
-      items: { orderBy: { sortOrder: 'asc' } },
-      submittedBy: { select: { profile: { select: { legalNameEn: true, legalNameZh: true } } } },
-    },
-  });
+  let p: any = null;
+  let company: SystemSettingMap = {};
+  try {
+    p = await prisma.payroll.findUnique({
+      where: { id: payrollId },
+      include: {
+        cycle: true,
+        items: { orderBy: { sortOrder: 'asc' } },
+        submittedBy: { select: { profile: { select: { legalNameEn: true, legalNameZh: true } } } },
+      },
+    });
+  } catch (e) {
+    throw new Error(`Prisma findUnique failed: ${String(e)}`);
+  }
   if (!p) throw new Error('Payroll not found');
   if (!isAdmin && p.userId !== sessionUserId) throw new Error('Forbidden');
   if (p.status === 'DRAFT' || p.status === 'REJECTED') {
-    // only admins can preview before confirmation; users must wait SUBMITTED
     if (!isAdmin) throw new Error('Payroll not available yet (DRAFT/REJECTED)');
   }
-  const company = await getCompanySettings();
+  try {
+    company = await getCompanySettings();
+  } catch (_e) { /* keep empty defaults */ }
   const pdfGeneratedAt = p.pdfGeneratedAt || new Date();
-  const pdf = generatePayslipPdf({
+  const profileInput = (p.snapshotProfileJson ?? {}) as any;
+  const profile = snapshotProfile({
+    legalNameEn: profileInput?.legalNameEn ?? p.userId?.slice(0, 8) ?? 'User',
+    legalNameZh: profileInput?.legalNameZh ?? null,
+    hkid: profileInput?.hkid ?? null,
+    passportNo: profileInput?.passportNo ?? null,
+    dateOfBirth: profileInput?.dateOfBirth ?? null,
+    jobTitle: profileInput?.jobTitle ?? null,
+    department: profileInput?.department ?? null,
+    dateJoined: profileInput?.dateJoined ?? null,
+    defaultBaseSalaryHkd: profileInput?.defaultBaseSalaryHkd ?? 0,
+    bankName: profileInput?.bankName ?? null,
+    bankAccountNo: profileInput?.bankAccountNo ?? null,
+    mpfAccountNo: profileInput?.mpfAccountNo ?? null,
+    addressLine1: profileInput?.addressLine1 ?? null,
+    addressLine2: profileInput?.addressLine2 ?? null,
+    contactPhone: profileInput?.contactPhone ?? null,
+    contactEmail: profileInput?.contactEmail ?? null,
+  });
+  const pdfInput: Parameters<typeof generatePayslipPdf>[0] = {
     company,
-    profile: p.snapshotProfileJson as unknown as Parameters<typeof snapshotProfile>[0] extends never ? never : ReturnType<typeof snapshotProfile>,
+    profile,
     payroll: {
       id: p.id,
-      periodStart: p.cycle.periodStart,
-      periodEnd: p.cycle.periodEnd,
-      payrollDate: p.cycle.payrollDate,
-      currency: p.currency,
-      baseSalaryHkd: p.baseSalaryHkd,
-      overtimeHkd: p.overtimeHkd,
-      bonusHkd: p.bonusHkd,
-      commissionHkd: p.commissionHkd,
-      allowanceTotalHkd: p.allowanceTotalHkd,
-      deductionTotalHkd: p.deductionTotalHkd,
-      grossTotalHkd: p.grossTotalHkd,
-      netPayableHkd: p.netPayableHkd,
-      submittedAt: p.submittedAt,
-      confirmedAt: p.confirmedAt,
-      paidAt: p.paidAt,
+      periodStart: p.cycle.periodStart instanceof Date ? p.cycle.periodStart : new Date(String(p.cycle.periodStart)),
+      periodEnd: p.cycle.periodEnd instanceof Date ? p.cycle.periodEnd : new Date(String(p.cycle.periodEnd)),
+      payrollDate: p.cycle.payrollDate instanceof Date ? p.cycle.payrollDate : new Date(String(p.cycle.payrollDate)),
+      currency: p.currency || 'HKD',
+      baseSalaryHkd: Number(p.baseSalaryHkd) || 0,
+      overtimeHkd: Number(p.overtimeHkd) || 0,
+      bonusHkd: Number(p.bonusHkd) || 0,
+      commissionHkd: Number(p.commissionHkd) || 0,
+      allowanceTotalHkd: Number(p.allowanceTotalHkd) || 0,
+      deductionTotalHkd: Number(p.deductionTotalHkd) || 0,
+      grossTotalHkd: Number(p.grossTotalHkd) || 0,
+      netPayableHkd: Math.max(0, Number(p.netPayableHkd) || 0),
+      submittedAt: p.submittedAt ? (p.submittedAt instanceof Date ? p.submittedAt : new Date(String(p.submittedAt))) : null,
+      confirmedAt: p.confirmedAt ? (p.confirmedAt instanceof Date ? p.confirmedAt : new Date(String(p.confirmedAt))) : null,
+      paidAt: p.paidAt ? (p.paidAt instanceof Date ? p.paidAt : new Date(String(p.paidAt))) : null,
       pdfGeneratedAt,
-      adminNote: p.adminNote,
+      adminNote: p.adminNote ?? null,
     },
-    items: p.items.map((it) => ({
-      itemType: it.itemType as 'EARNING' | 'DEDUCTION',
-      itemCode: it.itemCode,
-      itemName: it.itemName,
-      amountHkd: it.amountHkd,
-      sourceText: it.sourceText,
+    items: (p.items ?? []).map((it: any) => ({
+      itemType: (it.itemType as any) === 'DEDUCTION' ? 'DEDUCTION' : 'EARNING',
+      itemCode: String(it.itemCode ?? ''),
+      itemName: String(it.itemName ?? 'Item'),
+      amountHkd: Number(it.amountHkd) || 0,
+      sourceText: it.sourceText ?? null,
     })),
     submittedBy: p.submittedBy?.profile ?? null,
-    cycleNote: p.cycle.note,
-  });
+    cycleNote: p.cycle?.note ?? null,
+  };
+  let pdf: Uint8Array;
+  let fontPack: FontPack | null = null;
+  try {
+    fontPack = await loadCJKFontPackRailwaySafe();
+  } catch (e) {
+    console.error('[buildPdfForPayroll] fontPack load error:', String(e));
+    fontPack = null;
+  }
+  try {
+    pdf = generatePayslipPdf(pdfInput, fontPack);
+  } catch (e) {
+    const msg = String(e);
+    console.error('[buildPdfForPayroll] generatePayslipPdf threw; using generateFallbackEnPdf:', msg);
+    pdf = generateFallbackEnPdf(pdfInput, msg);
+  }
   return { pdf, payroll: p };
 }
 

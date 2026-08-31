@@ -3,6 +3,14 @@ import autoTable from 'jspdf-autotable';
 import type { SnapshotProfile } from './calc';
 import { loadChineseFonts } from '@/lib/fonts/loadChineseFont';
 
+export type FontPack = {
+  regular: Uint8Array | null;
+  bold: Uint8Array | null;
+  regularFamily: string;
+  boldFamily: string;
+  cjkAvailable: boolean;
+};
+
 export type SystemSettingMap = {
   COMPANY_NAME_ZH?: string;
   COMPANY_NAME_EN?: string;
@@ -108,40 +116,157 @@ function numberToEnglishWords(n: number): string {
   return `Hong Kong Dollars ${result} Only.`;
 }
 
-export function generatePayslipPdf(input: GeneratePayslipPdfInput): Uint8Array {
-  const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
-  let FONT_REG = 'helvetica';
-  let FONT_BOLD = 'helvetica';
-  let useCjkFallback = false;
-  try {
-    const fonts = loadChineseFonts();
-    FONT_REG = fonts.regularFamily;
-    FONT_BOLD = fonts.boldFamily;
-    const toBinaryStr = (bytes: Uint8Array): string => {
-      let bin = '';
-      const len = bytes.byteLength;
-      for (let i = 0; i < len; i++) bin += String.fromCharCode(bytes[i]);
-      return bin;
-    };
-    doc.addFileToVFS(`${FONT_REG}.ttf`, toBinaryStr(fonts.regular));
-    doc.addFont(`${FONT_REG}.ttf`, FONT_REG, 'normal');
-    if (FONT_BOLD !== FONT_REG) {
-      doc.addFileToVFS(`${FONT_BOLD}.ttf`, toBinaryStr(fonts.bold));
-      doc.addFont(`${FONT_BOLD}.ttf`, FONT_BOLD, 'bold');
-    } else {
-      doc.addFont(`${FONT_REG}.ttf`, FONT_BOLD, 'bold');
+function _toBinaryStr(bytes: Uint8Array): string {
+  let bin = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) bin += String.fromCharCode(bytes[i]);
+  return bin;
+}
+
+export function registerFonts(doc: jsPDF, pack: FontPack): { fontReg: string; fontBold: string; cjk: boolean } {
+  let fontReg = 'helvetica';
+  let fontBold = 'helvetica';
+  let cjk = false;
+  if (pack.cjkAvailable && pack.regular) {
+    try {
+      fontReg = pack.regularFamily;
+      fontBold = pack.boldFamily;
+      doc.addFileToVFS(`${fontReg}.ttf`, _toBinaryStr(pack.regular));
+      doc.addFont(`${fontReg}.ttf`, fontReg, 'normal');
+      if (pack.bold && pack.boldFamily !== pack.regularFamily) {
+        doc.addFileToVFS(`${fontBold}.ttf`, _toBinaryStr(pack.bold));
+        doc.addFont(`${fontBold}.ttf`, fontBold, 'bold');
+      } else {
+        doc.addFont(`${fontReg}.ttf`, fontBold, 'bold');
+      }
+      cjk = true;
+    } catch (e) {
+      console.error('[pdf.registerFonts] CJK font register failed, fallback helvetica:', String(e));
+      fontReg = 'helvetica';
+      fontBold = 'helvetica';
+      cjk = false;
     }
-  } catch (err) {
-    useCjkFallback = true;
-    FONT_REG = 'helvetica';
-    FONT_BOLD = 'helvetica';
-    // 字型載入失敗，繼續使用 helvetica，盡量用英文抬頭 (仍保留中文但會變亂碼, 至少 PDF 可出)
-    console.error('[generatePayslipPdf] CJK font load failed (fallback to helvetica):', String(err));
   }
-  const setBold = (bold: boolean) => doc.setFont(bold ? FONT_BOLD : FONT_REG, bold ? 'bold' : 'normal');
-  const pageW = doc.internal.pageSize.getWidth();
-  const margin = 40;
-  let cursorY = margin;
+  return { fontReg, fontBold, cjk };
+}
+
+export function generateFallbackEnPdf(input: GeneratePayslipPdfInput, errorMsg?: string): Uint8Array {
+  try {
+    const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    const pageW = doc.internal.pageSize.getWidth();
+    const margin = 40;
+    let y = margin;
+    doc.text(input.company.COMPANY_NAME_EN || 'SK11 Finance Limited', pageW / 2, y, { align: 'center' });
+    y += 22;
+    doc.setFontSize(14);
+    doc.text('PAYSLIP CERTIFICATE', pageW / 2, y, { align: 'center' });
+    y += 26;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    const snap = input.profile;
+    doc.text(`Payslip No.: SK11-PAY-${String(input.payroll.id).slice(-8).toUpperCase()}`, margin, y); y += 13;
+    doc.text(`Period: ${shortDate(input.payroll.periodStart)} ~ ${shortDate(input.payroll.periodEnd)}`, margin, y); y += 13;
+    doc.text(`Payroll Date: ${shortDate(input.payroll.payrollDate)}`, margin, y); y += 13;
+    doc.text(`Name: ${snap.legalNameEn || 'User-' + String(input.payroll.id).slice(-6)}`, margin, y); y += 13;
+    doc.text(`HKID/Passport: ${snap.hkidMasked || snap.passportNoMasked || '—'}`, margin, y); y += 13;
+    doc.text(`Department: ${snap.department || '—'}     Job Title: ${snap.jobTitle || '—'}`, margin, y); y += 13;
+    y += 6;
+    const body = input.items.map((it) => [it.itemName || it.itemCode, it.itemCode || '', formatHkd(it.amountHkd)]);
+    autoTable(doc, {
+      startY: y,
+      head: [['Item', 'Code', 'Amount (HKD)']],
+      body,
+      margin: { left: margin, right: margin },
+      styles: { fontSize: 9, font: 'helvetica', fontStyle: 'normal' },
+      headStyles: { fillColor: [30, 41, 59], textColor: 255, fontStyle: 'bold' },
+      foot: [['', 'Net Payable', formatHkd(input.payroll.netPayableHkd)]],
+      footStyles: { fillColor: [254, 243, 199], fontStyle: 'bold' },
+      columnStyles: { 2: { halign: 'right' as const } },
+    });
+    y = ((doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? y) + 20;
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(10);
+    doc.text(`Say: ${numberToEnglishWords(input.payroll.netPayableHkd)}`, margin, y);
+    y += 18;
+    if (errorMsg) {
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(8);
+      doc.setTextColor(180, 20, 20);
+      doc.text(`Note: Generated with fallback layout (${errorMsg.slice(0, 120)})`, margin, y, { maxWidth: pageW - margin * 2 });
+      doc.setTextColor(0);
+      y += 14;
+    }
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'italic');
+    doc.setTextColor(100);
+    doc.text(
+      `Generated: ${new Date(input.payroll.pdfGeneratedAt || Date.now()).toLocaleString('en-HK')}  Payslip: SK11-PAY-${String(input.payroll.id).slice(-8).toUpperCase()}`,
+      pageW / 2,
+      doc.internal.pageSize.getHeight() - 30,
+      { align: 'center' },
+    );
+    return new Uint8Array(doc.output('arraybuffer') as ArrayBuffer);
+  } catch (e2) {
+    // Last-resort: absolute minimal single-page doc
+    const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.text('PAYSLIP', 300, 120, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
+    doc.text(`Net Payable: ${formatHkd(input.payroll.netPayableHkd)}`, 300, 180, { align: 'center' });
+    doc.text(`Period: ${shortDate(input.payroll.periodStart)} ~ ${shortDate(input.payroll.periodEnd)}`, 300, 210, { align: 'center' });
+    return new Uint8Array(doc.output('arraybuffer') as ArrayBuffer);
+  }
+}
+
+export function generatePayslipPdf(input: GeneratePayslipPdfInput, fontPack?: FontPack | null): Uint8Array {
+  try {
+    const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
+    let fontsLoaded: { regular: Uint8Array; bold: Uint8Array; regularFamily: string; boldFamily: string } | null = null;
+    if (fontPack && fontPack.cjkAvailable && fontPack.regular) {
+      fontsLoaded = {
+        regular: fontPack.regular,
+        bold: fontPack.bold || fontPack.regular,
+        regularFamily: fontPack.regularFamily,
+        boldFamily: fontPack.boldFamily,
+      };
+    } else {
+      try {
+        fontsLoaded = loadChineseFonts();
+      } catch (e) {
+        console.warn('[pdf.generatePayslipPdf] Inline CJK font load skipped:', String(e));
+        fontsLoaded = null;
+      }
+    }
+    let FONT_REG = 'helvetica';
+    let FONT_BOLD = 'helvetica';
+    let useCjkFallback = !fontsLoaded;
+    if (fontsLoaded) {
+      try {
+        FONT_REG = fontsLoaded.regularFamily;
+        FONT_BOLD = fontsLoaded.boldFamily;
+        doc.addFileToVFS(`${FONT_REG}.ttf`, _toBinaryStr(fontsLoaded.regular));
+        doc.addFont(`${FONT_REG}.ttf`, FONT_REG, 'normal');
+        if (fontsLoaded.boldFamily !== fontsLoaded.regularFamily) {
+          doc.addFileToVFS(`${FONT_BOLD}.ttf`, _toBinaryStr(fontsLoaded.bold));
+          doc.addFont(`${FONT_BOLD}.ttf`, FONT_BOLD, 'bold');
+        } else {
+          doc.addFont(`${FONT_REG}.ttf`, FONT_BOLD, 'bold');
+        }
+      } catch (e) {
+        useCjkFallback = true;
+        FONT_REG = 'helvetica';
+        FONT_BOLD = 'helvetica';
+        console.error('[pdf.generatePayslipPdf] CJK font register failed (fallback helvetica):', String(e));
+      }
+    }
+    const setBold = (bold: boolean) => doc.setFont(bold ? FONT_BOLD : FONT_REG, bold ? 'bold' : 'normal');
+    const pageW = doc.internal.pageSize.getWidth();
+    const margin = 40;
+    let cursorY = margin;
 
   // --- Header (company) ---
   const companyZh = input.company.COMPANY_NAME_ZH || '';
@@ -367,5 +492,9 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput): Uint8Array {
   );
   doc.setTextColor(0);
 
-  return new Uint8Array(doc.output('arraybuffer') as ArrayBuffer);
+    return new Uint8Array(doc.output('arraybuffer') as ArrayBuffer);
+  } catch (err) {
+    console.error('[pdf.generatePayslipPdf] main pipeline failed; using fallback:', String(err));
+    return generateFallbackEnPdf(input, String(err));
+  }
 }
