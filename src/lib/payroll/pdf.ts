@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { SnapshotProfile } from './calc';
+import { loadChineseFonts } from '@/lib/fonts/loadChineseFont';
 
 export type SystemSettingMap = {
   COMPANY_NAME_ZH?: string;
@@ -109,6 +110,24 @@ function numberToEnglishWords(n: number): string {
 
 export function generatePayslipPdf(input: GeneratePayslipPdfInput): Uint8Array {
   const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
+  const fonts = loadChineseFonts();
+  const FONT_REG = fonts.regularFamily;
+  const FONT_BOLD = fonts.boldFamily;
+  const toBinaryStr = (bytes: Uint8Array): string => {
+    let bin = '';
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) bin += String.fromCharCode(bytes[i]);
+    return bin;
+  };
+  doc.addFileToVFS(`${FONT_REG}.ttf`, toBinaryStr(fonts.regular));
+  doc.addFont(`${FONT_REG}.ttf`, FONT_REG, 'normal');
+  if (FONT_BOLD !== FONT_REG) {
+    doc.addFileToVFS(`${FONT_BOLD}.ttf`, toBinaryStr(fonts.bold));
+    doc.addFont(`${FONT_BOLD}.ttf`, FONT_BOLD, 'bold');
+  } else {
+    doc.addFont(`${FONT_REG}.ttf`, FONT_BOLD, 'bold');
+  }
+  const setBold = (bold: boolean) => doc.setFont(bold ? FONT_BOLD : FONT_REG, bold ? 'bold' : 'normal');
   const pageW = doc.internal.pageSize.getWidth();
   const margin = 40;
   let cursorY = margin;
@@ -120,7 +139,7 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput): Uint8Array {
   const companyPhone = input.company.COMPANY_PHONE || '';
 
   doc.setFontSize(16);
-  doc.setFont('helvetica', 'bold');
+  setBold(true);
   if (companyZh) doc.text(companyZh, pageW / 2, cursorY, { align: 'center' });
   cursorY += 20;
   doc.setFontSize(12);
@@ -128,7 +147,7 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput): Uint8Array {
   cursorY += 14;
   if (companyAddr) {
     doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
+    setBold(false);
     doc.text(companyAddr, pageW / 2, cursorY, { align: 'center' });
     cursorY += 12;
   }
@@ -143,7 +162,7 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput): Uint8Array {
   cursorY += 16;
 
   doc.setFontSize(18);
-  doc.setFont('helvetica', 'bold');
+  setBold(true);
   doc.text('PAYSLIP CERTIFICATE', pageW / 2, cursorY, { align: 'center' });
   cursorY += 16;
   doc.setFontSize(14);
@@ -151,10 +170,10 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput): Uint8Array {
   cursorY += 22;
 
   // --- Meta info (payslip #, dates) ---
-  doc.setFont('helvetica', 'normal');
+  setBold(false);
   doc.setFontSize(10);
   const currency = input.payroll.currency || 'HKD';
-  const payslipNo = `SK11-PAY-${input.payroll.id.slice(-8).toUpperCase()}`;
+  const payslipNo = `SK11-PAY-${String(input.payroll.id).slice(-8).toUpperCase()}`;
   doc.text(`Payslip No.: ${payslipNo}`, margin, cursorY);
   doc.text(`Currency: ${currency}`, pageW - margin, cursorY, { align: 'right' });
   cursorY += 12;
@@ -168,10 +187,10 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput): Uint8Array {
   const col2X = margin + 230;
   const col3X = margin + 400;
   doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
+  setBold(true);
   doc.text('Employee / 僱員資料', margin, cursorY);
   cursorY += 14;
-  doc.setFont('helvetica', 'normal');
+  setBold(false);
 
   const rowsInfo = [
     ['Name (EN):', p.legalNameEn, 'Department:', p.department || '—'],
@@ -184,13 +203,13 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput): Uint8Array {
      'DOB:', p.dateOfBirthIso ? shortDate(p.dateOfBirthIso) : '—'],
   ];
   for (const [k1, v1, k2, v2] of rowsInfo) {
-    doc.setFont('helvetica', 'bold');
+    setBold(true);
     doc.text(k1, col1X, cursorY);
-    doc.setFont('helvetica', 'normal');
+    setBold(false);
     doc.text(String(v1), col2X, cursorY);
-    doc.setFont('helvetica', 'bold');
+    setBold(true);
     doc.text(k2, col3X, cursorY);
-    doc.setFont('helvetica', 'normal');
+    setBold(false);
     doc.text(String(v2), col3X + 80, cursorY);
     cursorY += 14;
   }
@@ -232,16 +251,23 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput): Uint8Array {
 
   // Left table
   const halfW = (pageW - margin * 2 - 16) / 2;
+  const commonTableStyles = {
+    font: FONT_REG as unknown as undefined,
+    fontStyle: 'normal' as const,
+    fontSize: 9,
+    cellPadding: 3,
+    overflow: 'linebreak' as const,
+  };
   autoTable(doc, {
     startY: cursorY,
     head: leftHead,
     body: leftBody,
     foot: leftFoot,
     margin: { left: margin, right: pageW - margin - halfW },
-    styles: { fontSize: 9, cellPadding: 3, overflow: 'linebreak' },
-    headStyles: { fillColor: [30, 41, 59], textColor: 255, fontStyle: 'bold' },
-    footStyles: { fillColor: [226, 232, 240], fontStyle: 'bold' },
-    columnStyles: { 0: { cellWidth: halfW * 0.5 }, 1: { cellWidth: halfW * 0.2 }, 2: { halign: 'right', cellWidth: halfW * 0.3 } },
+    styles: { ...commonTableStyles },
+    headStyles: { fillColor: [30, 41, 59], textColor: 255, fontStyle: 'bold', font: FONT_BOLD as unknown as undefined },
+    footStyles: { fillColor: [226, 232, 240], fontStyle: 'bold', font: FONT_BOLD as unknown as undefined },
+    columnStyles: { 0: { cellWidth: halfW * 0.5 }, 1: { cellWidth: halfW * 0.2 }, 2: { halign: 'right' as const, cellWidth: halfW * 0.3 } },
     tableWidth: halfW,
     showFoot: 'lastPage',
   });
@@ -254,10 +280,10 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput): Uint8Array {
     body: rightBody,
     foot: rightFoot,
     margin: { left: margin + halfW + 16, right: margin },
-    styles: { fontSize: 9, cellPadding: 3, overflow: 'linebreak' },
-    headStyles: { fillColor: [127, 29, 29], textColor: 255, fontStyle: 'bold' },
-    footStyles: { fillColor: [254, 226, 226], fontStyle: 'bold' },
-    columnStyles: { 0: { cellWidth: halfW * 0.5 }, 1: { cellWidth: halfW * 0.2 }, 2: { halign: 'right', cellWidth: halfW * 0.3 } },
+    styles: { ...commonTableStyles },
+    headStyles: { fillColor: [127, 29, 29], textColor: 255, fontStyle: 'bold', font: FONT_BOLD as unknown as undefined },
+    footStyles: { fillColor: [254, 226, 226], fontStyle: 'bold', font: FONT_BOLD as unknown as undefined },
+    columnStyles: { 0: { cellWidth: halfW * 0.5 }, 1: { cellWidth: halfW * 0.2 }, 2: { halign: 'right' as const, cellWidth: halfW * 0.3 } },
     tableWidth: halfW,
     showFoot: 'lastPage',
   });
@@ -268,7 +294,7 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput): Uint8Array {
   // --- Totals Banner ---
   doc.setFillColor(254, 243, 199);
   doc.rect(margin, cursorY, pageW - margin * 2, 40, 'F');
-  doc.setFont('helvetica', 'bold');
+  setBold(true);
   doc.setFontSize(12);
   doc.text('Net Payable / 應發淨額:', margin + 14, cursorY + 25);
   doc.setFontSize(18);
@@ -276,14 +302,14 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput): Uint8Array {
   cursorY += 54;
 
   doc.setFontSize(10);
-  doc.setFont('helvetica', 'italic');
+  setBold(false);
   const wording = numberToEnglishWords(input.payroll.netPayableHkd);
   doc.text(`Say: ${wording}`, margin, cursorY, { maxWidth: pageW - margin * 2 });
   cursorY += 18;
 
   // --- Admin note (optional) ---
   if (input.payroll.adminNote) {
-    doc.setFont('helvetica', 'normal');
+    setBold(false);
     doc.setFontSize(9);
     doc.text(`Note / 備註: ${input.payroll.adminNote}`, margin, cursorY, { maxWidth: pageW - margin * 2 });
     cursorY += 14;
@@ -292,13 +318,13 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput): Uint8Array {
 
   // --- Electronic Signatures ---
   doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
+  setBold(true);
   const signY = cursorY;
   doc.text('Issued by / 發出人 (管理員):', margin, signY);
   doc.text('Acknowledged by / 僱員確認:', margin + 270, signY);
   doc.text('Paid / 已發薪:', pageW - margin, signY, { align: 'right' });
   cursorY += 18;
-  doc.setFont('helvetica', 'normal');
+  setBold(false);
   const issuer = input.submittedBy
     ? ((input.submittedBy.legalNameZh ? `${input.submittedBy.legalNameZh} (${input.submittedBy.legalNameEn || ''})` : input.submittedBy.legalNameEn) || '—')
     : '—';
@@ -320,7 +346,7 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput): Uint8Array {
 
   // --- Footer ---
   doc.setFontSize(8);
-  doc.setFont('helvetica', 'italic');
+  setBold(false);
   doc.setTextColor(100);
   doc.text(
     `此支薪證明為電腦簽發，毋須蓋章。Generated: ${new Date(input.payroll.pdfGeneratedAt || Date.now()).toLocaleString('en-HK')}. Payslip: ${payslipNo}.`,
