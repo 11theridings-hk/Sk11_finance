@@ -316,6 +316,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     doc.text(`${t('balance')}: ${balance.toFixed(2)}`, 150, 25)
 
     const tableData = records.map(r => [
+      r.id.slice(-8),
       new Date(r.date).toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK'),
       r.type === 'INCOME' ? t('income') : t('expense'),
       r.category?.name || '-',
@@ -327,7 +328,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
 
     autoTable(doc, {
       startY: 35,
-      head: [[t('date'), t('type'), t('category'), t('role'), t('amount'), t('note'), t('status')]],
+      head: [[t('recordIdShort'), t('date'), t('type'), t('category'), t('role'), t('amount'), t('note'), t('status')]],
       body: tableData,
       styles: { font: fontBase64 ? 'NotoSansSC' : 'helvetica' },
       headStyles: { fillColor: [66, 139, 202], font: fontBase64 ? 'NotoSansSC' : 'helvetica' }
@@ -345,53 +346,194 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     setExporting(true)
     try {
       const zip = new JSZip()
-      const folder = zip.folder(locale === 'en' ? 'accounting-details' : '會計明細')
+      const attFolder = zip.folder(locale === 'en' ? 'attachments' : t('attachmentsFolder'))
 
-      for (let i = 0; i < records.length; i++) {
+      const totalCount = records.length
+      let totalIncome = 0
+      let totalExpense = 0
+      records.forEach(r => {
+        const val = Math.abs(r.amount)
+        if (r.type === 'INCOME') totalIncome += val
+        else if (r.type === 'EXPENSE') totalExpense += val
+      })
+      const balance = totalIncome - totalExpense
+
+      const doc = createPdfDoc()
+
+      doc.setFillColor(242, 242, 247)
+      doc.rect(0, 0, 210, 40, 'F')
+
+      if (fontBase64) doc.setFont('NotoSansSC', 'bold')
+      doc.setFontSize(22)
+      doc.setTextColor(0, 122, 255)
+      doc.text(t('accountingReportPdfTitle'), 105, 25, { align: 'center' })
+
+      doc.setDrawColor(200, 200, 200)
+      doc.line(15, 45, 195, 45)
+
+      doc.setFontSize(11)
+      doc.setTextColor(100, 100, 100)
+      if (fontBase64) doc.setFont('NotoSansSC', 'normal')
+
+      const timeRangeStr = startDate && endDate
+        ? `${startDate} 至 ${endDate}`
+        : (startDate ? `${startDate} -` : (endDate ? `- ${endDate}` : t('allTime')))
+
+      const categoryName = categoryId ? categories.find(c => c.id === categoryId)?.name || t('unknown') : t('all')
+      const roleName = userId ? users.find(u => u.id === userId)?.roleName || t('unknown') : t('all')
+      const noteKeywordLabel = noteKeyword.trim() || t('all')
+      const genDate = new Date().toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK')
+
+      doc.text(`${t('statisticsPeriod')}: ${timeRangeStr}`, 15, 55)
+      doc.text(`${t('generated')}: ${genDate}`, 150, 55)
+      doc.setTextColor(150, 150, 150)
+      doc.text(`${t('filterSummary')} -> ${t('category')}: [${categoryName}] | ${t('role')}: [${roleName}]`, 15, 64)
+      doc.text(`${t('reportNoteSearch')}: [${noteKeywordLabel}]`, 15, 71)
+
+      doc.setDrawColor(220, 220, 220)
+      doc.setFillColor(250, 250, 252)
+      doc.roundedRect(15, 82, 180, 40, 3, 3, 'FD')
+
+      if (fontBase64) doc.setFont('NotoSansSC', 'bold')
+      doc.setFontSize(13)
+      doc.setTextColor(50, 50, 50)
+      doc.text(`${t('totalTransactions')}: ${totalCount}`, 25, 95)
+      if (fontBase64) doc.setFont('NotoSansSC', 'normal')
+      doc.setFontSize(11)
+      doc.setTextColor(52, 199, 89)
+      doc.text(`${t('totalIncome')}: ${totalIncome.toFixed(2)}`, 25, 108)
+      doc.setTextColor(255, 59, 48)
+      doc.text(`${t('totalExpense')}: ${totalExpense.toFixed(2)}`, 85, 108)
+      doc.setTextColor(0, 0, 0)
+      if (fontBase64) doc.setFont('NotoSansSC', 'bold')
+      doc.text(`${t('balance')}: ${balance >= 0 ? '+' : ''}${balance.toFixed(2)}`, 145, 108)
+
+      doc.setFontSize(9)
+      doc.setTextColor(130, 130, 130)
+      if (fontBase64) doc.setFont('NotoSansSC', 'normal')
+      const splitHint = doc.splitTextToSize(t('reportAttachmentsHint'), 170)
+      doc.text(splitHint, 15, 135)
+
+      for (let i = 0; i < totalCount; i++) {
         const r = records[i]
-        const doc = createPdfDoc()
-        
-        doc.setFontSize(16)
-        if (fontBase64) doc.setFont('NotoSansSC', 'bold')
-        doc.text(locale === 'en' ? 'Accounting Detail' : '會計明細單', 105, 20, { align: 'center' })
-        
-        doc.setFontSize(12)
-        if (fontBase64) doc.setFont('NotoSansSC', 'normal')
-        doc.text(`${t('date')}: ${new Date(r.date).toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK')}`, 20, 40)
-        doc.text(`${t('type')}: ${r.type === 'INCOME' ? t('income') : t('expense')}`, 20, 50)
-        doc.text(`${t('category')}: ${[r.category?.name, r.subCategory?.name, r.thirdCategory?.name].filter(Boolean).join(' / ') || '-'}`, 20, 60)
-        doc.text(`${t('amount')}: ${formatCurrency(locale, r.amount)}`, 20, 70)
-        doc.text(`${t('role')}: ${r.user?.roleName || '-'}`, 20, 80)
-        doc.text(`${t('pool')}: ${r.pool?.name || '-'}`, 20, 90)
-        doc.text(`${t('status')}: ${r.status === 'PENDING' ? t('pendingApproval') : t('approvedStored')}`, 20, 100)
-        doc.text(`${t('note')}: ${r.note || '-'}`, 20, 110)
+        doc.addPage()
 
-        const firstAttachment = r.attachments?.[0]?.fileUrl || r.attachmentUrl
-        if (firstAttachment && firstAttachment.startsWith('data:image')) {
-          doc.text(`${t('attachment')}:`, 20, 120)
-          try {
-            const match = firstAttachment.match(/^data:image\/(png|jpeg|jpg|gif);base64,/)
-            const format = match ? (match[1].toUpperCase() === 'JPG' ? 'JPEG' : match[1].toUpperCase()) : 'JPEG'
-            doc.addImage(firstAttachment, format, 20, 125, 150, 150, undefined, 'FAST')
-          } catch (e) {
-            console.error('添加图片附件失败:', e)
-            doc.text('(image failed to load)', 40, 120)
-          }
+        const allAttachUrls: string[] = []
+        if (r.attachments && Array.isArray(r.attachments)) {
+          r.attachments.forEach((a: any) => { if (a?.fileUrl) allAttachUrls.push(a.fileUrl) })
+        }
+        if (r.attachmentUrl && !allAttachUrls.includes(r.attachmentUrl)) {
+          allAttachUrls.push(r.attachmentUrl)
         }
 
-        const pdfBlob = doc.output('blob')
-        const safeDate = new Date(r.date).toLocaleDateString().replace(/\//g, '-')
-        const fileName = `${safeDate}_${r.category?.name || t('uncategorized')}_${i + 1}.pdf`
-        
-        folder?.file(fileName, pdfBlob)
+        const shortId = r.id.slice(-12)
+        doc.setDrawColor(220, 220, 220)
+        doc.setFillColor(247, 247, 250)
+        doc.roundedRect(14, 12, 182, 32, 2, 2, 'FD')
+
+        if (fontBase64) doc.setFont('NotoSansSC', 'bold')
+        doc.setFontSize(14)
+        doc.setTextColor(50, 50, 50)
+        doc.text(`${locale === 'en' ? 'Entry' : '分錄'} #${i + 1}  /  ${t('recordId')}: ${shortId}`, 18, 25)
+        doc.setFontSize(9)
+        doc.setTextColor(140, 140, 140)
+        if (fontBase64) doc.setFont('NotoSansSC', 'normal')
+        doc.text(`Full ID: ${r.id}`, 18, 35)
+
+        let y = 58
+        const labelStartX = 20
+        const valueStartX = 80
+
+        const addLabelValue = (label: string, value: string, valueColor?: [number, number, number]) => {
+          if (fontBase64) doc.setFont('NotoSansSC', 'bold')
+          doc.setFontSize(11)
+          doc.setTextColor(120, 120, 120)
+          doc.text(label, labelStartX, y)
+          if (fontBase64) doc.setFont('NotoSansSC', 'normal')
+          if (valueColor) doc.setTextColor(valueColor[0], valueColor[1], valueColor[2])
+          else doc.setTextColor(40, 40, 40)
+          const lines = doc.splitTextToSize(String(value || '-'), 105)
+          doc.text(lines, valueStartX, y)
+          y += Math.max(9, lines.length * 6)
+        }
+
+        addLabelValue(`${t('recordId')}:`, shortId)
+        addLabelValue(`${t('date')}:`, new Date(r.date).toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK'))
+        const typeLabel = r.type === 'INCOME' ? t('income') : t('expense')
+        const typeColor: [number, number, number] = r.type === 'INCOME' ? [52, 199, 89] : [255, 59, 48]
+        addLabelValue(`${t('type')}:`, typeLabel, typeColor)
+        addLabelValue(
+          `${t('category')}:`,
+          [r.category?.name, r.subCategory?.name, r.thirdCategory?.name].filter(Boolean).join(' / ') || '-'
+        )
+        addLabelValue(`${t('amount')}:`, formatCurrency(locale, r.amount), r.amount >= 0 ? [52, 199, 89] : [255, 59, 48])
+        addLabelValue(`${t('role')}:`, r.user?.roleName || '-')
+        addLabelValue(`${t('pool')}:`, r.pool?.name || '-')
+        addLabelValue(`${t('status')}:`, r.status === 'PENDING' ? t('pendingApproval') : t('approvedStored'))
+        addLabelValue(`${t('note')}:`, r.note || '-')
+
+        if (allAttachUrls.length > 0) {
+          y += 2
+          if (fontBase64) doc.setFont('NotoSansSC', 'bold')
+          doc.setFontSize(11)
+          doc.setTextColor(88, 86, 214)
+          doc.text(`${t('attachment')} (${allAttachUrls.length}):`, labelStartX, y)
+          y += 7
+          if (fontBase64) doc.setFont('NotoSansSC', 'normal')
+          doc.setFontSize(10)
+          doc.setTextColor(90, 90, 90)
+
+          for (let k = 0; k < allAttachUrls.length; k++) {
+            const dataUrl = allAttachUrls[k]
+            const mimeMatch = String(dataUrl).match(/^data:([^;,]+)(?:;[^;,]*)*;base64,/i)
+            const mimeType = mimeMatch ? mimeMatch[1].toLowerCase() : 'application/octet-stream'
+            let ext = mimeType.split('/').pop() || 'bin'
+            if (ext === 'jpeg') ext = 'jpg'
+            if (ext === 'x-icon') ext = 'ico'
+            if (['png','jpg','gif','webp','bmp','pdf','txt','csv','heic'].indexOf(ext) < 0 && mimeType.indexOf('pdf') >= 0) ext = 'pdf'
+            const safeShortId = shortId.replace(/[^a-zA-Z0-9_\-]/g, '_')
+            const attFileName = `${safeShortId}_${k + 1}.${ext}`
+            const relPath = `${locale === 'en' ? 'attachments' : t('attachmentsFolder')}/${attFileName}`
+            const prefixLine = `  [${k + 1}] ${relPath}`
+            doc.text(doc.splitTextToSize(prefixLine, 165), labelStartX, y)
+            y += 6
+
+            if (attFolder && dataUrl.startsWith('data:')) {
+              try {
+                const commaIdx = dataUrl.indexOf(',')
+                if (commaIdx > 0) {
+                  const b64 = dataUrl.substring(commaIdx + 1)
+                  const rawBin = typeof atob === 'function' ? atob(b64) : Buffer.from(b64, 'base64').toString('binary')
+                  const len = rawBin.length
+                  const u8 = new Uint8Array(len)
+                  for (let b = 0; b < len; b++) u8[b] = rawBin.charCodeAt(b)
+                  attFolder.file(attFileName, u8)
+                }
+              } catch (e) {
+                console.error('附件寫入 ZIP 失敗:', r.id, k, e)
+                y += 5
+                doc.setTextColor(255, 59, 48)
+                doc.text(`    (${t('decodeFailed')})`, labelStartX + 5, y - 5)
+                doc.setTextColor(90, 90, 90)
+              }
+            }
+          }
+        }
       }
 
+      const pdfBlob = doc.output('blob')
+      const ymd = new Date()
+      const pad = (n: number) => String(n).padStart(2, '0')
+      const stamp = `${ymd.getFullYear()}${pad(ymd.getMonth() + 1)}${pad(ymd.getDate())}`
+      const pdfName = locale === 'en' ? `accounting-report-${stamp}.pdf` : `會計明細報表_${stamp}.pdf`
+      zip.file(pdfName, pdfBlob)
+
       const zipContent = await zip.generateAsync({ type: 'blob' })
-      
+
       const url = window.URL.createObjectURL(zipContent)
       const link = document.createElement('a')
       link.href = url
-      link.download = locale === 'en' ? 'accounting-details.zip' : '會計明細.zip'
+      link.download = locale === 'en' ? `accounting-report-${stamp}.zip` : `會計明細報表_${stamp}.zip`
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
