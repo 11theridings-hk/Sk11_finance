@@ -110,22 +110,33 @@ function numberToEnglishWords(n: number): string {
 
 export function generatePayslipPdf(input: GeneratePayslipPdfInput): Uint8Array {
   const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
-  const fonts = loadChineseFonts();
-  const FONT_REG = fonts.regularFamily;
-  const FONT_BOLD = fonts.boldFamily;
-  const toBinaryStr = (bytes: Uint8Array): string => {
-    let bin = '';
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) bin += String.fromCharCode(bytes[i]);
-    return bin;
-  };
-  doc.addFileToVFS(`${FONT_REG}.ttf`, toBinaryStr(fonts.regular));
-  doc.addFont(`${FONT_REG}.ttf`, FONT_REG, 'normal');
-  if (FONT_BOLD !== FONT_REG) {
-    doc.addFileToVFS(`${FONT_BOLD}.ttf`, toBinaryStr(fonts.bold));
-    doc.addFont(`${FONT_BOLD}.ttf`, FONT_BOLD, 'bold');
-  } else {
-    doc.addFont(`${FONT_REG}.ttf`, FONT_BOLD, 'bold');
+  let FONT_REG = 'helvetica';
+  let FONT_BOLD = 'helvetica';
+  let useCjkFallback = false;
+  try {
+    const fonts = loadChineseFonts();
+    FONT_REG = fonts.regularFamily;
+    FONT_BOLD = fonts.boldFamily;
+    const toBinaryStr = (bytes: Uint8Array): string => {
+      let bin = '';
+      const len = bytes.byteLength;
+      for (let i = 0; i < len; i++) bin += String.fromCharCode(bytes[i]);
+      return bin;
+    };
+    doc.addFileToVFS(`${FONT_REG}.ttf`, toBinaryStr(fonts.regular));
+    doc.addFont(`${FONT_REG}.ttf`, FONT_REG, 'normal');
+    if (FONT_BOLD !== FONT_REG) {
+      doc.addFileToVFS(`${FONT_BOLD}.ttf`, toBinaryStr(fonts.bold));
+      doc.addFont(`${FONT_BOLD}.ttf`, FONT_BOLD, 'bold');
+    } else {
+      doc.addFont(`${FONT_REG}.ttf`, FONT_BOLD, 'bold');
+    }
+  } catch (err) {
+    useCjkFallback = true;
+    FONT_REG = 'helvetica';
+    FONT_BOLD = 'helvetica';
+    // 字型載入失敗，繼續使用 helvetica，盡量用英文抬頭 (仍保留中文但會變亂碼, 至少 PDF 可出)
+    console.error('[generatePayslipPdf] CJK font load failed (fallback to helvetica):', String(err));
   }
   const setBold = (bold: boolean) => doc.setFont(bold ? FONT_BOLD : FONT_REG, bold ? 'bold' : 'normal');
   const pageW = doc.internal.pageSize.getWidth();
@@ -140,7 +151,7 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput): Uint8Array {
 
   doc.setFontSize(16);
   setBold(true);
-  if (companyZh) doc.text(companyZh, pageW / 2, cursorY, { align: 'center' });
+  if (!useCjkFallback && companyZh) doc.text(companyZh, pageW / 2, cursorY, { align: 'center' });
   cursorY += 20;
   doc.setFontSize(12);
   doc.text(companyEn, pageW / 2, cursorY, { align: 'center' });

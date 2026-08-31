@@ -1,10 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const PROJECT_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..', '..');
-const FONT_PATH_REGULAR = join(PROJECT_ROOT, 'public', 'fonts', 'NotoSansSC-Regular.ttf');
-const FONT_PATH_BOLD = join(PROJECT_ROOT, 'public', 'fonts', 'msyh.ttf');
 
 export type ChineseFontPack = {
   regular: Uint8Array;
@@ -15,23 +10,36 @@ export type ChineseFontPack = {
 
 let cache: ChineseFontPack | null = null;
 
+function tryResolveFontPath(filename: string): string | null {
+  const candidates: string[] = [
+    join(process.cwd(), 'public', 'fonts', filename),
+    join(process.cwd(), '..', 'public', 'fonts', filename),
+    join(process.cwd(), 'src', 'public', 'fonts', filename),
+  ];
+  for (const c of candidates) {
+    try { if (existsSync(c)) return c; } catch { /* ignore */ }
+  }
+  return null;
+}
+
 export function loadChineseFonts(): ChineseFontPack {
   if (cache) return cache;
+  const regPath = tryResolveFontPath('NotoSansSC-Regular.ttf');
+  const boldPath = tryResolveFontPath('msyh.ttf');
   let regularBuf: Uint8Array;
   let boldBuf: Uint8Array;
   let regularFamily = 'NotoSansSC';
   let boldFamily = 'NotoSansSC-Bold';
-  try {
-    regularBuf = new Uint8Array(readFileSync(FONT_PATH_REGULAR));
-  } catch (_e) {
+  if (!regPath) {
     throw new Error(
-      `loadChineseFonts: 找不到 NotoSansSC-Regular.ttf (path=${FONT_PATH_REGULAR}). 請確認 public/fonts 存在。`,
+      `[loadChineseFonts] 找不到 NotoSansSC-Regular.ttf. cwd=${process.cwd()}. 請確認 public/fonts 已複製到部署容器內.`,
     );
   }
-  try {
-    boldBuf = new Uint8Array(readFileSync(FONT_PATH_BOLD));
+  regularBuf = new Uint8Array(readFileSync(regPath));
+  if (boldPath) {
+    boldBuf = new Uint8Array(readFileSync(boldPath));
     boldFamily = 'MSYaHei';
-  } catch (_e) {
+  } else {
     boldBuf = regularBuf;
     boldFamily = 'NotoSansSC';
   }
