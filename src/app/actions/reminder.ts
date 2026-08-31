@@ -46,88 +46,103 @@ function sortReminderItems(items: ReminderItem[]) {
 }
 
 export async function getContractReminderItems() {
-  const session = await getSession()
-  if (!session?.isAdmin) return []
+  try {
+    const session = await getSession()
+    if (!session?.isAdmin) return []
 
-  const contracts = await prisma.contract.findMany({
-    orderBy: [{ expiryDate: 'asc' }, { createdAt: 'desc' }],
-    select: {
-      id: true,
-      title: true,
-      expiryDate: true,
-      reminderDays: true,
-    },
-  })
-
-  const items = contracts
-    .map((contract) => {
-      const daysDiff = getDaysDiff(contract.expiryDate)
-      const bucket = getReminderBucket(daysDiff, contract.reminderDays)
-      if (!bucket) return null
-
-      return {
-        id: contract.id,
-        title: contract.title,
-        targetDate: contract.expiryDate.toISOString(),
-        bucket,
-        daysDiff,
-        reminderDays: contract.reminderDays,
-        href: '/contracts',
-      } satisfies ReminderItem
+    const contracts = await prisma.contract.findMany({
+      orderBy: [{ expiryDate: 'asc' }, { createdAt: 'desc' }],
+      select: {
+        id: true,
+        title: true,
+        expiryDate: true,
+        reminderDays: true,
+      },
     })
-    .filter(Boolean) as ReminderItem[]
 
-  return sortReminderItems(items)
+    const items = contracts
+      .map((contract) => {
+        const daysDiff = getDaysDiff(contract.expiryDate)
+        const bucket = getReminderBucket(daysDiff, contract.reminderDays)
+        if (!bucket) return null
+
+        return {
+          id: contract.id,
+          title: contract.title,
+          targetDate: contract.expiryDate.toISOString(),
+          bucket,
+          daysDiff,
+          reminderDays: contract.reminderDays,
+          href: '/contracts',
+        } satisfies ReminderItem
+      })
+      .filter(Boolean) as ReminderItem[]
+
+    return sortReminderItems(items)
+  } catch (_e) {
+    // Graceful degradation: if the DB is missing the new column (reminderDays) because
+    // migration hasn't been applied yet, return an empty list instead of crashing SSR.
+    return []
+  }
 }
 
 export async function getActivityReminderItems() {
-  const session = await getSession()
-  if (!session) return []
+  try {
+    const session = await getSession()
+    if (!session) return []
 
-  const activities = await prisma.activity.findMany({
-    where: {
-      OR: [{ visibility: 'PUBLIC' }, { userId: session.userId }],
-    },
-    orderBy: [{ eventDate: 'asc' }, { createdAt: 'desc' }],
-    select: {
-      id: true,
-      title: true,
-      eventDate: true,
-      reminderDays: true,
-    },
-  })
-
-  const items = activities
-    .map((activity) => {
-      const daysDiff = getDaysDiff(activity.eventDate)
-      const bucket = getReminderBucket(daysDiff, activity.reminderDays)
-      if (!bucket) return null
-
-      return {
-        id: activity.id,
-        title: activity.title,
-        targetDate: activity.eventDate.toISOString(),
-        bucket,
-        daysDiff,
-        reminderDays: activity.reminderDays,
-        href: '/activities',
-      } satisfies ReminderItem
+    const activities = await prisma.activity.findMany({
+      where: {
+        OR: [{ visibility: 'PUBLIC' }, { userId: session.userId }],
+      },
+      orderBy: [{ eventDate: 'asc' }, { createdAt: 'desc' }],
+      select: {
+        id: true,
+        title: true,
+        eventDate: true,
+        reminderDays: true,
+      },
     })
-    .filter(Boolean) as ReminderItem[]
 
-  return sortReminderItems(items)
+    const items = activities
+      .map((activity) => {
+        const daysDiff = getDaysDiff(activity.eventDate)
+        const bucket = getReminderBucket(daysDiff, activity.reminderDays)
+        if (!bucket) return null
+
+        return {
+          id: activity.id,
+          title: activity.title,
+          targetDate: activity.eventDate.toISOString(),
+          bucket,
+          daysDiff,
+          reminderDays: activity.reminderDays,
+          href: '/activities',
+        } satisfies ReminderItem
+      })
+      .filter(Boolean) as ReminderItem[]
+
+    return sortReminderItems(items)
+  } catch (_e) {
+    // Graceful degradation: see note in getContractReminderItems.
+    return []
+  }
 }
 
 export async function getReminderOverview() {
-  const [contracts, activities] = await Promise.all([
-    getContractReminderItems(),
-    getActivityReminderItems(),
-  ])
+  try {
+    const [contracts, activities] = await Promise.all([
+      getContractReminderItems(),
+      getActivityReminderItems(),
+    ])
 
-  return {
-    contracts,
-    activities,
-    contractCount: contracts.length,
-    activityCount: activities.length,
+    return {
+      contracts,
+      activities,
+      contractCount: contracts.length,
+      activityCount: activities.length,
+    }
+  } catch (_e) {
+    return { contracts: [], activities: [], contractCount: 0, activityCount: 0 }
   }
 }

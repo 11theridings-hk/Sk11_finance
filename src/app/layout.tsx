@@ -47,10 +47,18 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   } = { contracts: [], activities: [], contractCount: 0, activityCount: 0 };
 
   if (session?.isAdmin) {
-    pendingCount = await getPendingReviewCount();
+    try {
+      pendingCount = await getPendingReviewCount()
+    } catch (_e) {
+      pendingCount = 0
+    }
   }
   if (session) {
-    reminderOverview = await getReminderOverview();
+    try {
+      reminderOverview = await getReminderOverview()
+    } catch (_e) {
+      reminderOverview = { contracts: [], activities: [], contractCount: 0, activityCount: 0 }
+    }
   }
   return (
     <html

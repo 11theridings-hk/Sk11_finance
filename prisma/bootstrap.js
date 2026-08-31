@@ -5,7 +5,6 @@ const { spawnSync } = require('child_process');
 
 const prisma = new PrismaClient();
 const APP_ROOT = path.resolve(__dirname, '..');
-const IDEMPOTENT_SQL = path.join(__dirname, 'idempotent-migration.sql');
 
 const LEGACY_MIGRATIONS = [
   '20260812143457_init',
@@ -35,38 +34,63 @@ function run(cmd, args) {
 }
 
 async function columnExists(tableName, columnName) {
-  const rows =
-    await prisma.$queryRaw`SELECT EXISTS (
-      SELECT FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name = ${tableName} AND column_name = ${columnName}
-    ) as "exists"`;
-  return !!(rows && rows[0] && rows[0].exists);
+  try {
+    const rows =
+      await prisma.$queryRaw`SELECT EXISTS (
+        SELECT FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = ${tableName} AND column_name = ${columnName}
+      ) as "exists"`;
+    return !!(rows && rows[0] && rows[0].exists);
+  } catch (e) {
+    console.warn(`[bootstrap] columnExists(${tableName}, ${columnName}) failed: ${e && e.message}`);
+    return false;
+  }
 }
 
 async function tableExists(tableName) {
-  const rows =
-    await prisma.$queryRaw`SELECT EXISTS (
-      SELECT FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name = ${tableName}
-    ) as "exists"`;
-  return !!(rows && rows[0] && rows[0].exists);
+  try {
+    const rows =
+      await prisma.$queryRaw`SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = ${tableName}
+      ) as "exists"`;
+    return !!(rows && rows[0] && rows[0].exists);
+  } catch (e) {
+    console.warn(`[bootstrap] tableExists(${tableName}) failed: ${e && e.message}`);
+    return false;
+  }
 }
 
 async function getMigrationRows() {
   try {
     return await prisma.$queryRawUnsafe(
-      `SELECT migration_name, finished_at, rolled_back_at FROM _prisma_migrations`,
+      `SELECT migration_name, started_at, finished_at, rolled_back_at FROM _prisma_migrations`,
     );
   } catch (_e) {
     return [];
   }
 }
 
+function isApplied(row) {
+  // finished_at is set on success; absence of rolled_back_at is not sufficient.
+  return !!(row && row.finished_at && !row.rolled_back_at);
+}
+
+function isFailed(row) {
+  // Started running but never finished, and not marked rolled back.
+  return !!(row && row.started_at && !row.finished_at && !row.rolled_back_at);
+}
+
 async function resetFailedMigrations() {
   const rows = await getMigrationRows();
-  const failed = rows.filter((r) => r.finished_at == null && r.rolled_back_at == null);
-  if (failed.length === 0) return;
-  console.log(`[bootstrap] Found ${failed.length} failed/pending migrations in _prisma_migrations. Resolving as --rolled-back.`);
+  const failed = rows.filter(isFailed);
+  if (failed.length === 0) {
+    console.log('[bootstrap] No failed/pending migrations found.');
+    return;
+  }
+  console.log(
+    `[bootstrap] Found ${failed.length} failed/pending migrations. Resolving each as --rolled-back.`,
+  );
   for (const r of failed) {
     run('npx', ['prisma', 'migrate', 'resolve', '--rolled-back', r.migration_name]);
   }
@@ -74,72 +98,175 @@ async function resetFailedMigrations() {
 
 async function markAppliedIfMissing(names) {
   const rows = await getMigrationRows();
-  const appliedNames = new Set(
-    rows.filter((r) => r.finished_at != null || r.rolled_back_at == null).map((r) => r.migration_name),
-  );
+  const byName = new Map(rows.map((r) => [r.migration_name, r]));
   for (const name of names) {
-    if (!appliedNames.has(name)) {
+    const row = byName.get(name);
+    if (!isApplied(row)) {
       run('npx', ['prisma', 'migrate', 'resolve', '--applied', name]);
-      appliedNames.add(name);
     }
   }
 }
 
+async function execSafe(label, sql) {
+  console.log(`[bootstrap] -> ${label} ...`);
+  try {
+    const result = await prisma.$executeRawUnsafe(sql);
+    console.log(`[bootstrap]    ${label} OK (raw result: ${JSON.stringify(result)})`);
+    return true;
+  } catch (e) {
+    const msg = (e && e.message) || String(e);
+    console.warn(`[bootstrap]    ${label} skipped/non-fatal: ${msg}`);
+    return false;
+  }
+}
+
+async function applyProgrammaticDDL() {
+  const before = {
+    SystemSetting: await tableExists('SystemSetting'),
+    UserOcrEnabled: await columnExists('User', 'ocrEnabled'),
+    PrivateCustomCategory: await columnExists('PrivateRecord', 'customCategory'),
+    ContractReminderDays: await columnExists('Contract', 'reminderDays'),
+    ContractCategoryId: await columnExists('Contract', 'categoryId'),
+  };
+  console.log(
+    `[bootstrap] Pre-DDL state: ${JSON.stringify(before)}`,
+  );
+
+  // Step 1: User.ocrEnabled
+  if (!before.UserOcrEnabled) {
+    await execSafe(
+      'ALTER TABLE "User" ADD COLUMN "ocrEnabled" BOOLEAN NOT NULL DEFAULT true',
+      `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "ocrEnabled" BOOLEAN NOT NULL DEFAULT true`,
+    );
+  } else {
+    console.log('[bootstrap] -> User.ocrEnabled already exists; skipping.');
+  }
+
+  // Step 2: PrivateRecord.customCategory
+  if (!before.PrivateCustomCategory) {
+    await execSafe(
+      'ALTER TABLE "PrivateRecord" ADD COLUMN "customCategory" TEXT',
+      `ALTER TABLE "PrivateRecord" ADD COLUMN IF NOT EXISTS "customCategory" TEXT`,
+    );
+  } else {
+    console.log('[bootstrap] -> PrivateRecord.customCategory already exists; skipping.');
+  }
+
+  // Step 3: Contract.reminderDays
+  if (!before.ContractReminderDays) {
+    await execSafe(
+      'ALTER TABLE "Contract" ADD COLUMN "reminderDays" INTEGER NOT NULL DEFAULT 15',
+      `ALTER TABLE "Contract" ADD COLUMN IF NOT EXISTS "reminderDays" INTEGER NOT NULL DEFAULT 15`,
+    );
+  } else {
+    console.log('[bootstrap] -> Contract.reminderDays already exists; skipping.');
+  }
+
+  // Step 4: Contract.categoryId nullable
+  if (before.ContractCategoryId) {
+    try {
+      const nullableRows =
+        await prisma.$queryRaw`SELECT is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name='Contract' AND column_name='categoryId'`;
+      const isNullable = nullableRows && nullableRows[0] && nullableRows[0].is_nullable === 'YES';
+      if (!isNullable) {
+        await execSafe(
+          'ALTER TABLE "Contract" ALTER COLUMN "categoryId" DROP NOT NULL',
+          `ALTER TABLE "Contract" ALTER COLUMN "categoryId" DROP NOT NULL`,
+        );
+      } else {
+        console.log('[bootstrap] -> Contract.categoryId already nullable; skipping.');
+      }
+    } catch (e) {
+      console.warn(
+        `[bootstrap]    Could not inspect Contract.categoryId nullable state: ${e && e.message}`,
+      );
+    }
+  }
+
+  // Step 5: SystemSetting table + unique index
+  if (!before.SystemSetting) {
+    await execSafe(
+      'CREATE TABLE "SystemSetting" (...)',
+      `CREATE TABLE IF NOT EXISTS "SystemSetting" (
+        "id" TEXT NOT NULL,
+        "key" TEXT NOT NULL,
+        "value" TEXT NOT NULL,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL,
+        CONSTRAINT "SystemSetting_pkey" PRIMARY KEY ("id")
+      )`,
+    );
+    await execSafe(
+      'CREATE UNIQUE INDEX "SystemSetting_key_key"',
+      `CREATE UNIQUE INDEX IF NOT EXISTS "SystemSetting_key_key" ON "SystemSetting"("key")`,
+    );
+  } else {
+    console.log('[bootstrap] -> SystemSetting table already exists; skipping.');
+    try {
+      await execSafe(
+        'CREATE UNIQUE INDEX IF NOT EXISTS "SystemSetting_key_key" (safety)',
+        `CREATE UNIQUE INDEX IF NOT EXISTS "SystemSetting_key_key" ON "SystemSetting"("key")`,
+      );
+    } catch (_e) {
+      /* ignore */
+    }
+  }
+
+  const after = {
+    SystemSetting: await tableExists('SystemSetting'),
+    UserOcrEnabled: await columnExists('User', 'ocrEnabled'),
+    PrivateCustomCategory: await columnExists('PrivateRecord', 'customCategory'),
+    ContractReminderDays: await columnExists('Contract', 'reminderDays'),
+  };
+  console.log(`[bootstrap] Post-DDL state: ${JSON.stringify(after)}`);
+  return after;
+}
+
 async function main() {
-  console.log('[bootstrap] Starting bootstrap (baseline + idempotent SQL + migrate + start).');
+  console.log('[bootstrap] ===============================================================');
+  console.log('[bootstrap] bootstrap.js entry: baseline legacy migrations -> DDL -> migrate deploy -> start Next.js');
+  console.log('[bootstrap] ===============================================================');
 
   const rows = await getMigrationRows();
-  console.log(`[bootstrap] Rows in _prisma_migrations: ${rows.length}`);
+  console.log(`[bootstrap] _prisma_migrations rows present: ${rows.length}`);
+  for (const r of rows) {
+    console.log(
+      `[bootstrap]   - ${r.migration_name}  started=${!!r.started_at}  finished=${!!r.finished_at}  rolled_back=${!!r.rolled_back_at}`,
+    );
+  }
 
-  // 1) Handle legacy baseline (if _prisma_migrations missing first 4, but tables exist).
+  // 1. Legacy baseline (tables exist but no _prisma_migrations rows).
   const hasPrivateRecord = await tableExists('PrivateRecord');
   if (hasPrivateRecord) {
-    console.log('[bootstrap] Legacy tables detected. Marking 4 legacy migrations as --applied if missing.');
+    console.log(
+      '[bootstrap] Legacy tables detected (PrivateRecord exists). Marking first 4 migrations as --applied if missing.',
+    );
     await markAppliedIfMissing(LEGACY_MIGRATIONS);
   }
 
-  // 2) Reset any failed (started, not finished) migrations so prisma migrate deploy can advance.
+  // 2. Reset any failed rows (P3009).
   await resetFailedMigrations();
 
-  // 3) Run the idempotent SQL for the new migration (safe even if partially applied already).
-  //    Then mark the migration row as --applied.
-  if (fs.existsSync(IDEMPOTENT_SQL)) {
-    const hasSystemSetting = await tableExists('SystemSetting');
-    const hasOcrEnabled = await columnExists('User', 'ocrEnabled');
-    const hasCustomCategory = await columnExists('PrivateRecord', 'customCategory');
-    const hasContractReminderDays = await columnExists('Contract', 'reminderDays');
-    console.log(
-      `[bootstrap] Before idempotent SQL: SystemSetting=${hasSystemSetting}, User.ocrEnabled=${hasOcrEnabled}, PrivateRecord.customCategory=${hasCustomCategory}, Contract.reminderDays=${hasContractReminderDays}`,
-    );
+  // 3. Apply programmatic DDL for the new migration (5 individual steps).
+  await applyProgrammaticDDL();
 
-    console.log('[bootstrap] Executing idempotent SQL from prisma/idempotent-migration.sql ...');
-    const sql = fs.readFileSync(IDEMPOTENT_SQL, 'utf8');
-    try {
-      await prisma.$executeRawUnsafe(sql);
-      console.log('[bootstrap] idempotent SQL executed successfully.');
-    } catch (e) {
-      // If this is "already applied / no-op", DO NOT FATAL — we continue to mark applied.
-      const msg = (e && e.message) || String(e);
-      console.warn(`[bootstrap] idempotent SQL returned non-fatal warning: ${msg}. Continuing...`);
-    }
+  // 4. Mark the new migration applied.
+  await markAppliedIfMissing(NEW_PROGRAMMATIC_MIGRATIONS);
 
-    // Now mark the programmatic migration row as applied so prisma migrate deploy stays stable.
-    await markAppliedIfMissing(NEW_PROGRAMMATIC_MIGRATIONS);
-  }
-
-  // 4) Finally, run prisma migrate deploy — should be a no-op on successful path,
-  //    but guarantees any future added migrations get applied properly.
-  console.log('[bootstrap] Running prisma migrate deploy (final pass)...');
+  // 5. Final prisma migrate deploy pass.
+  console.log('[bootstrap] Running prisma migrate deploy (final verification pass)...');
   run('npx', ['prisma', 'migrate', 'deploy']);
 
   await prisma.$disconnect();
 
-  console.log('[bootstrap] Migrations OK. Starting Next.js server (server.js).');
+  console.log('[bootstrap] Migrations OK. Starting Next.js server (require server.js).');
   require(path.join(APP_ROOT, 'server.js'));
 }
 
 main().catch(async (e) => {
-  console.error('[bootstrap] FATAL:', e);
+  console.error('[bootstrap] ===============================================================');
+  console.error('[bootstrap] FATAL bootstrap error:', e);
+  console.error('[bootstrap] ===============================================================');
   try {
     await prisma.$disconnect();
   } catch (_e) {
