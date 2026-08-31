@@ -11,6 +11,8 @@ export type FontPack = {
   cjkAvailable: boolean;
 };
 
+export type PdfLocale = 'bilingual' | 'zh' | 'en';
+
 export type SystemSettingMap = {
   COMPANY_NAME_ZH?: string;
   COMPANY_NAME_EN?: string;
@@ -72,6 +74,49 @@ function shortDate(d: Date | string | null | undefined): string {
   const day = String(x.getDate()).padStart(2, '0');
   return `${day}/${m}/${y}`;
 }
+
+type L = Record<'zh' | 'en' | 'bilingual', string>;
+const label = (k: L, locale: PdfLocale): string => {
+  if (locale === 'zh') return k.zh;
+  if (locale === 'en') return k.en;
+  return k.bilingual; // zh + en 並列
+};
+const T = {
+  payslipTitle: {
+    zh: '支 薪 證 明',
+    en: 'PAYSLIP CERTIFICATE',
+    bilingual: 'PAYSLIP CERTIFICATE\n支 薪 證 明',
+  } as L,
+  employeeBlock: { zh: '僱員資料', en: 'Employee Info', bilingual: 'Employee / 僱員資料' } as L,
+  nameEn: { zh: '英文姓名', en: 'Name (EN)', bilingual: 'Name (EN) / 英文姓名' } as L,
+  nameZh: { zh: '中文姓名', en: 'Name (ZH)', bilingual: 'Name (中) / 中文姓名' } as L,
+  hkid: { zh: '身份證/護照', en: 'HKID / Passport', bilingual: 'HKID/Passport / 身份證/護照' } as L,
+  mpfNo: { zh: '強積金帳號', en: 'MPF No.', bilingual: 'MPF No. / 強積金帳號' } as L,
+  contact: { zh: '聯絡資訊', en: 'Contact', bilingual: 'Contact / 聯絡資訊' } as L,
+  department: { zh: '部門', en: 'Department', bilingual: 'Department / 部門' } as L,
+  jobTitle: { zh: '職稱', en: 'Job Title', bilingual: 'Job Title / 職稱' } as L,
+  dateJoined: { zh: '入職日期', en: 'Date Joined', bilingual: 'Date Joined / 入職日' } as L,
+  bank: { zh: '銀行帳號', en: 'Bank', bilingual: 'Bank / 銀行' } as L,
+  dob: { zh: '出生日期', en: 'DOB', bilingual: 'DOB / 出生日期' } as L,
+  incomeTableHead: { zh: '收入項目', en: 'Income Items', bilingual: 'Income / 收入項目' } as L,
+  deductionTableHead: { zh: '扣除項目', en: 'Deductions', bilingual: 'Deductions / 扣除項目' } as L,
+  code: { zh: '編碼', en: 'Code', bilingual: 'Code / 編碼' } as L,
+  amount: { zh: '金額', en: 'Amount', bilingual: 'Amount / 金額' } as L,
+  grossTotal: { zh: '收入總額', en: 'Gross Total', bilingual: 'Gross Total / 收入總額' } as L,
+  deductionTotal: { zh: '扣除總額', en: 'Deduction Total', bilingual: 'Deduction Total / 扣除總額' } as L,
+  netPayable: { zh: '應發淨額', en: 'Net Payable', bilingual: 'Net Payable / 應發淨額' } as L,
+  issuedBy: { zh: '發出人（管理員）', en: 'Issued by', bilingual: 'Issued by / 發出人（管理員）' } as L,
+  acknowledgedBy: { zh: '僱員確認', en: 'Acknowledged by', bilingual: 'Acknowledged by / 僱員確認' } as L,
+  paid: { zh: '已發薪', en: 'Paid', bilingual: 'Paid / 已發薪' } as L,
+  notYetPaid: { zh: '尚未發薪', en: 'Not yet paid', bilingual: 'Not yet paid / 尚未發薪' } as L,
+  confirmed: { zh: '已確認（電子接受）', en: 'Confirmed (Electronic Acceptance)', bilingual: 'Confirmed / 已確認（電子接受）' } as L,
+  footerNote: {
+    zh: '此支薪證明為電腦簽發，毋須蓋章。',
+    en: 'This payslip is computer-generated, no stamp required.',
+    bilingual: '此支薪證明為電腦簽發，毋須蓋章。This payslip is computer-generated, no stamp required.',
+  } as L,
+  note: { zh: '備註', en: 'Note', bilingual: 'Note / 備註' } as L,
+};
 
 function numberToEnglishWords(n: number): string {
   // HKD amount in English, pragmatic for common salary ranges
@@ -150,7 +195,7 @@ export function registerFonts(doc: jsPDF, pack: FontPack): { fontReg: string; fo
   return { fontReg, fontBold, cjk };
 }
 
-export function generateFallbackEnPdf(input: GeneratePayslipPdfInput, errorMsg?: string): Uint8Array {
+export function generateFallbackEnPdf(input: GeneratePayslipPdfInput, errorMsg?: string, locale: PdfLocale = 'en'): Uint8Array {
   try {
     const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
     doc.setFont('helvetica', 'bold');
@@ -222,28 +267,31 @@ export function generateFallbackEnPdf(input: GeneratePayslipPdfInput, errorMsg?:
   }
 }
 
-export function generatePayslipPdf(input: GeneratePayslipPdfInput, fontPack?: FontPack | null): Uint8Array {
+export function generatePayslipPdf(input: GeneratePayslipPdfInput, fontPack?: FontPack | null, locale: PdfLocale = 'bilingual'): Uint8Array {
+  const L = (k: L): string => label(k, locale);
   try {
     const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
     let fontsLoaded: { regular: Uint8Array; bold: Uint8Array; regularFamily: string; boldFamily: string } | null = null;
-    if (fontPack && fontPack.cjkAvailable && fontPack.regular) {
-      fontsLoaded = {
-        regular: fontPack.regular,
-        bold: fontPack.bold || fontPack.regular,
-        regularFamily: fontPack.regularFamily,
-        boldFamily: fontPack.boldFamily,
-      };
-    } else {
-      try {
-        fontsLoaded = loadChineseFonts();
-      } catch (e) {
-        console.warn('[pdf.generatePayslipPdf] Inline CJK font load skipped:', String(e));
-        fontsLoaded = null;
+    if (locale !== 'en') {
+      if (fontPack && fontPack.cjkAvailable && fontPack.regular) {
+        fontsLoaded = {
+          regular: fontPack.regular,
+          bold: fontPack.bold || fontPack.regular,
+          regularFamily: fontPack.regularFamily,
+          boldFamily: fontPack.boldFamily,
+        };
+      } else {
+        try {
+          fontsLoaded = loadChineseFonts();
+        } catch (e) {
+          console.warn('[pdf.generatePayslipPdf] Inline CJK font load skipped:', String(e));
+          fontsLoaded = null;
+        }
       }
     }
     let FONT_REG = 'helvetica';
     let FONT_BOLD = 'helvetica';
-    let useCjkFallback = !fontsLoaded;
+    let useCjkFallback = !fontsLoaded && locale !== 'en';
     if (fontsLoaded) {
       try {
         FONT_REG = fontsLoaded.regularFamily;
@@ -267,7 +315,6 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput, fontPack?: Fo
     const pageW = doc.internal.pageSize.getWidth();
     const margin = 40;
     let cursorY = margin;
-
   // --- Header (company) ---
   const companyZh = input.company.COMPANY_NAME_ZH || '';
   const companyEn = input.company.COMPANY_NAME_EN || 'SK11 Finance Limited';
@@ -276,8 +323,13 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput, fontPack?: Fo
 
   doc.setFontSize(16);
   setBold(true);
-  if (!useCjkFallback && companyZh) doc.text(companyZh, pageW / 2, cursorY, { align: 'center' });
-  cursorY += 20;
+  if (locale === 'bilingual' && companyZh) {
+    doc.text(companyZh, pageW / 2, cursorY, { align: 'center' });
+    cursorY += 18;
+  } else if (locale === 'zh') {
+    doc.text(companyZh || companyEn, pageW / 2, cursorY, { align: 'center' });
+    cursorY += 18;
+  }
   doc.setFontSize(12);
   doc.text(companyEn, pageW / 2, cursorY, { align: 'center' });
   cursorY += 14;
@@ -297,13 +349,15 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput, fontPack?: Fo
   doc.line(margin, cursorY, pageW - margin, cursorY);
   cursorY += 16;
 
-  doc.setFontSize(18);
-  setBold(true);
-  doc.text('PAYSLIP CERTIFICATE', pageW / 2, cursorY, { align: 'center' });
-  cursorY += 16;
-  doc.setFontSize(14);
-  doc.text('支 薪 證 明', pageW / 2, cursorY, { align: 'center' });
-  cursorY += 22;
+  const payslipTitle = L(T.payslipTitle);
+  const parts = payslipTitle.split('\n');
+  for (let i = 0; i < parts.length; i++) {
+    doc.setFontSize(i === 0 && parts.length > 1 ? 18 : (parts.length === 1 ? 18 : 14));
+    setBold(true);
+    doc.text(parts[i], pageW / 2, cursorY, { align: 'center' });
+    cursorY += (parts.length > 1 && i === 0 ? 20 : 18);
+  }
+  cursorY += 4;
 
   // --- Meta info (payslip #, dates) ---
   setBold(false);
@@ -324,19 +378,19 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput, fontPack?: Fo
   const col3X = margin + 400;
   doc.setFontSize(10);
   setBold(true);
-  doc.text('Employee / 僱員資料', margin, cursorY);
+  doc.text(L(T.employeeBlock), margin, cursorY);
   cursorY += 14;
   setBold(false);
 
-  const rowsInfo = [
-    ['Name (EN):', p.legalNameEn, 'Department:', p.department || '—'],
-    ['Name (中):', p.legalNameZh || '—', 'Job Title:', p.jobTitle || '—'],
-    ['HKID / Passport:', (p.hkidMasked || p.passportNoMasked) ? `${p.hkidMasked || ''} ${p.passportNoMasked || ''}`.trim() : '—',
-     'Date Joined:', p.dateJoinedIso ? shortDate(p.dateJoinedIso) : '—'],
-    ['MPF No.:', p.mpfAccountNoMasked || '—',
-     'Bank:', (p.bankName || '—') + (p.bankAccountNoLast4 ? ` (尾 4 碼 ${p.bankAccountNoLast4})` : '')],
-    ['Contact:', [p.contactPhone, p.contactEmail].filter(Boolean).join(' / ') || '—',
-     'DOB:', p.dateOfBirthIso ? shortDate(p.dateOfBirthIso) : '—'],
+  const rowsInfo: [string, string, string, string][] = [
+    [L(T.nameEn), p.legalNameEn, L(T.department), p.department || '—'],
+    [L(T.nameZh), p.legalNameZh || '—', L(T.jobTitle), p.jobTitle || '—'],
+    [L(T.hkid), (p.hkidMasked || p.passportNoMasked) ? `${p.hkidMasked || ''} ${p.passportNoMasked || ''}`.trim() : '—',
+     L(T.dateJoined), p.dateJoinedIso ? shortDate(p.dateJoinedIso) : '—'],
+    [L(T.mpfNo), p.mpfAccountNoMasked || '—',
+     L(T.bank), (p.bankName || '—') + (p.bankAccountNoLast4 ? ` (尾 4 碼 ${p.bankAccountNoLast4})` : '')],
+    [L(T.contact), [p.contactPhone, p.contactEmail].filter(Boolean).join(' / ') || '—',
+     L(T.dob), p.dateOfBirthIso ? shortDate(p.dateOfBirthIso) : '—'],
   ];
   for (const [k1, v1, k2, v2] of rowsInfo) {
     setBold(true);
@@ -379,11 +433,11 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput, fontPack?: Fo
   const totalEarning = earnings.reduce((s, it) => s + it.amountHkd, 0);
   const totalDeduct = deductions.reduce((s, it) => s + it.amountHkd, 0);
 
-  const leftHead = [['Income / 收入項目', 'Code / 編碼', 'Amount / 金額']];
-  const rightHead = [['Deductions / 扣除項目', 'Code / 編碼', 'Amount / 金額']];
+  const leftHead = [[L(T.incomeTableHead), L(T.code), L(T.amount)]];
+  const rightHead = [[L(T.deductionTableHead), L(T.code), L(T.amount)]];
 
-  const leftFoot = [['', '收入總額 / Gross Total', formatHkd(totalEarning)]];
-  const rightFoot = [['', '扣除總額 / Deduction Total', formatHkd(totalDeduct)]];
+  const leftFoot = [['', L(T.grossTotal), formatHkd(totalEarning)]];
+  const rightFoot = [['', L(T.deductionTotal), formatHkd(totalDeduct)]];
 
   // Left table
   const halfW = (pageW - margin * 2 - 16) / 2;
@@ -432,7 +486,7 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput, fontPack?: Fo
   doc.rect(margin, cursorY, pageW - margin * 2, 40, 'F');
   setBold(true);
   doc.setFontSize(12);
-  doc.text('Net Payable / 應發淨額:', margin + 14, cursorY + 25);
+  doc.text(`${L(T.netPayable)}:`, margin + 14, cursorY + 25);
   doc.setFontSize(18);
   doc.text(formatHkd(input.payroll.netPayableHkd), pageW - margin - 14, cursorY + 27, { align: 'right' });
   cursorY += 54;
@@ -447,7 +501,7 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput, fontPack?: Fo
   if (input.payroll.adminNote) {
     setBold(false);
     doc.setFontSize(9);
-    doc.text(`Note / 備註: ${input.payroll.adminNote}`, margin, cursorY, { maxWidth: pageW - margin * 2 });
+    doc.text(`${L(T.note)}: ${input.payroll.adminNote}`, margin, cursorY, { maxWidth: pageW - margin * 2 });
     cursorY += 14;
   }
   cursorY += 8;
@@ -456,9 +510,9 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput, fontPack?: Fo
   doc.setFontSize(10);
   setBold(true);
   const signY = cursorY;
-  doc.text('Issued by / 發出人 (管理員):', margin, signY);
-  doc.text('Acknowledged by / 僱員確認:', margin + 270, signY);
-  doc.text('Paid / 已發薪:', pageW - margin, signY, { align: 'right' });
+  doc.text(`${L(T.issuedBy)}:`, margin, signY);
+  doc.text(`${L(T.acknowledgedBy)}:`, margin + 270, signY);
+  doc.text(`${L(T.paid)}:`, pageW - margin, signY, { align: 'right' });
   cursorY += 18;
   setBold(false);
   const issuer = input.submittedBy
@@ -467,13 +521,13 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput, fontPack?: Fo
   doc.text(issuer, margin, cursorY);
   doc.text(
     input.payroll.confirmedAt
-      ? `已確認 (${shortDate(input.payroll.confirmedAt)})  Electronic Acceptance`
+      ? `${L(T.confirmed)} (${shortDate(input.payroll.confirmedAt)})`
       : '—',
     margin + 270,
     cursorY,
   );
   doc.text(
-    input.payroll.paidAt ? `PAID (${shortDate(input.payroll.paidAt)})` : 'Not yet paid',
+    input.payroll.paidAt ? `${L(T.paid)} (${shortDate(input.payroll.paidAt)})` : L(T.notYetPaid),
     pageW - margin,
     cursorY,
     { align: 'right' },
@@ -485,7 +539,7 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput, fontPack?: Fo
   setBold(false);
   doc.setTextColor(100);
   doc.text(
-    `此支薪證明為電腦簽發，毋須蓋章。Generated: ${new Date(input.payroll.pdfGeneratedAt || Date.now()).toLocaleString('en-HK')}. Payslip: ${payslipNo}.`,
+    `${L(T.footerNote)} Generated: ${new Date(input.payroll.pdfGeneratedAt || Date.now()).toLocaleString('en-HK')}. Payslip: ${payslipNo}.`,
     pageW / 2,
     doc.internal.pageSize.getHeight() - 30,
     { align: 'center' },
@@ -495,6 +549,6 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput, fontPack?: Fo
     return new Uint8Array(doc.output('arraybuffer') as ArrayBuffer);
   } catch (err) {
     console.error('[pdf.generatePayslipPdf] main pipeline failed; using fallback:', String(err));
-    return generateFallbackEnPdf(input, String(err));
+    return generateFallbackEnPdf(input, String(err), locale === 'en' ? 'en' : 'bilingual');
   }
 }

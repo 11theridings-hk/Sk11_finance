@@ -17,6 +17,14 @@ import {
   downloadPayrollPdf,
   type PayrollStatus,
 } from '@/app/actions/payroll';
+import { createTranslator, normalizeLocale, type Locale } from '@/lib/i18n';
+
+type PdfLocale = 'bilingual' | 'zh' | 'en';
+function getBrowserLocaleFromCookieOrFallback(): Locale {
+  if (typeof document === 'undefined') return 'zh-HK';
+  const m = document.cookie.match(/(?:^|; )locale=([^;]+)/);
+  return normalizeLocale(m?.[1]);
+}
 
 type Props = {
   userId: string;
@@ -81,41 +89,7 @@ function toIsoDay(s: unknown): string {
 }
 const shortDate = toIsoDay;
 
-const statusChip = (s: string) => {
-  const map: Record<string, { label: string; cls: string }> = {
-    DRAFT: { label: '草稿', cls: 'bg-slate-100 text-slate-700 border border-slate-300' },
-    SUBMITTED: { label: '待確認', cls: 'bg-amber-100 text-amber-800 border border-amber-300' },
-    CONFIRMED: { label: '已確認', cls: 'bg-blue-100 text-blue-800 border border-blue-300' },
-    PAID: { label: '已發薪', cls: 'bg-emerald-100 text-emerald-800 border border-emerald-300' },
-    REJECTED: { label: '已拒絕', cls: 'bg-rose-100 text-rose-800 border border-rose-300' },
-  };
-  const o = map[s] ?? { label: s, cls: 'bg-gray-100 text-gray-700 border border-gray-300' };
-  return (
-    <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold ${o.cls}`}>
-      {o.label}
-    </span>
-  );
-};
-
-const cycleTypeLabel = (t: string) => {
-  const m: Record<string, string> = {
-    MONTHLY: '月薪',
-    SEMI_MONTHLY: '半月薪',
-    WEEKLY: '週薪',
-    BI_WEEKLY: '雙週薪',
-    ONE_OFF: '一次性',
-  };
-  return m[t] ?? t;
-};
-
 type TabKey = 'ALL' | 'PENDING' | 'CONFIRMED' | 'PAID';
-
-const TAB_DEFS: { key: TabKey; label: string; filter?: (p: PayrollRow) => boolean }[] = [
-  { key: 'ALL', label: '全部' },
-  { key: 'PENDING', label: '待確認', filter: (p) => p.status === 'SUBMITTED' },
-  { key: 'CONFIRMED', label: '已確認', filter: (p) => p.status === 'CONFIRMED' },
-  { key: 'PAID', label: '已發薪', filter: (p) => p.status === 'PAID' },
-];
 
 export default function PayrollTab(props: Props) {
   const [rows, setRows] = useState<PayrollRow[]>([]);
@@ -129,6 +103,51 @@ export default function PayrollTab(props: Props) {
   const [rejectReason, setRejectReason] = useState('');
   const [rejectBusy, setRejectBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState<string | null>(null);
+
+  const [browserLocale, setBrowserLocale] = useState<Locale>(() => getBrowserLocaleFromCookieOrFallback());
+  useEffect(() => {
+    const id = setInterval(() => {
+      const next = getBrowserLocaleFromCookieOrFallback();
+      if (next !== browserLocale) setBrowserLocale(next);
+    }, 800);
+    return () => clearInterval(id);
+  }, [browserLocale]);
+  const t = useMemo(() => createTranslator(browserLocale), [browserLocale]);
+
+  const statusChip = (s: string) => {
+    const map: Record<string, { label: string; cls: string }> = {
+      DRAFT: { label: t('statusDraft'), cls: 'bg-slate-100 text-slate-700 border border-slate-300' },
+      SUBMITTED: { label: t('statusSubmitted'), cls: 'bg-amber-100 text-amber-800 border border-amber-300' },
+      CONFIRMED: { label: t('statusConfirmed'), cls: 'bg-blue-100 text-blue-800 border border-blue-300' },
+      PAID: { label: t('statusPaid'), cls: 'bg-emerald-100 text-emerald-800 border border-emerald-300' },
+      REJECTED: { label: t('statusRejected'), cls: 'bg-rose-100 text-rose-800 border border-rose-300' },
+    };
+    const o = map[s] ?? { label: s, cls: 'bg-gray-100 text-gray-700 border border-gray-300' };
+    return (
+      <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold ${o.cls}`}>
+        {o.label}
+      </span>
+    );
+  };
+
+  const cycleTypeLabel = (type: string) => {
+    const m: Record<string, string> = {
+      MONTHLY: t('cycleMonthlyShort'),
+      SEMI_MONTHLY: t('cycleSemiMonthlyShort'),
+      WEEKLY: t('cycleWeeklyShort'),
+      BI_WEEKLY: t('cycleBiWeeklyShort'),
+      ONE_OFF: t('cycleOneOffShort'),
+    };
+    return m[type] ?? type;
+  };
+
+  const TAB_DEFS = useMemo<{ key: TabKey; label: string; filter?: (p: PayrollRow) => boolean }[]>(() => [
+    { key: 'ALL', label: t('tabAll') },
+    { key: 'PENDING', label: t('tabPending'), filter: (p) => p.status === 'SUBMITTED' },
+    { key: 'CONFIRMED', label: t('tabConfirmed'), filter: (p) => p.status === 'CONFIRMED' },
+    { key: 'PAID', label: t('tabPaid'), filter: (p) => p.status === 'PAID' },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [browserLocale]);
 
   const load = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -150,9 +169,9 @@ export default function PayrollTab(props: Props) {
   }, [props.userId]);
 
   const filtered = useMemo(() => {
-    const def = TAB_DEFS.find((t) => t.key === tab);
+    const def = TAB_DEFS.find((td) => td.key === tab);
     return def?.filter ? rows.filter(def.filter) : rows;
-  }, [rows, tab]);
+  }, [rows, tab, TAB_DEFS]);
 
   const stats = useMemo(() => {
     const s = { count: 0, netTotal: 0, grossTotal: 0, paidCount: 0, pendingCount: 0 };
@@ -186,7 +205,7 @@ export default function PayrollTab(props: Props) {
   const handleRejectSubmit = async () => {
     if (!rejectOpen) return;
     if (!rejectReason.trim() || rejectReason.trim().length < 3) {
-      alert('請填寫拒絕理由（至少 3 個字）');
+      alert(t('rejectValidation'));
       return;
     }
     setRejectBusy(true);
@@ -201,10 +220,10 @@ export default function PayrollTab(props: Props) {
     }
   };
 
-  const handleDownloadPdf = async (p: PayrollRow) => {
+  const handleDownloadPdf = async (p: PayrollRow, locale: PdfLocale = 'bilingual') => {
     setPdfBusy(p.id);
     try {
-      const res = await downloadPayrollPdf(p.id);
+      const res = await downloadPayrollPdf(p.id, locale);
       const blob = new Blob([res.bytes as unknown as BlobPart], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -230,10 +249,10 @@ export default function PayrollTab(props: Props) {
         <div>
           <h2 className="text-lg md:text-xl font-bold text-slate-900 flex items-center gap-2">
             <FileText className="w-5 h-5 text-indigo-600" />
-            薪資單記錄 / Payslips
+            {t('headerPayslips')}
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            共 {rows.length} 筆；此畫面顯示 {filtered.length} 筆
+            {t('headerRowCount').replace('{total}', String(rows.length)).replace('{shown}', String(filtered.length))}
           </p>
         </div>
         <button
@@ -242,7 +261,7 @@ export default function PayrollTab(props: Props) {
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 text-sm hover:bg-slate-50 disabled:opacity-50"
         >
           <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-          重新整理
+          {t('refreshBtnLabel')}
         </button>
       </div>
 
@@ -251,7 +270,7 @@ export default function PayrollTab(props: Props) {
         <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 flex items-start gap-2">
           <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
           <div>
-            <div className="font-semibold">載入失敗</div>
+            <div className="font-semibold">{t('loadFailTitle')}</div>
             <div className="text-rose-600 mt-0.5">{error}</div>
           </div>
         </div>
@@ -259,19 +278,19 @@ export default function PayrollTab(props: Props) {
 
       {/* Tabs */}
       <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 pb-1">
-        {TAB_DEFS.map((t) => (
+        {TAB_DEFS.map((td) => (
           <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
+            key={td.key}
+            onClick={() => setTab(td.key)}
             className={`px-3 py-1.5 rounded-t-md text-sm font-medium transition-colors ${
-              tab === t.key
+              tab === td.key
                 ? 'bg-white border border-b-0 border-slate-200 text-indigo-700 shadow-sm'
                 : 'text-slate-500 hover:text-slate-800'
             }`}
           >
-            {t.label}
+            {td.label}
             <span className="ml-1.5 text-xs text-slate-400">
-              ({t.filter ? rows.filter(t.filter).length : rows.length})
+              ({td.filter ? rows.filter(td.filter).length : rows.length})
             </span>
           </button>
         ))}
@@ -280,19 +299,19 @@ export default function PayrollTab(props: Props) {
       {/* Mini KPI */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="rounded-lg border border-slate-200 bg-white p-3">
-          <div className="text-xs text-slate-500">本畫面筆數</div>
+          <div className="text-xs text-slate-500">{t('kpiRowsCount')}</div>
           <div className="text-xl font-bold text-slate-900 mt-1">{stats.count}</div>
         </div>
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-          <div className="text-xs text-amber-700">待確認</div>
+          <div className="text-xs text-amber-700">{t('kpiPendingTotal')}</div>
           <div className="text-xl font-bold text-amber-800 mt-1">{stats.pendingCount}</div>
         </div>
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
-          <div className="text-xs text-blue-700">總收入 (Gross)</div>
+          <div className="text-xs text-blue-700">{t('kpiGrossTotalMini')}</div>
           <div className="text-lg font-bold text-blue-800 mt-1 truncate">{fmtHkd(stats.grossTotal)}</div>
         </div>
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-          <div className="text-xs text-emerald-700">淨收入 (Net)</div>
+          <div className="text-xs text-emerald-700">{t('kpiNetTotalMini')}</div>
           <div className="text-lg font-bold text-emerald-800 mt-1 truncate">{fmtHkd(stats.netTotal)}</div>
         </div>
       </div>
@@ -314,9 +333,9 @@ export default function PayrollTab(props: Props) {
       ) : filtered.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center">
           <FileText className="w-10 h-10 mx-auto text-slate-300" />
-          <div className="mt-2 text-slate-600 font-medium">暫無薪資單記錄</div>
+          <div className="mt-2 text-slate-600 font-medium">{t('emptyPayslipTitle')}</div>
           <div className="text-xs text-slate-400 mt-1">
-            管理員建立薪資週期並發送後，您的薪資單會顯示在此。
+            {t('emptyPayslipHint')}
           </div>
         </div>
       ) : (
@@ -330,7 +349,9 @@ export default function PayrollTab(props: Props) {
               pdfBusy={pdfBusy === p.id}
               onConfirm={() => handleConfirm(p)}
               onReject={() => openReject(p)}
-              onDownloadPdf={() => handleDownloadPdf(p)}
+              onDownloadPdfLocale={(lc) => handleDownloadPdf(p, lc)}
+              t={t}
+              cycleTypeLabel={cycleTypeLabel}
             />
           ))}
         </div>
@@ -342,27 +363,31 @@ export default function PayrollTab(props: Props) {
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-200 flex items-center gap-2">
               <XCircle className="w-5 h-5 text-rose-600" />
-              <h3 className="font-bold text-slate-900">拒絕此薪資單</h3>
+              <h3 className="font-bold text-slate-900">{t('rejectModalTitle')}</h3>
             </div>
             <div className="p-5 space-y-4">
               <div className="text-sm text-slate-600 rounded-lg bg-slate-50 border border-slate-200 p-3">
                 <div className="font-medium text-slate-700">
-                  {cycleTypeLabel(rejectOpen.cycle.cycleType)} · {shortDate(rejectOpen.cycle.periodStart)} ~{' '}
-                  {shortDate(rejectOpen.cycle.periodEnd)}
+                  {t('rejectPayslipFormat')
+                    .replace('{cycleType}', cycleTypeLabel(rejectOpen.cycle.cycleType))
+                    .replace('{periodStart}', shortDate(rejectOpen.cycle.periodStart))
+                    .replace('{periodEnd}', shortDate(rejectOpen.cycle.periodEnd))}
                 </div>
                 <div className="text-slate-500 mt-0.5 text-xs">
-                  發薪日：{shortDate(rejectOpen.cycle.payrollDate)} · 淨額：{fmtHkd(rejectOpen.netPayableHkd)}
+                  {t('rejectPayslipMeta')
+                    .replace('{payrollDate}', shortDate(rejectOpen.cycle.payrollDate))
+                    .replace('{net}', fmtHkd(rejectOpen.netPayableHkd))}
                 </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                  拒絕理由 <span className="text-rose-600">*</span>
+                  {t('rejectFieldLabel')}
                 </label>
                 <textarea
                   value={rejectReason}
                   onChange={(e) => setRejectReason(e.target.value)}
                   rows={4}
-                  placeholder="請簡述有問題的項目（至少 3 個字），管理員會收到並重新處理。"
+                  placeholder={t('rejectPlaceholder')}
                   className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                 />
               </div>
@@ -373,7 +398,7 @@ export default function PayrollTab(props: Props) {
                 disabled={rejectBusy}
                 className="px-4 py-2 rounded-md border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-100 disabled:opacity-50"
               >
-                取消
+                {t('cancelBtn')}
               </button>
               <button
                 onClick={handleRejectSubmit}
@@ -381,7 +406,7 @@ export default function PayrollTab(props: Props) {
                 className="px-4 py-2 rounded-md bg-rose-600 text-white text-sm font-medium hover:bg-rose-700 disabled:opacity-60 inline-flex items-center gap-1.5"
               >
                 {rejectBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
-                確認拒絕
+                {t('rejectModalConfirmBtn')}
               </button>
             </div>
           </div>
@@ -398,10 +423,13 @@ function PayrollCard(props: {
   pdfBusy: boolean;
   onConfirm: () => void;
   onReject: () => void;
-  onDownloadPdf: () => void;
+  onDownloadPdfLocale: (locale: PdfLocale) => void;
+  t: (k: any) => string;
+  cycleTypeLabel: (type: string) => string;
 }) {
-  const { p } = props;
+  const { p, t } = props;
   const [expanded, setExpanded] = useState(false);
+  const [pdfDropdownOpen, setPdfDropdownOpen] = useState(false);
 
   const showConfirmReject = p.status === 'SUBMITTED' && props.canAct;
   const showDownload = (p.status === 'CONFIRMED' || p.status === 'PAID') && props.canAct;
@@ -417,29 +445,30 @@ function PayrollCard(props: {
         <div className="flex-1 min-w-[240px]">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-base md:text-lg font-bold text-slate-900">
-              {cycleTypeLabel(p.cycle.cycleType)} 薪資單
+              {t('cardTitleFormat').replace('{cycleType}', props.cycleTypeLabel(p.cycle.cycleType))}
             </h3>
-            {statusChip(p.status)}
+            {/* Re-use status chip from parent; but we don't have access; recreate */}
+            <StatusChipInline status={p.status} t={t} />
           </div>
           <div className="mt-1.5 text-xs md:text-sm text-slate-600 flex flex-wrap items-center gap-x-4 gap-y-1">
             <span>
-              <span className="text-slate-400">週期：</span>
+              <span className="text-slate-400">{t('cycleColon')}</span>
               {shortDate(p.cycle.periodStart)} ~ {shortDate(p.cycle.periodEnd)}
             </span>
             <span>
-              <span className="text-slate-400">發薪日：</span>
+              <span className="text-slate-400">{t('payrollDateLabel')}</span>
               {shortDate(p.cycle.payrollDate)}
             </span>
             {p.paidReference && (
               <span className="text-emerald-700">
-                <span className="text-emerald-500">參考編號：</span>
+                <span className="text-emerald-500">{t('refColon')}</span>
                 {p.paidReference}
               </span>
             )}
           </div>
         </div>
         <div className="text-right">
-          <div className="text-xs text-slate-400">應付淨額 Net</div>
+          <div className="text-xs text-slate-400">{t('netPayableColon')}</div>
           <div className="text-xl md:text-2xl font-bold text-emerald-700 tabular-nums">
             {fmtHkd(p.netPayableHkd)}
           </div>
@@ -448,14 +477,14 @@ function PayrollCard(props: {
 
       {/* Amount grid */}
       <div className="px-4 md:px-5 py-4 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-        <AmountItem label="底薪 Base" value={p.baseSalaryHkd} tone="slate" />
-        <AmountItem label="加班 Overtime" value={p.overtimeHkd} tone="indigo" />
-        <AmountItem label="獎金 Bonus" value={p.bonusHkd} tone="violet" />
-        <AmountItem label="佣金 Commission" value={p.commissionHkd} tone="sky" />
-        <AmountItem label="津貼 Allowance" value={p.allowanceTotalHkd} tone="teal" />
-        <AmountItem label="扣除 Deduction" value={-p.deductionTotalHkd} tone="rose" />
-        <AmountItem label="總收入 Gross" value={p.grossTotalHkd} tone="blue" highlight />
-        <AmountItem label="淨收入 Net" value={p.netPayableHkd} tone="emerald" highlight />
+        <AmountItem label={t('amountLabelBase')} value={p.baseSalaryHkd} tone="slate" />
+        <AmountItem label={t('amountLabelOvertime')} value={p.overtimeHkd} tone="indigo" />
+        <AmountItem label={t('amountLabelBonus')} value={p.bonusHkd} tone="violet" />
+        <AmountItem label={t('amountLabelCommission')} value={p.commissionHkd} tone="sky" />
+        <AmountItem label={t('amountLabelAllowance')} value={p.allowanceTotalHkd} tone="teal" />
+        <AmountItem label={t('amountLabelDeduction')} value={-p.deductionTotalHkd} tone="rose" />
+        <AmountItem label={t('amountLabelGross')} value={p.grossTotalHkd} tone="blue" highlight />
+        <AmountItem label={t('amountLabelNet')} value={p.netPayableHkd} tone="emerald" highlight />
       </div>
 
       {/* Notes / Rejected reason */}
@@ -463,14 +492,14 @@ function PayrollCard(props: {
         <div className="mx-4 md:mx-5 mb-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm flex items-start gap-2">
           <XCircle className="w-4 h-4 text-rose-600 mt-0.5 flex-shrink-0" />
           <div>
-            <div className="font-semibold text-rose-800">拒絕理由</div>
+            <div className="font-semibold text-rose-800">{t('rejectReasonChipLabel')}</div>
             <div className="text-rose-700 mt-0.5 whitespace-pre-wrap">{p.employeeNote}</div>
           </div>
         </div>
       )}
       {p.adminNote && (
         <div className="mx-4 md:mx-5 mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-          <div className="font-semibold text-slate-700 text-xs">管理員備註 Admin Note</div>
+          <div className="font-semibold text-slate-700 text-xs">{t('adminNoteMiniLabel')}</div>
           <div className="text-slate-600 mt-0.5 whitespace-pre-wrap">{p.adminNote}</div>
         </div>
       )}
@@ -481,15 +510,15 @@ function PayrollCard(props: {
           onClick={() => setExpanded((v) => !v)}
           className="text-xs md:text-sm text-indigo-600 hover:text-indigo-800 font-medium inline-flex items-center gap-1"
         >
-          {expanded ? '收起明細 ▲' : '展開明細項目 ▼'}
-          <span className="text-slate-400">({p.items.length} 項)</span>
+          {expanded ? t('collapseDetailsLabel') : t('expandDetailsLabel')}
+          <span className="text-slate-400">{t('itemsCountLabel').replace('{count}', String(p.items.length))}</span>
         </button>
         {expanded && (
           <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
             {earnings.length > 0 && (
               <div className="rounded-lg border border-blue-200 overflow-hidden">
                 <div className="bg-blue-600 text-white px-3 py-1.5 text-xs font-semibold">
-                  收入項目 Earnings ({earnings.length})
+                  {t('earningsTitleWithCount').replace('{count}', String(earnings.length))}
                 </div>
                 <div className="divide-y divide-slate-100">
                   {earnings.map((it) => (
@@ -516,7 +545,7 @@ function PayrollCard(props: {
             {deductions.length > 0 && (
               <div className="rounded-lg border border-rose-200 overflow-hidden">
                 <div className="bg-rose-600 text-white px-3 py-1.5 text-xs font-semibold">
-                  扣除項目 Deductions ({deductions.length})
+                  {t('deductionsTitleWithCount').replace('{count}', String(deductions.length))}
                 </div>
                 <div className="divide-y divide-slate-100">
                   {deductions.map((it) => (
@@ -547,36 +576,57 @@ function PayrollCard(props: {
       {/* Actions */}
       <div className="px-4 md:px-5 py-3 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
         <div className="text-[11px] text-slate-400 flex flex-wrap items-center gap-x-4 gap-y-1">
-          {p.submittedAt && <span>送出：{shortDate(p.submittedAt)}</span>}
-          {p.confirmedAt && <span>確認：{shortDate(p.confirmedAt)}</span>}
-          {p.paidAt && <span className="text-emerald-600">發薪：{shortDate(p.paidAt)}</span>}
-          {p.rejectedAt && <span className="text-rose-600">拒絕：{shortDate(p.rejectedAt)}</span>}
+          {p.submittedAt && <span>{t('submittedAtMini')}{shortDate(p.submittedAt)}</span>}
+          {p.confirmedAt && <span>{t('confirmedAtMini')}{shortDate(p.confirmedAt)}</span>}
+          {p.paidAt && <span className="text-emerald-600">{t('paidAtMini')}{shortDate(p.paidAt)}</span>}
+          {p.rejectedAt && <span className="text-rose-600">{t('rejectedAtMini')}{shortDate(p.rejectedAt)}</span>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {isPreviewable && (
             <button
-              onClick={props.onDownloadPdf}
+              onClick={() => props.onDownloadPdfLocale('bilingual')}
               disabled={props.pdfBusy}
               className="px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 text-sm hover:bg-slate-100 disabled:opacity-50 inline-flex items-center gap-1.5"
               title="管理員可預覽草稿 PDF"
             >
               {props.pdfBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-              預覽 PDF
+              {t('previewPdfBtn')}
             </button>
           )}
           {showDownload && (
-            <button
-              onClick={props.onDownloadPdf}
-              disabled={props.pdfBusy}
-              className="px-4 py-2 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-60 inline-flex items-center gap-1.5"
-            >
-              {props.pdfBusy ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <FileText className="w-4 h-4" />
+            <div className="relative inline-block">
+              <button
+                onClick={() => setPdfDropdownOpen((o) => !o)}
+                onBlur={() => setTimeout(() => setPdfDropdownOpen(false), 150)}
+                disabled={props.pdfBusy}
+                className="px-4 py-2 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-60 inline-flex items-center gap-1.5"
+              >
+                {props.pdfBusy ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <FileText className="w-4 h-4" />
+                )}
+                {t('downloadPdfCardBtn')} ▾
+              </button>
+              {pdfDropdownOpen && (
+                <div className="absolute z-20 mt-1 w-56 rounded-md border border-slate-200 bg-white shadow-lg right-0">
+                  {(['bilingual', 'zh', 'en'] as PdfLocale[]).map((lc) => (
+                    <button
+                      key={lc}
+                      type="button"
+                      className="block w-full text-left px-3 py-2 text-xs hover:bg-slate-100"
+                      onMouseDown={async (e) => {
+                        e.preventDefault();
+                        setPdfDropdownOpen(false);
+                        props.onDownloadPdfLocale(lc);
+                      }}
+                    >
+                      {lc === 'bilingual' ? t('downloadPdfBilingual') : lc === 'zh' ? t('downloadPdfZh') : t('downloadPdfEn')}
+                    </button>
+                  ))}
+                </div>
               )}
-              下載支薪證明 PDF
-            </button>
+            </div>
           )}
           {showConfirmReject && (
             <>
@@ -585,7 +635,7 @@ function PayrollCard(props: {
                 className="px-3.5 py-2 rounded-md border border-rose-300 bg-white text-rose-700 text-sm font-medium hover:bg-rose-50 inline-flex items-center gap-1.5"
               >
                 <XCircle className="w-4 h-4" />
-                有問題，拒絕
+                {t('rejectCardBtn')}
               </button>
               <button
                 onClick={props.onConfirm}
@@ -597,16 +647,32 @@ function PayrollCard(props: {
                 ) : (
                   <CheckCircle2 className="w-4 h-4" />
                 )}
-                確認無誤
+                {t('confirmCardBtn')}
               </button>
             </>
           )}
           {p.status === 'DRAFT' && !props.canAct === false && !isPreviewable && (
-            <span className="text-xs text-slate-400 italic">草稿尚未送出</span>
+            <span className="text-xs text-slate-400 italic">{t('draftNotSubmitted')}</span>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+function StatusChipInline({ status, t }: { status: string; t: (k: any) => string }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    DRAFT: { label: t('statusDraft'), cls: 'bg-slate-100 text-slate-700 border border-slate-300' },
+    SUBMITTED: { label: t('statusSubmitted'), cls: 'bg-amber-100 text-amber-800 border border-amber-300' },
+    CONFIRMED: { label: t('statusConfirmed'), cls: 'bg-blue-100 text-blue-800 border border-blue-300' },
+    PAID: { label: t('statusPaid'), cls: 'bg-emerald-100 text-emerald-800 border border-emerald-300' },
+    REJECTED: { label: t('statusRejected'), cls: 'bg-rose-100 text-rose-800 border border-rose-300' },
+  };
+  const o = map[status] ?? { label: status, cls: 'bg-gray-100 text-gray-700 border border-gray-300' };
+  return (
+    <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold ${o.cls}`}>
+      {o.label}
+    </span>
   );
 }
 

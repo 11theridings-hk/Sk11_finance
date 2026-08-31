@@ -18,9 +18,19 @@ import {
   updatePayrollAmounts,
   updateSalaryCycle,
   downloadPayrollPdf,
+  getMyProfile,
+  adminUpdateUserProfile,
   type PayrollStatus,
 } from '@/app/actions/payroll';
-import type { PayrollAmountsInput } from '@/lib/payroll/calc';
+import type { PayrollAmountsInput, UserProfileSnapshotInput } from '@/lib/payroll/calc';
+import { createTranslator, normalizeLocale, type Locale } from '@/lib/i18n';
+
+type PdfLocale = 'bilingual' | 'zh' | 'en';
+function getBrowserLocaleFromCookieOrFallback(): Locale {
+  if (typeof document === 'undefined') return 'zh-HK';
+  const m = document.cookie.match(/(?:^|; )locale=([^;]+)/);
+  return normalizeLocale(m?.[1]);
+}
 
 type SalaryCycleRow = {
   id: string;
@@ -104,22 +114,6 @@ function toIsoDay(s: unknown): string {
   return prim.length >= 10 ? prim.slice(0, 10) : prim;
 }
 const shortDate = toIsoDay;
-const statusChip = (s: string) => {
-  const map: Record<string, { label: string; cls: string }> = {
-    DRAFT: { label: '草稿', cls: 'bg-slate-100 text-slate-700 border border-slate-300' },
-    SUBMITTED: { label: '待確認', cls: 'bg-amber-100 text-amber-800 border border-amber-300' },
-    CONFIRMED: { label: '已確認', cls: 'bg-blue-100 text-blue-800 border border-blue-300' },
-    PAID: { label: '已發薪', cls: 'bg-emerald-100 text-emerald-800 border border-emerald-300' },
-    REJECTED: { label: '已拒絕', cls: 'bg-rose-100 text-rose-800 border border-rose-300' },
-    OPEN: { label: '開啟中', cls: 'bg-sky-50 text-sky-700 border border-sky-200' },
-    LOCKED: { label: '已鎖定', cls: 'bg-slate-200 text-slate-700 border border-slate-400' },
-    SETTLED: { label: '已結算', cls: 'bg-violet-100 text-violet-800 border border-violet-300' },
-  };
-  const o = map[s] ?? { label: s, cls: 'bg-gray-100 text-gray-700 border border-gray-300' };
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${o.cls}`}>{o.label}</span>
-  );
-};
 
 type Props = {
   initialCycles: SalaryCycleRow[];
@@ -165,13 +159,43 @@ export default function AdminPayrollClient(props: Props) {
   const [batchUserIds, setBatchUserIds] = useState<Set<string>>(new Set());
 
   // Row action modal
-  const [actionModal, setActionModal] = useState<null | { mode: 'edit' | 'markPaid' | 'viewReject'; payrollId: string }>(null);
+  const [actionModal, setActionModal] = useState<null | { mode: 'edit' | 'markPaid' | 'viewReject' | 'profile'; payrollId: string; userId?: string }>(null);
   const [editForm, setEditForm] = useState<PayrollAmountsInput & { adminNote?: string | null }>({
     baseSalaryHkd: 0,
   });
   const [markPaidForm, setMarkPaidForm] = useState<{ paidAt: string; paidReference: string }>(
     { paidAt: new Date().toISOString().slice(0, 10), paidReference: '' },
   );
+  type FullProfileForm = UserProfileSnapshotInput & { emergencyName?: string | null; emergencyPhone?: string | null };
+  const [profileForm, setProfileForm] = useState<FullProfileForm>({ legalNameEn: '', defaultBaseSalaryHkd: 0 });
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  const [browserLocale, setBrowserLocale] = useState<Locale>(() => getBrowserLocaleFromCookieOrFallback());
+  useEffect(() => {
+    const id = setInterval(() => {
+      const next = getBrowserLocaleFromCookieOrFallback();
+      if (next !== browserLocale) setBrowserLocale(next);
+    }, 800);
+    return () => clearInterval(id);
+  }, [browserLocale]);
+  const t = useMemo(() => createTranslator(browserLocale), [browserLocale]);
+
+  const statusChip = (s: string) => {
+    const map: Record<string, { label: string; cls: string }> = {
+      DRAFT: { label: t('statusDraft'), cls: 'bg-slate-100 text-slate-700 border border-slate-300' },
+      SUBMITTED: { label: t('statusSubmitted'), cls: 'bg-amber-100 text-amber-800 border border-amber-300' },
+      CONFIRMED: { label: t('statusConfirmed'), cls: 'bg-blue-100 text-blue-800 border border-blue-300' },
+      PAID: { label: t('statusPaid'), cls: 'bg-emerald-100 text-emerald-800 border border-emerald-300' },
+      REJECTED: { label: t('statusRejected'), cls: 'bg-rose-100 text-rose-800 border border-rose-300' },
+      OPEN: { label: t('cycleStatusOpen'), cls: 'bg-sky-50 text-sky-700 border border-sky-200' },
+      LOCKED: { label: t('cycleStatusLocked'), cls: 'bg-slate-200 text-slate-700 border border-slate-400' },
+      SETTLED: { label: t('cycleStatusSettled'), cls: 'bg-violet-100 text-violet-800 border border-violet-300' },
+    };
+    const o = map[s] ?? { label: s, cls: 'bg-gray-100 text-gray-700 border border-gray-300' };
+    return (
+      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${o.cls}`}>{o.label}</span>
+    );
+  };
 
   const loadRows = async () => {
     setLoading(true);
@@ -232,9 +256,6 @@ export default function AdminPayrollClient(props: Props) {
     const arg: any = newCycle;
     await createSalaryCycle(arg);
     setShowNewCycle(false);
-    // refresh cycles
-    // we simply recreate cycles from a fresh list by using server action listSalaryCycles alternative
-    // (for MVP, just trigger a page-like state: reload window).
     window.location.reload();
   };
 
@@ -252,9 +273,9 @@ export default function AdminPayrollClient(props: Props) {
     await loadRows();
   };
 
-  const handleBatchZip = async () => {
+  const handleBatchZip = async (locale: PdfLocale = 'bilingual') => {
     const ids = selectedIds.size > 0 ? Array.from(selectedIds) : rows.map((r) => r.id);
-    const res = await batchDownloadPdfZip(ids);
+    const res = await batchDownloadPdfZip(ids, locale);
     downloadBlob(new Blob([res.bytes as any], { type: 'application/zip' }), res.filename);
   };
 
@@ -309,9 +330,126 @@ export default function AdminPayrollClient(props: Props) {
     await loadRows();
   };
 
-  const handleDownloadPdf = async (id: string) => {
-    const res = await downloadPayrollPdf(id);
+  const openProfileModal = async (row: PayrollRow) => {
+    setProfileLoading(true);
+    try {
+      const r = (await getMyProfile(row.userId)) as any;
+      setProfileForm({
+        legalNameEn: r?.legalNameEn ?? '',
+        legalNameZh: r?.legalNameZh ?? null,
+        hkid: r?.hkid ?? null,
+        passportNo: r?.passportNo ?? null,
+        dateOfBirth: r?.dateOfBirth ? toIsoDay(r.dateOfBirth) : null,
+        jobTitle: r?.jobTitle ?? null,
+        department: r?.department ?? null,
+        dateJoined: r?.dateJoined ? toIsoDay(r.dateJoined) : null,
+        defaultBaseSalaryHkd: r?.defaultBaseSalaryHkd ?? 0,
+        bankName: r?.bankName ?? null,
+        bankAccountNo: r?.bankAccountNo ?? null,
+        mpfAccountNo: r?.mpfAccountNo ?? null,
+        addressLine1: r?.addressLine1 ?? null,
+        addressLine2: r?.addressLine2 ?? null,
+        contactPhone: r?.contactPhone ?? null,
+        contactEmail: r?.contactEmail ?? null,
+        emergencyName: r?.emergencyName ?? null,
+        emergencyPhone: r?.emergencyPhone ?? null,
+      });
+      setActionModal({ mode: 'profile', payrollId: row.id, userId: row.userId });
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    if (!actionModal || actionModal.mode !== 'profile' || !actionModal.userId) return;
+    if (!profileForm.legalNameEn.trim()) {
+      alert('legalNameEn 為必填');
+      return;
+    }
+    try {
+      setProfileLoading(true);
+      await adminUpdateUserProfile(actionModal.userId, profileForm);
+      alert(t('savedSuccess'));
+      setActionModal(null);
+      await loadRows();
+    } catch (e) {
+      alert(String(e));
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  const handleDownloadPdf = async (id: string, locale: PdfLocale = 'bilingual') => {
+    const res = await downloadPayrollPdf(id, locale);
     downloadBlob(new Blob([res.bytes as any], { type: 'application/pdf' }), res.filename);
+  };
+
+  const PdfDropdown = ({ payrollId }: { payrollId: string }) => {
+    const [open, setOpen] = useState(false);
+    return (
+      <div className="relative inline-block">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          title={t('downloadPdf')}
+          className="text-xs px-2 py-1 border border-slate-300 rounded hover:bg-white inline-flex items-center gap-1"
+        >
+          <FileText className="w-3 h-3" /> PDF ▾
+        </button>
+        {open && (
+          <div className="absolute z-20 mt-1 w-48 rounded-md border border-slate-200 bg-white shadow-lg right-0">
+            {(['bilingual', 'zh', 'en'] as PdfLocale[]).map((lc) => (
+              <button
+                key={lc}
+                type="button"
+                className="block w-full text-left px-3 py-2 text-xs hover:bg-slate-100"
+                onMouseDown={async (e) => {
+                  e.preventDefault();
+                  setOpen(false);
+                  await handleDownloadPdf(payrollId, lc);
+                }}
+              >
+                {lc === 'bilingual' ? t('downloadPdfBilingual') : lc === 'zh' ? t('downloadPdfZh') : t('downloadPdfEn')}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const ZipDropdown = () => {
+    const [open, setOpen] = useState(false);
+    return (
+      <div className="relative inline-block">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          title={t('zipBtnTitle')}
+          className="inline-flex items-center gap-1.5 text-xs bg-slate-700 hover:bg-slate-800 text-white px-2.5 py-1.5 rounded"
+        >
+          <Download className="w-3 h-3" /> {t('batchZipBtn')} ▾
+        </button>
+        {open && (
+          <div className="absolute z-20 mt-1 w-56 rounded-md border border-slate-200 bg-white shadow-lg right-0">
+            {(['bilingual', 'zh', 'en'] as PdfLocale[]).map((lc) => (
+              <button
+                key={lc}
+                type="button"
+                className="block w-full text-left px-3 py-2 text-xs hover:bg-slate-100"
+                onMouseDown={async (e) => {
+                  e.preventDefault();
+                  setOpen(false);
+                  await handleBatchZip(lc);
+                }}
+              >
+                {lc === 'bilingual' ? t('zipLocaleBilingual') : lc === 'zh' ? t('zipLocaleZh') : t('zipLocaleEn')}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -319,18 +457,18 @@ export default function AdminPayrollClient(props: Props) {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-slate-900">薪金結算管理 / Payroll Admin</h1>
-          <p className="text-slate-500 mt-1 text-sm">管理薪資週期、批次建立薪資單、發送確認、標註已發薪、匯出 PDF / CSV。</p>
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-900">{t('payrollPage')}</h1>
+          <p className="text-slate-500 mt-1 text-sm">{t('payrollPageHint')}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => setShowNewCycle(true)} className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white rounded-md px-3 py-2 text-sm font-medium">
-            <PlusCircle className="w-4 h-4" /> 建立薪資週期
+            <PlusCircle className="w-4 h-4" /> {t('createSalaryCycle')}
           </button>
           <button onClick={() => setShowBatchAdd(true)} disabled={!selectedCycleId} className="inline-flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-900 border border-slate-300 rounded-md px-3 py-2 text-sm font-medium disabled:opacity-40">
-            <PlusCircle className="w-4 h-4" /> 批次新增員工薪資
+            <PlusCircle className="w-4 h-4" /> {t('batchAddUsers')}
           </button>
           <button onClick={loadRows} className="inline-flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-md px-3 py-2 text-sm">
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> 重新整理
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> {t('refreshBtnLabel')}
           </button>
         </div>
       </div>
@@ -338,50 +476,50 @@ export default function AdminPayrollClient(props: Props) {
       {/* Filters Block A */}
       <div className="bg-white border border-slate-200 rounded-lg p-4 mb-5 shadow-sm">
         <div className="flex items-center gap-2 text-slate-700 font-medium mb-3">
-          <Filter className="w-4 h-4" /> 篩選器
+          <Filter className="w-4 h-4" /> {t('filtersLabel')}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3 mb-4">
           <div>
-            <label className="text-xs font-medium text-slate-500 mb-1 block">薪資週期</label>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">{t('filterCycle')}</label>
             <select value={selectedCycleId ?? ''} onChange={(e) => setSelectedCycleId(e.target.value || undefined)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm">
-              <option value="">全部週期</option>
+              <option value="">{t('filterCycleAll')}</option>
               {cyclesForLabel.map((c) => (
                 <option key={c.id} value={c.id}>{c.label}</option>
               ))}
             </select>
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-500 mb-1 block">部門</label>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">{t('filterDept')}</label>
             <select value={deptFilter ?? ''} onChange={(e) => setDeptFilter(e.target.value || undefined)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm">
-              <option value="">全部部門</option>
+              <option value="">{t('filterDeptAll')}</option>
               {props.departments.map((d) => (<option key={d} value={d}>{d}</option>))}
             </select>
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-500 mb-1 block">職稱</label>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">{t('filterJob')}</label>
             <select value={titleFilter ?? ''} onChange={(e) => setTitleFilter(e.target.value || undefined)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm">
-              <option value="">全部職稱</option>
+              <option value="">{t('filterJobAll')}</option>
               {props.jobTitles.map((j) => (<option key={j} value={j}>{j}</option>))}
             </select>
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-500 mb-1 block">起日期 (PeriodStart ≥)</label>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">{t('filterPeriodGte')}</label>
             <input type="date" value={periodGte} onChange={(e) => setPeriodGte(e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm"/>
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-500 mb-1 block">迄日期 (PeriodEnd ≤)</label>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">{t('filterPeriodLte')}</label>
             <input type="date" value={periodLte} onChange={(e) => setPeriodLte(e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm"/>
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-500 mb-1 block">關鍵字 (姓名/部門/發薪編號)</label>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">{t('filterKeyword')}</label>
             <div className="relative">
               <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="姓名/部門/編號關鍵字..." className="w-full border border-slate-300 rounded pl-7 pr-2 py-1.5 text-sm" />
+              <input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder={t('filterKeywordPlaceholder')} className="w-full border border-slate-300 rounded pl-7 pr-2 py-1.5 text-sm" />
             </div>
           </div>
         </div>
         <div className="flex flex-wrap gap-2 items-center">
-          <span className="text-xs font-medium text-slate-500">狀態:</span>
+          <span className="text-xs font-medium text-slate-500">{t('statusColon')}</span>
           {(['DRAFT','SUBMITTED','CONFIRMED','PAID','REJECTED'] as PayrollStatus[]).map((s) => {
             const active = statusFilter.includes(s);
             return (
@@ -393,7 +531,7 @@ export default function AdminPayrollClient(props: Props) {
           })}
           <div className="ml-auto">
             <button onClick={loadRows} className="text-xs px-3 py-1 rounded bg-slate-900 text-white hover:bg-slate-800 inline-flex items-center gap-1.5">
-              {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />} 查詢
+              {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />} {t('searchBtn')}
             </button>
           </div>
         </div>
@@ -401,13 +539,13 @@ export default function AdminPayrollClient(props: Props) {
 
       {/* KPI Block B */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 mb-5">
-        <KpiCard label="薪資筆數" value={`${stats.count}`} sub="符合篩選" tone="slate" />
-        <KpiCard label="已確認" value={`${stats.countConfirmed}/${stats.count}`} sub={`${stats.count ? Math.round(stats.countConfirmed*100/stats.count) : 0}%`} tone="blue" />
-        <KpiCard label="已發薪" value={`${stats.countPaid}/${stats.count}`} sub={`${stats.count ? Math.round(stats.countPaid*100/stats.count) : 0}%`} tone="emerald" />
-        <KpiCard label="收入總額" value={fmtHkd(stats.grossTotalHkd)} sub="Gross Total" tone="slate" />
-        <KpiCard label="扣除總額" value={fmtHkd(stats.deductionTotalHkd)} sub="MPF/稅/借款..." tone="rose" />
-        <KpiCard label="應發淨額" value={fmtHkd(stats.netTotalHkd)} sub="Net Payable" tone="indigo" />
-        <KpiCard label="已實際發出" value={fmtHkd(stats.amountPaidHkd)} sub={`${stats.netTotalHkd ? Math.round(stats.amountPaidHkd*100/stats.netTotalHkd) : 0}%`} tone="emerald" />
+        <KpiCard label={t('kpiPayrollCount')} value={`${stats.count}`} sub={t('kpiPayrollCountSub')} tone="slate" />
+        <KpiCard label={t('kpiConfirmed')} value={`${stats.countConfirmed}/${stats.count}`} sub={`${stats.count ? Math.round(stats.countConfirmed*100/stats.count) : 0}%`} tone="blue" />
+        <KpiCard label={t('kpiPaid')} value={`${stats.countPaid}/${stats.count}`} sub={`${stats.count ? Math.round(stats.countPaid*100/stats.count) : 0}%`} tone="emerald" />
+        <KpiCard label={t('kpiGrossTotal')} value={fmtHkd(stats.grossTotalHkd)} sub={t('kpiGrossTotalSub')} tone="slate" />
+        <KpiCard label={t('kpiDeductionTotal')} value={fmtHkd(stats.deductionTotalHkd)} sub={t('kpiDeductionTotalSub')} tone="rose" />
+        <KpiCard label={t('kpiNetPayable')} value={fmtHkd(stats.netTotalHkd)} sub={t('kpiNetPayableSub')} tone="indigo" />
+        <KpiCard label={t('kpiAmountPaid')} value={fmtHkd(stats.amountPaidHkd)} sub={`${stats.netTotalHkd ? Math.round(stats.amountPaidHkd*100/stats.netTotalHkd) : 0}%`} tone="emerald" />
       </div>
 
       {/* Salary cycle summary cards */}
@@ -415,7 +553,7 @@ export default function AdminPayrollClient(props: Props) {
         <div className="mb-5 bg-slate-50 rounded-lg border border-slate-200 p-4">
           <div className="flex items-center justify-between mb-2">
             <div className="text-sm font-medium text-slate-700">
-              目前薪資週期：{cyclesForLabel.find((c) => c.id === selectedCycleId)?.label}
+              {t('cycleSummaryTitle')}{cyclesForLabel.find((c) => c.id === selectedCycleId)?.label}
             </div>
             <div className="flex gap-2">
               {(() => {
@@ -424,11 +562,11 @@ export default function AdminPayrollClient(props: Props) {
                 return (
                   <>
                     {c.status === 'OPEN' ? (
-                      <button onClick={async () => { await updateSalaryCycle(c.id, { status: 'LOCKED' }); window.location.reload(); }} className="text-xs px-2.5 py-1 border border-slate-400 text-slate-700 rounded hover:bg-white">鎖定本週期</button>
+                      <button onClick={async () => { await updateSalaryCycle(c.id, { status: 'LOCKED' }); window.location.reload(); }} className="text-xs px-2.5 py-1 border border-slate-400 text-slate-700 rounded hover:bg-white">{t('cycleLockBtn')}</button>
                     ) : c.status === 'LOCKED' ? (
-                      <button onClick={async () => { await updateSalaryCycle(c.id, { status: 'SETTLED' }); window.location.reload(); }} className="text-xs px-2.5 py-1 border border-violet-300 text-violet-700 rounded hover:bg-white">標記結算完成</button>
+                      <button onClick={async () => { await updateSalaryCycle(c.id, { status: 'SETTLED' }); window.location.reload(); }} className="text-xs px-2.5 py-1 border border-violet-300 text-violet-700 rounded hover:bg-white">{t('cycleSettleBtn')}</button>
                     ) : (
-                      <span className="text-xs text-slate-500">已結算</span>
+                      <span className="text-xs text-slate-500">{t('cycleSettledChip')}</span>
                     )}
                   </>
                 );
@@ -440,10 +578,10 @@ export default function AdminPayrollClient(props: Props) {
             if (!c) return null;
             return (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs text-slate-600">
-                <div><span className="text-slate-400">人數 / 確認 / 已發:</span> <b>{c.headcountTotal} / {c.headcountConfirmed} / {c.headcountPaid}</b></div>
-                <div><span className="text-slate-400">Gross / Deduction:</span> <b>{fmtHkd(c.grossTotalHkd)} / {fmtHkd(c.deductionTotalHkd)}</b></div>
-                <div><span className="text-slate-400">Net / Paid:</span> <b>{fmtHkd(c.netPayableTotalHkd)} / {fmtHkd(c.amountPaidTotalHkd)}</b></div>
-                <div><span className="text-slate-400">備註:</span> <b>{c.note || '—'}</b></div>
+                <div><span className="text-slate-400">{t('cycleHcLabel')}</span> <b>{c.headcountTotal} / {c.headcountConfirmed} / {c.headcountPaid}</b></div>
+                <div><span className="text-slate-400">{t('cycleGdLabel')}</span> <b>{fmtHkd(c.grossTotalHkd)} / {fmtHkd(c.deductionTotalHkd)}</b></div>
+                <div><span className="text-slate-400">{t('cycleNpLabel')}</span> <b>{fmtHkd(c.netPayableTotalHkd)} / {fmtHkd(c.amountPaidTotalHkd)}</b></div>
+                <div><span className="text-slate-400">{t('cycleNoteLabel')}</span> <b>{c.note || '—'}</b></div>
               </div>
             );
           })()}
@@ -455,18 +593,16 @@ export default function AdminPayrollClient(props: Props) {
         <div className="flex flex-wrap items-center gap-2 p-3 border-b border-slate-200 bg-slate-50">
           <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
             <input type="checkbox" checked={selectedIds.size === rows.length && rows.length > 0} onChange={toggleSelectAll} />
-            全選
-            {selectedIds.size > 0 && <span className="text-slate-500">(已選 {selectedIds.size})</span>}
+            {t('selectAllLabel')}
+            {selectedIds.size > 0 && <span className="text-slate-500">{t('selectedCountLabel').replace('{count}', String(selectedIds.size))}</span>}
           </label>
           <div className="ml-auto flex flex-wrap gap-2">
             <button onClick={handleBatchSubmit} disabled={selectedIds.size === 0} className="inline-flex items-center gap-1.5 text-xs bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white px-2.5 py-1.5 rounded">
-              <Send className="w-3 h-3" /> 批次送出確認
+              <Send className="w-3 h-3" /> {t('batchSubmitBtn')}
             </button>
-            <button onClick={handleBatchZip} className="inline-flex items-center gap-1.5 text-xs bg-slate-700 hover:bg-slate-800 text-white px-2.5 py-1.5 rounded">
-              <Download className="w-3 h-3" /> PDF 批次下載 (ZIP)
-            </button>
+            <ZipDropdown />
             <button onClick={handleCsv} className="inline-flex items-center gap-1.5 text-xs bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 px-2.5 py-1.5 rounded">
-              <FileText className="w-3 h-3" /> 匯出 CSV
+              <FileText className="w-3 h-3" /> {t('batchCsvBtn')}
             </button>
           </div>
         </div>
@@ -475,21 +611,21 @@ export default function AdminPayrollClient(props: Props) {
             <thead className="bg-slate-50 text-slate-500 text-xs">
               <tr>
                 <th className="w-10"></th>
-                <th className="text-left px-3 py-2 font-medium">員工</th>
-                <th className="text-left px-3 py-2 font-medium">週期</th>
-                <th className="text-left px-3 py-2 font-medium">狀態</th>
-                <th className="text-right px-3 py-2 font-medium">底薪</th>
-                <th className="text-right px-3 py-2 font-medium">加項</th>
-                <th className="text-right px-3 py-2 font-medium">扣項</th>
-                <th className="text-right px-3 py-2 font-medium">淨發</th>
-                <th className="text-center px-3 py-2 font-medium">動作</th>
+                <th className="text-left px-3 py-2 font-medium">{t('thUser')}</th>
+                <th className="text-left px-3 py-2 font-medium">{t('thCycle')}</th>
+                <th className="text-left px-3 py-2 font-medium">{t('thStatus')}</th>
+                <th className="text-right px-3 py-2 font-medium">{t('thBase')}</th>
+                <th className="text-right px-3 py-2 font-medium">{t('thAddon')}</th>
+                <th className="text-right px-3 py-2 font-medium">{t('thDeduction')}</th>
+                <th className="text-right px-3 py-2 font-medium">{t('thNet')}</th>
+                <th className="text-center px-3 py-2 font-medium">{t('thAction')}</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 && (
                 <tr>
                   <td colSpan={9} className="px-3 py-10 text-center text-slate-400 text-sm">
-                    {loading ? '載入中…' : '尚無資料，請先建立薪資週期 → 批次新增員工薪資。'}
+                    {loading ? t('loadingRows') : t('noDataHint')}
                   </td>
                 </tr>
               )}
@@ -505,12 +641,12 @@ export default function AdminPayrollClient(props: Props) {
                     <td className="px-3 py-2">
                       <div className="font-medium text-slate-900">{who}</div>
                       <div className="text-xs text-slate-500">
-                        {[snap.department, snap.jobTitle].filter(Boolean).join(' · ') || '尚未建立個人資料'}
+                        {[snap.department, snap.jobTitle].filter(Boolean).join(' · ') || t('noProfileHint')}
                       </div>
                     </td>
                     <td className="px-3 py-2 text-xs text-slate-600">
                       <div>{shortDate(r.cycle.periodStart)} ~ {shortDate(r.cycle.periodEnd)}</div>
-                      <div className="text-slate-400">發薪日: {shortDate(r.cycle.payrollDate)}</div>
+                      <div className="text-slate-400">{t('payrollDateLabel')} {shortDate(r.cycle.payrollDate)}</div>
                     </td>
                     <td className="px-3 py-2">{statusChip(r.status)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{fmtHkd(r.baseSalaryHkd)}</td>
@@ -519,33 +655,38 @@ export default function AdminPayrollClient(props: Props) {
                     <td className="px-3 py-2 text-right tabular-nums font-semibold text-slate-900">{fmtHkd(r.netPayableHkd)}</td>
                     <td className="px-3 py-2">
                       <div className="flex flex-wrap items-center justify-center gap-1.5">
+                        <button
+                          title={t('profileBtnTitle')}
+                          onClick={() => openProfileModal(r)}
+                          className="text-xs px-2 py-1 border border-indigo-300 bg-indigo-50 text-indigo-800 rounded hover:bg-indigo-100"
+                        >
+                          {t('profileBtnLabel')}
+                        </button>
                         {(r.status === 'DRAFT' || r.status === 'REJECTED') && (
                           <>
-                            <button title="編輯" onClick={() => openEdit(r)} className="text-xs px-2 py-1 border border-slate-300 rounded hover:bg-white">✏️ 編輯</button>
-                            <button title="送出確認" onClick={async () => { await submitPayrollForConfirmation(r.id); await loadRows(); }} className="text-xs px-2 py-1 border border-amber-300 bg-amber-50 text-amber-800 rounded hover:bg-amber-100">📤 送出</button>
-                            <button title="刪除" onClick={async () => { if (!confirm('確定刪除此薪資單?')) return; await deletePayroll(r.id); await loadRows(); }} className="text-xs px-2 py-1 border border-rose-200 text-rose-700 rounded hover:bg-rose-50">🗑️</button>
+                            <button title="編輯" onClick={() => openEdit(r)} className="text-xs px-2 py-1 border border-slate-300 rounded hover:bg-white">{t('editBtnLabel')}</button>
+                            <button title="送出確認" onClick={async () => { await submitPayrollForConfirmation(r.id); await loadRows(); }} className="text-xs px-2 py-1 border border-amber-300 bg-amber-50 text-amber-800 rounded hover:bg-amber-100">{t('submitBtnLabel')}</button>
+                            <button title="刪除" onClick={async () => { if (!confirm(t('deleteBtnConfirm'))) return; await deletePayroll(r.id); await loadRows(); }} className="text-xs px-2 py-1 border border-rose-200 text-rose-700 rounded hover:bg-rose-50">🗑️</button>
                           </>
                         )}
                         {r.status === 'SUBMITTED' && (
                           <>
-                            <button title="撤回" onClick={async () => { await withdrawPayroll(r.id); await loadRows(); }} className="text-xs px-2 py-1 border border-slate-300 rounded hover:bg-white">↩️ 撤回</button>
-                            <button title="模擬確認(admin測試)" onClick={async () => { await confirmPayroll(r.id, '管理員快速確認'); await loadRows(); }} className="text-xs px-2 py-1 border border-blue-300 bg-blue-50 text-blue-800 rounded hover:bg-blue-100">✔ 快速確認</button>
-                            <button title="模擬拒絕(admin測試)" onClick={async () => { await rejectPayroll(r.id, '管理員測試拒絕'); await loadRows(); }} className="text-xs px-2 py-1 border border-rose-200 text-rose-700 rounded hover:bg-rose-50">✖ 拒絕</button>
+                            <button title="撤回" onClick={async () => { await withdrawPayroll(r.id); await loadRows(); }} className="text-xs px-2 py-1 border border-slate-300 rounded hover:bg-white">{t('withdrawBtnLabel')}</button>
+                            <button title="模擬確認(admin測試)" onClick={async () => { await confirmPayroll(r.id, '管理員快速確認'); await loadRows(); }} className="text-xs px-2 py-1 border border-blue-300 bg-blue-50 text-blue-800 rounded hover:bg-blue-100">{t('quickConfirmBtnLabel')}</button>
+                            <button title="模擬拒絕(admin測試)" onClick={async () => { await rejectPayroll(r.id, '管理員測試拒絕'); await loadRows(); }} className="text-xs px-2 py-1 border border-rose-200 text-rose-700 rounded hover:bg-rose-50">{t('quickRejectBtnLabel')}</button>
                           </>
                         )}
                         {r.status === 'CONFIRMED' && (
-                          <button title="標註已發薪" onClick={() => setActionModal({ mode: 'markPaid', payrollId: r.id })} className="text-xs px-2 py-1 border border-emerald-300 bg-emerald-50 text-emerald-800 rounded hover:bg-emerald-100">✅ 標註已發</button>
+                          <button title="標註已發薪" onClick={() => setActionModal({ mode: 'markPaid', payrollId: r.id })} className="text-xs px-2 py-1 border border-emerald-300 bg-emerald-50 text-emerald-800 rounded hover:bg-emerald-100">{t('markPaidBtnLabel')}</button>
                         )}
                         {(r.status !== 'DRAFT' && r.status !== 'REJECTED') && (
-                          <button title="下載 PDF" onClick={() => handleDownloadPdf(r.id)} className="text-xs px-2 py-1 border border-slate-300 rounded hover:bg-white inline-flex items-center gap-1">
-                            <FileText className="w-3 h-3" /> PDF
-                          </button>
+                          <PdfDropdown payrollId={r.id} />
                         )}
                         {r.status === 'PAID' && r.paidReference && (
-                          <span className="text-[11px] text-slate-500">Ref: <b className="tabular-nums">{r.paidReference}</b></span>
+                          <span className="text-[11px] text-slate-500">{t('refLabelPrefix')}<b className="tabular-nums">{r.paidReference}</b></span>
                         )}
                         {r.status === 'REJECTED' && r.employeeNote && (
-                          <span title={r.employeeNote} className="inline-flex items-center text-[11px] text-rose-600"><XCircle className="w-3 h-3 mr-1" /> 拒絕理由</span>
+                          <span title={r.employeeNote} className="inline-flex items-center text-[11px] text-rose-600"><XCircle className="w-3 h-3 mr-1" /> {t('rejectReasonChipLabel')}</span>
                         )}
                       </div>
                     </td>
@@ -559,47 +700,47 @@ export default function AdminPayrollClient(props: Props) {
 
       {/* Cycle modal */}
       {showNewCycle && (
-        <Modal title="建立薪資週期" onClose={() => setShowNewCycle(false)}>
+        <Modal title={t('cycleModalTitle')} onClose={() => setShowNewCycle(false)}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
             <div>
-              <label className="text-xs font-medium text-slate-500">週期類型</label>
+              <label className="text-xs font-medium text-slate-500">{t('cycleTypeLabel')}</label>
               <select className="w-full border border-slate-300 rounded px-2 py-1.5" value={newCycle.cycleType} onChange={(e) => setNewCycle({ ...newCycle, cycleType: e.target.value })}>
-                <option value="MONTHLY">MONTHLY 月結</option>
-                <option value="SEMI_MONTHLY">SEMI_MONTHLY 半個月</option>
-                <option value="WEEKLY">WEEKLY 週結</option>
-                <option value="BI_WEEKLY">BI_WEEKLY 雙週</option>
-                <option value="ONE_OFF">ONE_OFF 一次性</option>
+                <option value="MONTHLY">{t('cycleTypeMonthly')}</option>
+                <option value="SEMI_MONTHLY">{t('cycleTypeSemiMonthly')}</option>
+                <option value="WEEKLY">{t('cycleTypeWeekly')}</option>
+                <option value="BI_WEEKLY">{t('cycleTypeBiWeekly')}</option>
+                <option value="ONE_OFF">{t('cycleTypeOneOff')}</option>
               </select>
             </div>
             <div>
-              <label className="text-xs font-medium text-slate-500">期間起</label>
+              <label className="text-xs font-medium text-slate-500">{t('periodStartLabel')}</label>
               <input type="date" className="w-full border border-slate-300 rounded px-2 py-1.5" value={newCycle.periodStart} onChange={(e) => setNewCycle({ ...newCycle, periodStart: e.target.value })}/>
             </div>
             <div>
-              <label className="text-xs font-medium text-slate-500">期間迄</label>
+              <label className="text-xs font-medium text-slate-500">{t('periodEndLabel')}</label>
               <input type="date" className="w-full border border-slate-300 rounded px-2 py-1.5" value={newCycle.periodEnd} onChange={(e) => setNewCycle({ ...newCycle, periodEnd: e.target.value })}/>
             </div>
             <div>
-              <label className="text-xs font-medium text-slate-500">發薪日</label>
+              <label className="text-xs font-medium text-slate-500">{t('payrollDateLabelNew')}</label>
               <input type="date" className="w-full border border-slate-300 rounded px-2 py-1.5" value={newCycle.payrollDate} onChange={(e) => setNewCycle({ ...newCycle, payrollDate: e.target.value })}/>
             </div>
             <div className="md:col-span-2">
-              <label className="text-xs font-medium text-slate-500">管理員備註</label>
+              <label className="text-xs font-medium text-slate-500">{t('adminNoteCycleLabel')}</label>
               <input className="w-full border border-slate-300 rounded px-2 py-1.5" value={newCycle.note} onChange={(e) => setNewCycle({ ...newCycle, note: e.target.value })}/>
             </div>
           </div>
           <div className="flex justify-end gap-2 mt-5">
-            <button onClick={() => setShowNewCycle(false)} className="text-sm px-3 py-1.5 rounded border border-slate-300 text-slate-600 hover:bg-slate-50">取消</button>
-            <button onClick={handleCreateCycle} className="text-sm px-3 py-1.5 rounded bg-slate-900 text-white hover:bg-slate-800">建立</button>
+            <button onClick={() => setShowNewCycle(false)} className="text-sm px-3 py-1.5 rounded border border-slate-300 text-slate-600 hover:bg-slate-50">{t('cancelBtn')}</button>
+            <button onClick={handleCreateCycle} className="text-sm px-3 py-1.5 rounded bg-slate-900 text-white hover:bg-slate-800">{t('createBtn')}</button>
           </div>
         </Modal>
       )}
 
       {/* Batch add users */}
       {showBatchAdd && (
-        <Modal title={`批次新增員工薪資 (${batchUserIds.size} 人選)`} onClose={() => setShowBatchAdd(false)}>
+        <Modal title={t('batchModalTitle').replace('{count}', String(batchUserIds.size))} onClose={() => setShowBatchAdd(false)}>
           <p className="text-xs text-slate-500 mb-2">
-            勾選要建立 DRAFT 薪資單的員工；系統會自動帶入個人資料中的預設底薪 (defaultBaseSalaryHkd)。
+            {t('batchModalHint')}
           </p>
           <div className="max-h-96 overflow-y-auto border border-slate-200 rounded-md divide-y divide-slate-100">
             {props.allUsers.map((u) => (
@@ -619,56 +760,122 @@ export default function AdminPayrollClient(props: Props) {
             ))}
           </div>
           <div className="flex justify-end gap-2 mt-4">
-            <button onClick={() => setShowBatchAdd(false)} className="text-sm px-3 py-1.5 rounded border border-slate-300 text-slate-600 hover:bg-slate-50">取消</button>
-            <button onClick={handleBatchCreate} disabled={batchUserIds.size === 0} className="text-sm px-3 py-1.5 rounded bg-slate-900 disabled:opacity-40 text-white hover:bg-slate-800">建立 {batchUserIds.size} 筆 DRAFT</button>
+            <button onClick={() => setShowBatchAdd(false)} className="text-sm px-3 py-1.5 rounded border border-slate-300 text-slate-600 hover:bg-slate-50">{t('cancelBtn')}</button>
+            <button onClick={handleBatchCreate} disabled={batchUserIds.size === 0} className="text-sm px-3 py-1.5 rounded bg-slate-900 disabled:opacity-40 text-white hover:bg-slate-800">{t('batchModalCreateBtn').replace('{count}', String(batchUserIds.size))}</button>
           </div>
         </Modal>
       )}
 
       {/* Edit / MarkPaid modals */}
       {actionModal?.mode === 'edit' && (
-        <Modal title="編輯薪資項目" onClose={() => setActionModal(null)}>
+        <Modal title={t('editModalTitle')} onClose={() => setActionModal(null)}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-            <NumberField label="基本底薪 HKD" value={editForm.baseSalaryHkd} onChange={(v) => setEditForm({ ...editForm, baseSalaryHkd: v })}/>
-            <NumberField label="加班費 HKD" value={editForm.overtimeHkd ?? 0} onChange={(v) => setEditForm({ ...editForm, overtimeHkd: v })}/>
-            <NumberField label="獎金/花紅 HKD" value={editForm.bonusHkd ?? 0} onChange={(v) => setEditForm({ ...editForm, bonusHkd: v })}/>
-            <NumberField label="佣金 HKD" value={editForm.commissionHkd ?? 0} onChange={(v) => setEditForm({ ...editForm, commissionHkd: v })}/>
+            <NumberField label={t('nfBaseSalary')} value={editForm.baseSalaryHkd} onChange={(v) => setEditForm({ ...editForm, baseSalaryHkd: v })}/>
+            <NumberField label={t('nfOvertime')} value={editForm.overtimeHkd ?? 0} onChange={(v) => setEditForm({ ...editForm, overtimeHkd: v })}/>
+            <NumberField label={t('nfBonus')} value={editForm.bonusHkd ?? 0} onChange={(v) => setEditForm({ ...editForm, bonusHkd: v })}/>
+            <NumberField label={t('nfCommission')} value={editForm.commissionHkd ?? 0} onChange={(v) => setEditForm({ ...editForm, commissionHkd: v })}/>
           </div>
           <div className="mt-4">
-            <label className="text-xs font-medium text-slate-500 mb-1 block">管理員備註 (不顯示給員工)</label>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">{t('editAdminNoteLabel')}</label>
             <textarea className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" rows={2} value={editForm.adminNote ?? ''} onChange={(e) => setEditForm({ ...editForm, adminNote: e.target.value })}/>
           </div>
           <div className="mt-3 text-xs text-slate-500">
-            💡 進階加/扣項目 (津貼/MPF/稅/借款等)：未來版本提供獨立編輯表格；MVP 版本儲存時由 server 自動按 base + 加班 + 獎金 + 佣金合併 Headroom 計算。
+            {t('editHeadroomHint')}
           </div>
           <div className="flex justify-end gap-2 mt-5">
-            <button onClick={() => setActionModal(null)} className="text-sm px-3 py-1.5 rounded border border-slate-300 text-slate-600 hover:bg-slate-50">取消</button>
+            <button onClick={() => setActionModal(null)} className="text-sm px-3 py-1.5 rounded border border-slate-300 text-slate-600 hover:bg-slate-50">{t('cancelBtn')}</button>
             <button onClick={handleEditSave} className="text-sm px-3 py-1.5 rounded bg-slate-900 text-white hover:bg-slate-800 inline-flex items-center gap-1.5">
-              <CheckCircle className="w-4 h-4" /> 儲存 & 重算淨發
+              <CheckCircle className="w-4 h-4" /> {t('editSaveBtn')}
             </button>
           </div>
         </Modal>
       )}
 
       {actionModal?.mode === 'markPaid' && (
-        <Modal title="標註已發薪" onClose={() => setActionModal(null)}>
+        <Modal title={t('markPaidModalTitle')} onClose={() => setActionModal(null)}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
             <div>
-              <label className="text-xs font-medium text-slate-500">發薪日期</label>
+              <label className="text-xs font-medium text-slate-500">{t('markPaidDate')}</label>
               <input type="date" className="w-full border border-slate-300 rounded px-2 py-1.5" value={markPaidForm.paidAt} onChange={(e) => setMarkPaidForm({ ...markPaidForm, paidAt: e.target.value })}/>
             </div>
             <div>
-              <label className="text-xs font-medium text-slate-500">轉帳參考編號 / 支票號 / 收據編號</label>
-              <input className="w-full border border-slate-300 rounded px-2 py-1.5" placeholder="Ex: TRF20260905XXXX" value={markPaidForm.paidReference} onChange={(e) => setMarkPaidForm({ ...markPaidForm, paidReference: e.target.value })}/>
+              <label className="text-xs font-medium text-slate-500">{t('markPaidRef')}</label>
+              <input className="w-full border border-slate-300 rounded px-2 py-1.5" placeholder={t('markPaidRefPlaceholder')} value={markPaidForm.paidReference} onChange={(e) => setMarkPaidForm({ ...markPaidForm, paidReference: e.target.value })}/>
             </div>
           </div>
           <div className="mt-3 text-xs text-slate-500">
-            (可選) 未來版本可在此上傳銀行收據 Attachment；MVP 版本請手動於 Attachment 管理。
+            {t('markPaidFutureHint')}
           </div>
           <div className="flex justify-end gap-2 mt-5">
-            <button onClick={() => setActionModal(null)} className="text-sm px-3 py-1.5 rounded border border-slate-300 text-slate-600 hover:bg-slate-50">取消</button>
+            <button onClick={() => setActionModal(null)} className="text-sm px-3 py-1.5 rounded border border-slate-300 text-slate-600 hover:bg-slate-50">{t('cancelBtn')}</button>
             <button onClick={handleMarkPaid} className="text-sm px-3 py-1.5 rounded bg-emerald-700 text-white hover:bg-emerald-800 inline-flex items-center gap-1.5">
-              <CheckCircle className="w-4 h-4" /> 確認已發
+              <CheckCircle className="w-4 h-4" /> {t('markPaidConfirmBtn')}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {actionModal?.mode === 'profile' && (
+        <Modal title={t('adminProfileEditTitle')} onClose={() => setActionModal(null)}>
+          {profileLoading ? (
+            <div className="flex items-center justify-center py-12 text-slate-500 text-sm">
+              <Loader2 className="w-5 h-5 animate-spin mr-2" /> 載入中...
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+              {([
+                ['profileLegalNameEn', 'legalNameEn', 'text'],
+                ['profileLegalNameZh', 'legalNameZh', 'text'],
+                ['profileHkid', 'hkid', 'text'],
+                ['profilePassport', 'passportNo', 'text'],
+                ['profileDob', 'dateOfBirth', 'date'],
+                ['profileJobTitle', 'jobTitle', 'text'],
+                ['profileDepartment', 'department', 'text'],
+                ['profileDateJoined', 'dateJoined', 'date'],
+                ['profileDefaultBaseSalaryHkd', 'defaultBaseSalaryHkd', 'number'],
+                ['profileBankName', 'bankName', 'text'],
+                ['profileBankAccountNo', 'bankAccountNo', 'text'],
+                ['profileMpfAccountNo', 'mpfAccountNo', 'text'],
+                ['profileAddressLine1', 'addressLine1', 'text'],
+                ['profileAddressLine2', 'addressLine2', 'text'],
+                ['profileContactPhone', 'contactPhone', 'tel'],
+                ['profileContactEmail', 'contactEmail', 'email'],
+                ['profileEmergencyName', 'emergencyName', 'text'],
+                ['profileEmergencyPhone', 'emergencyPhone', 'tel'],
+              ] as const).map(([tKey, formKey, type]) => (
+                <div key={formKey}>
+                  <label className="text-xs font-medium text-slate-500 mb-1 block">{t(tKey)}</label>
+                  <input
+                    type={type}
+                    className="w-full border border-slate-300 rounded px-2 py-1.5"
+                    value={(profileForm as any)[formKey] ?? ''}
+                    onChange={(e) =>
+                      setProfileForm((p: FullProfileForm) => ({
+                        ...p,
+                        [formKey]:
+                          type === 'number'
+                            ? Number(e.target.value || 0)
+                            : e.target.value
+                            ? e.target.value
+                            : null,
+                      }))
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex justify-end gap-2 mt-5">
+            <button onClick={() => setActionModal(null)} className="text-sm px-3 py-1.5 rounded border border-slate-300 text-slate-600 hover:bg-slate-50">
+              {t('cancelBtn')}
+            </button>
+            <button
+              onClick={handleSaveProfile}
+              disabled={profileLoading}
+              className="text-sm px-3 py-1.5 rounded bg-slate-900 text-white hover:bg-slate-800 inline-flex items-center gap-1.5"
+            >
+              {profileLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+              {t('saveProfile')}
             </button>
           </div>
         </Modal>

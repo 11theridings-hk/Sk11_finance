@@ -227,6 +227,58 @@ export async function saveMyProfile(userId: string, profile: UserProfileSnapshot
   return ser(saved);
 }
 
+export async function adminUpdateUserProfile(userId: string, profile: UserProfileSnapshotInput & { emergencyName?: string | null; emergencyPhone?: string | null }) {
+  await requireAdmin();
+  if (!profile.legalNameEn || !profile.legalNameEn.trim()) {
+    throw new Error('legalNameEn 為必填');
+  }
+  const saved = await prisma.userProfile.upsert({
+    where: { userId },
+    create: {
+      userId,
+      legalNameEn: profile.legalNameEn,
+      legalNameZh: profile.legalNameZh || null,
+      hkid: profile.hkid || null,
+      passportNo: profile.passportNo || null,
+      dateOfBirth: profile.dateOfBirth ? new Date(profile.dateOfBirth as string) : null,
+      jobTitle: profile.jobTitle || null,
+      department: profile.department || null,
+      dateJoined: profile.dateJoined ? new Date(profile.dateJoined as string) : null,
+      defaultBaseSalaryHkd: profile.defaultBaseSalaryHkd ?? 0,
+      bankName: profile.bankName || null,
+      bankAccountNo: profile.bankAccountNo || null,
+      mpfAccountNo: profile.mpfAccountNo || null,
+      addressLine1: profile.addressLine1 || null,
+      addressLine2: profile.addressLine2 || null,
+      contactPhone: profile.contactPhone || null,
+      contactEmail: profile.contactEmail || null,
+      emergencyName: profile.emergencyName || null,
+      emergencyPhone: profile.emergencyPhone || null,
+    },
+    update: {
+      legalNameEn: profile.legalNameEn,
+      legalNameZh: profile.legalNameZh || null,
+      hkid: profile.hkid || null,
+      passportNo: profile.passportNo || null,
+      dateOfBirth: profile.dateOfBirth ? new Date(profile.dateOfBirth as string) : null,
+      jobTitle: profile.jobTitle || null,
+      department: profile.department || null,
+      dateJoined: profile.dateJoined ? new Date(profile.dateJoined as string) : null,
+      defaultBaseSalaryHkd: profile.defaultBaseSalaryHkd ?? 0,
+      bankName: profile.bankName || null,
+      bankAccountNo: profile.bankAccountNo || null,
+      mpfAccountNo: profile.mpfAccountNo || null,
+      addressLine1: profile.addressLine1 || null,
+      addressLine2: profile.addressLine2 || null,
+      contactPhone: profile.contactPhone || null,
+      contactEmail: profile.contactEmail || null,
+      emergencyName: profile.emergencyName || null,
+      emergencyPhone: profile.emergencyPhone || null,
+    },
+  });
+  return ser(saved);
+}
+
 // ---------- Payroll (Admin core) ----------
 export async function batchCreatePayrolls(cycleId: string, userIds: string[]) {
   const s = await requireAdmin();
@@ -581,7 +633,7 @@ async function loadCJKFontPackRailwaySafe(): Promise<FontPack> {
   return { regular: null, bold: null, regularFamily: 'helvetica', boldFamily: 'helvetica', cjkAvailable: false };
 }
 
-async function buildPdfForPayroll(payrollId: string, { isAdmin, sessionUserId }: { isAdmin: boolean; sessionUserId: string }) {
+async function buildPdfForPayroll(payrollId: string, { isAdmin, sessionUserId, locale = 'bilingual' }: { isAdmin: boolean; sessionUserId: string; locale?: 'bilingual' | 'zh' | 'en' }) {
   let p: any = null;
   let company: SystemSettingMap = {};
   try {
@@ -666,20 +718,20 @@ async function buildPdfForPayroll(payrollId: string, { isAdmin, sessionUserId }:
     fontPack = null;
   }
   try {
-    pdf = generatePayslipPdf(pdfInput, fontPack);
+    pdf = generatePayslipPdf(pdfInput, fontPack, locale);
   } catch (e) {
     const msg = String(e);
     console.error('[buildPdfForPayroll] generatePayslipPdf threw; using generateFallbackEnPdf:', msg);
-    pdf = generateFallbackEnPdf(pdfInput, msg);
+    pdf = generateFallbackEnPdf(pdfInput, msg, locale === 'en' ? 'en' : 'bilingual');
   }
   return { pdf, payroll: p };
 }
 
-export async function downloadPayrollPdf(payrollId: string): Promise<{
+export async function downloadPayrollPdf(payrollId: string, locale: 'bilingual' | 'zh' | 'en' = 'bilingual'): Promise<{
   filename: string; bytes: Uint8Array;
 }> {
   const s = await requireSession();
-  const { pdf, payroll } = await buildPdfForPayroll(payrollId, { isAdmin: !!s.isAdmin, sessionUserId: s.userId });
+  const { pdf, payroll } = await buildPdfForPayroll(payrollId, { isAdmin: !!s.isAdmin, sessionUserId: s.userId, locale });
   if (!payroll.pdfGeneratedAt) {
     await prisma.payroll.update({ where: { id: payrollId }, data: { pdfGeneratedAt: new Date() } });
   }
@@ -689,19 +741,20 @@ export async function downloadPayrollPdf(payrollId: string): Promise<{
   const periodLabel = `${ps.getFullYear()}${String(ps.getMonth() + 1).padStart(2, '0')}`;
   const snap = payroll.snapshotProfileJson as unknown as { legalNameEn?: string };
   const name = (snap.legalNameEn || String(payroll.userId).slice(-6)).replace(/\s+/g, '_');
+  const localeSuffix = locale === 'zh' ? '_中文' : locale === 'en' ? '_EN' : '_Bilingual';
   return {
-    filename: `Payslip_${periodLabel}_${name}_${String(payrollId).slice(-6)}.pdf`,
+    filename: `Payslip_${periodLabel}_${name}_${String(payrollId).slice(-6)}${localeSuffix}.pdf`,
     bytes: pdf,
   };
 }
 
-export async function batchDownloadPdfZip(payrollIds: string[]): Promise<{ filename: string; bytes: Uint8Array }> {
+export async function batchDownloadPdfZip(payrollIds: string[], locale: 'bilingual' | 'zh' | 'en' = 'bilingual'): Promise<{ filename: string; bytes: Uint8Array }> {
   const s = await requireAdmin();
   void s;
   const zip = new JSZip();
   for (const id of payrollIds) {
     try {
-      const { filename, bytes } = await downloadPayrollPdf(id);
+      const { filename, bytes } = await downloadPayrollPdf(id, locale);
       zip.file(filename, bytes);
     } catch (_e) {
       /* skip individually failed */
@@ -709,8 +762,9 @@ export async function batchDownloadPdfZip(payrollIds: string[]): Promise<{ filen
   }
   const content = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
   const stamp = new Date().toISOString().slice(0, 10);
+  const localeSuffix = locale === 'zh' ? '_中文' : locale === 'en' ? '_EN' : '_Bilingual';
   return {
-    filename: `Payslip_Batch_${stamp}_${payrollIds.length}.zip`,
+    filename: `Payslip_Batch_${stamp}_${payrollIds.length}${localeSuffix}.zip`,
     bytes: content,
   };
 }
