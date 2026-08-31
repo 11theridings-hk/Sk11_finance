@@ -16,26 +16,54 @@ type NavSession = {
   publicLedgerRole?: string | null
 }
 
-export default function TopNav({ session, pendingCount = 0, locale }: { session: NavSession | null, pendingCount?: number, locale: Locale }) {
+type NavItem = {
+  name: string
+  href: string
+  count?: number
+}
+
+function CountBadge({ count }: { count?: number }) {
+  if (!count) return null
+
+  return (
+    <span className="absolute -right-3 -top-1 min-w-[18px] rounded-full bg-[#FF3B30] px-1.5 py-0.5 text-center text-[10px] font-bold leading-none text-white shadow-sm">
+      {count > 99 ? '99+' : count}
+    </span>
+  )
+}
+
+export default function TopNav({
+  session,
+  pendingCount = 0,
+  contractReminderCount = 0,
+  activityReminderCount = 0,
+  locale,
+}: {
+  session: NavSession | null
+  pendingCount?: number
+  contractReminderCount?: number
+  activityReminderCount?: number
+  locale: Locale
+}) {
   const pathname = usePathname()
   const router = useRouter()
   const t = createTranslator(locale)
   const [isMoreOpen, setIsMoreOpen] = useState(false)
 
-  const primaryNavItems: Array<{ name: string; href: string }> = []
+  const primaryNavItems: NavItem[] = []
 
   if (hasPublicLedgerAccess(session)) {
     primaryNavItems.push({ name: t('publicLedger'), href: '/' })
   }
 
   primaryNavItems.push({ name: t('privateLedger'), href: '/private-ledger' })
-  primaryNavItems.push({ name: t('activities'), href: '/activities' })
+  primaryNavItems.push({ name: t('activities'), href: '/activities', count: activityReminderCount })
 
-  const secondaryNavItems: Array<{ name: string; href: string }> = []
+  const secondaryNavItems: NavItem[] = []
 
   if (session?.isAdmin) {
-    secondaryNavItems.push({ name: t('review'), href: '/review' })
-    secondaryNavItems.push({ name: t('contracts'), href: '/contracts' })
+    secondaryNavItems.push({ name: t('review'), href: '/review', count: pendingCount })
+    secondaryNavItems.push({ name: t('contracts'), href: '/contracts', count: contractReminderCount })
     secondaryNavItems.push({ name: t('report'), href: '/report' })
     secondaryNavItems.push({ name: t('admin'), href: '/admin' })
   }
@@ -95,11 +123,7 @@ export default function TopNav({ session, pendingCount = 0, locale }: { session:
                 className={`relative pb-1 transition-colors ${isActive ? 'border-b-2 border-[#007AFF] text-[#007AFF]' : 'text-gray-500 hover:text-gray-800'}`}
               >
                 {item.name}
-                {item.href === '/review' && pendingCount > 0 && (
-                  <span className="absolute -right-3 -top-1 min-w-[18px] rounded-full bg-[#FF3B30] px-1.5 py-0.5 text-center text-[10px] font-bold leading-none text-white shadow-sm">
-                    {pendingCount > 99 ? '99+' : pendingCount}
-                  </span>
-                )}
+                <CountBadge count={item.count} />
               </Link>
             )
           })}
@@ -136,9 +160,10 @@ export default function TopNav({ session, pendingCount = 0, locale }: { session:
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex min-w-0 flex-1 items-center justify-center rounded-2xl px-2 py-3 text-sm font-semibold transition-colors ${isActive ? 'bg-[#007AFF]/12 text-[#007AFF]' : 'text-gray-500'}`}
+                className={`relative flex min-w-0 flex-1 items-center justify-center rounded-2xl px-2 py-3 text-sm font-semibold transition-colors ${isActive ? 'bg-[#007AFF]/12 text-[#007AFF]' : 'text-gray-500'}`}
               >
                 <span className="truncate">{item.name}</span>
+                <CountBadge count={item.count} />
               </Link>
             )
           })}
@@ -182,11 +207,11 @@ export default function TopNav({ session, pendingCount = 0, locale }: { session:
                     className={`flex items-center justify-between rounded-2xl px-4 py-3 text-sm font-semibold transition-colors ${isActive ? 'bg-[#007AFF]/12 text-[#007AFF]' : 'bg-[#F2F2F7] text-gray-700'}`}
                   >
                     <span>{item.name}</span>
-                    {item.href === '/review' && pendingCount > 0 && (
+                    {item.count ? (
                       <span className="min-w-[18px] rounded-full bg-[#FF3B30] px-1.5 py-0.5 text-center text-[10px] font-bold leading-none text-white">
-                        {pendingCount > 99 ? '99+' : pendingCount}
+                        {item.count > 99 ? '99+' : item.count}
                       </span>
-                    )}
+                    ) : null}
                   </Link>
                 )
               })}

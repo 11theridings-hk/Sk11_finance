@@ -9,6 +9,7 @@ import AdminTabs from "./AdminTabs";
 import { getCurrentLocale } from "@/lib/locale";
 import { createTranslator } from "@/lib/i18n";
 import { getDefaultHomePath } from "@/lib/access";
+import { getAISettings } from "../actions/settings";
 
 export const metadata = {
   title: "管理后台",
@@ -30,6 +31,7 @@ export default async function AdminPage() {
   const attachments = await getAttachments();
   const pools = await getCapitalPools();
   const users = await getUsers();
+  const aiSettings = await getAISettings();
 
   return (
     <div className="bg-[#F2F2F7] min-h-screen">
@@ -52,6 +54,7 @@ export default async function AdminPage() {
           initialAttachments={attachments}
           initialPools={pools}
           initialUsers={users}
+          initialAISettings={aiSettings}
           locale={locale}
         />
       </main>

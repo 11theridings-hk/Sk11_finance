@@ -1,0 +1,133 @@
+'use server'
+
+import prisma from '@/lib/prisma'
+import { getSession } from './auth'
+
+export type ReminderBucket = 'overdue' | 'today' | 'upcoming'
+
+export type ReminderItem = {
+  id: string
+  title: string
+  targetDate: string
+  bucket: ReminderBucket
+  daysDiff: number
+  reminderDays: number
+  href: string
+}
+
+function getDaysDiff(dateValue: Date) {
+  const today = new Date()
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  const target = new Date(dateValue)
+  const targetDay = new Date(target.getFullYear(), target.getMonth(), target.getDate())
+  return Math.ceil((targetDay.getTime() - startOfToday.getTime()) / 86400000)
+}
+
+function getReminderBucket(daysDiff: number, reminderDays: number): ReminderBucket | null {
+  if (daysDiff < 0) return 'overdue'
+  if (daysDiff === 0) return 'today'
+  if (daysDiff <= reminderDays) return 'upcoming'
+  return null
+}
+
+function sortReminderItems(items: ReminderItem[]) {
+  const bucketOrder: Record<ReminderBucket, number> = {
+    overdue: 0,
+    today: 1,
+    upcoming: 2,
+  }
+
+  return items.sort((a, b) => {
+    if (bucketOrder[a.bucket] !== bucketOrder[b.bucket]) {
+      return bucketOrder[a.bucket] - bucketOrder[b.bucket]
+    }
+    return a.daysDiff - b.daysDiff
+  })
+}
+
+export async function getContractReminderItems() {
+  const session = await getSession()
+  if (!session?.isAdmin) return []
+
+  const contracts = await prisma.contract.findMany({
+    orderBy: [{ expiryDate: 'asc' }, { createdAt: 'desc' }],
+    select: {
+      id: true,
+      title: true,
+      expiryDate: true,
+      reminderDays: true,
+    },
+  })
+
+  const items = contracts
+    .map((contract) => {
+      const daysDiff = getDaysDiff(contract.expiryDate)
+      const bucket = getReminderBucket(daysDiff, contract.reminderDays)
+      if (!bucket) return null
+
+      return {
+        id: contract.id,
+        title: contract.title,
+        targetDate: contract.expiryDate.toISOString(),
+        bucket,
+        daysDiff,
+        reminderDays: contract.reminderDays,
+        href: '/contracts',
+      } satisfies ReminderItem
+    })
+    .filter(Boolean) as ReminderItem[]
+
+  return sortReminderItems(items)
+}
+
+export async function getActivityReminderItems() {
+  const session = await getSession()
+  if (!session) return []
+
+  const activities = await prisma.activity.findMany({
+    where: {
+      OR: [{ visibility: 'PUBLIC' }, { userId: session.userId }],
+    },
+    orderBy: [{ eventDate: 'asc' }, { createdAt: 'desc' }],
+    select: {
+      id: true,
+      title: true,
+      eventDate: true,
+      reminderDays: true,
+    },
+  })
+
+  const items = activities
+    .map((activity) => {
+      const daysDiff = getDaysDiff(activity.eventDate)
+      const bucket = getReminderBucket(daysDiff, activity.reminderDays)
+      if (!bucket) return null
+
+      return {
+        id: activity.id,
+        title: activity.title,
+        targetDate: activity.eventDate.toISOString(),
+        bucket,
+        daysDiff,
+        reminderDays: activity.reminderDays,
+        href: '/activities',
+      } satisfies ReminderItem
+    })
+    .filter(Boolean) as ReminderItem[]
+
+  return sortReminderItems(items)
+}
+
+export async function getReminderOverview() {
+  const [contracts, activities] = await Promise.all([
+    getContractReminderItems(),
+    getActivityReminderItems(),
+  ])
+
+  return {
+    contracts,
+    activities,
+    contractCount: contracts.length,
+    activityCount: activities.length,
+  }
+}

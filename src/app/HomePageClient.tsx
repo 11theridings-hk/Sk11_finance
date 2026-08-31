@@ -5,6 +5,7 @@ import { createRecord } from './actions/record'
 import { createCategory } from './actions/category'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
 import { compressImage, type ClientAttachment } from '@/lib/image'
+import OcrNoteButton from '@/components/OcrNoteButton'
 import RecordDetailModal from './RecordDetailModal'
 
 type SessionInfo = {
@@ -132,6 +133,10 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
         alert(t('imageCompressionFailed'))
       }
     }
+  }
+
+  const appendRecognizedText = (recognizedText: string) => {
+    setNote((current) => (current.trim() ? `${current.trim()}\n${recognizedText}` : recognizedText))
   }
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -389,7 +394,16 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
             </div>
             
             <div className="md:col-span-2 bg-white/50 p-4 rounded-2xl border border-dashed border-gray-300">
-              <label className="block text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wider">{t('attachment')} <span className="normal-case font-normal">(image &lt; 200KB)</span></label>
+              <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('attachment')} <span className="normal-case font-normal">(image &lt; 200KB)</span></label>
+                <OcrNoteButton
+                  locale={locale}
+                  attachment={attachment}
+                  context="public-record"
+                  onResolved={appendRecognizedText}
+                  disabled={isSubmitting || countdown > 0}
+                />
+              </div>
               <input
                 type="file"
                 accept="image/*"

@@ -100,14 +100,12 @@ export default function ContractDetailModal({
               <div className="font-semibold text-gray-900">{contract.type === 'INCOME' ? t('income') : t('expense')}</div>
             </div>
             <div>
-              <div className="text-gray-500 mb-1">{t('amount')}</div>
-              <div className={`font-bold ${contract.amount > 0 ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>{formatCurrency(locale, contract.amount)}</div>
+              <div className="text-gray-500 mb-1">{t('reminderDays')}</div>
+              <div className="font-semibold text-gray-900">{contract.reminderDays ?? 15}</div>
             </div>
             <div>
-              <div className="text-gray-500 mb-1">{t('category')}</div>
-              <div className="font-semibold text-gray-900">
-                {[contract.category?.name, contract.subCategory?.name, contract.thirdCategory?.name].filter(Boolean).join(' / ') || '-'}
-              </div>
+              <div className="text-gray-500 mb-1">{t('amount')}</div>
+              <div className={`font-bold ${contract.amount > 0 ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>{formatCurrency(locale, contract.amount)}</div>
             </div>
             <div>
               <div className="text-gray-500 mb-1">{t('pool')}</div>

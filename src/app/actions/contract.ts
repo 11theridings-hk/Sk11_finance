@@ -17,9 +17,10 @@ export type CreateContractInput = {
   type: 'INCOME' | 'EXPENSE'
   effectiveDate: Date
   expiryDate: Date
+  reminderDays: number
   note?: string
   amount: number
-  categoryId: string
+  categoryId?: string
   subCategoryId?: string
   thirdCategoryId?: string
   poolId?: string
@@ -112,11 +113,12 @@ export async function createContract(data: CreateContractInput) {
           type: data.type,
           effectiveDate: data.effectiveDate,
           expiryDate: data.expiryDate,
+          reminderDays: data.reminderDays,
           note: data.note,
           amount: data.amount,
           categoryId: data.categoryId,
-          subCategoryId: data.subCategoryId,
-          thirdCategoryId: data.thirdCategoryId,
+          subCategoryId: data.categoryId ? data.subCategoryId : undefined,
+          thirdCategoryId: data.categoryId ? data.thirdCategoryId : undefined,
           poolId: data.poolId,
           userId: session.userId
         }
@@ -129,7 +131,7 @@ export async function createContract(data: CreateContractInput) {
             size: data.attachment.size,
             note: data.attachment.note,
             uploaderId: session.userId,
-            categoryId: getDeepestCategoryId(data),
+            categoryId: data.categoryId ? getDeepestCategoryId(data) : undefined,
             contractId: contract.id
           }
         })
@@ -156,7 +158,7 @@ export async function addContractAttachment(contractId: string, attachment: Atta
         size: attachment.size,
         note: attachment.note,
         uploaderId: session.userId,
-        categoryId: getDeepestCategoryId(contract),
+        categoryId: contract.categoryId ? getDeepestCategoryId(contract) : undefined,
         contractId
       }
     })

@@ -9,6 +9,7 @@ import autoTable from 'jspdf-autotable'
 import JSZip from 'jszip'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
 import { compressImage, type ClientAttachment } from '@/lib/image'
+import OcrNoteButton from '@/components/OcrNoteButton'
 import RecordDetailModal from '../RecordDetailModal'
 
 type Props = {
@@ -106,6 +107,10 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     } catch {
       alert(t('imageCompressionFailed'))
     }
+  }
+
+  const appendRecognizedText = (recognizedText: string) => {
+    setEditNote((current) => (current.trim() ? `${current.trim()}\n${recognizedText}` : recognizedText))
   }
 
   const handleDeleteRecord = async (recordId: string) => {
@@ -715,7 +720,16 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                 </div>
 
                 <div className="md:col-span-2 rounded-2xl border border-dashed border-gray-200 p-4 bg-[#F2F2F7]/50">
-                  <label className="block text-xs font-semibold text-gray-500 mb-2 uppercase">{t('appendAttachment')}</label>
+                  <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <label className="block text-xs font-semibold text-gray-500 uppercase">{t('appendAttachment')}</label>
+                    <OcrNoteButton
+                      locale={locale}
+                      attachment={editAttachment}
+                      context="record-edit"
+                      onResolved={appendRecognizedText}
+                      disabled={isSubmittingEdit}
+                    />
+                  </div>
                   <input type="file" accept="image/*" onChange={handleEditAttachmentChange} className="w-full text-sm text-gray-600 file:mr-4 file:py-2.5 file:px-5 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-[#007AFF]/10 file:text-[#007AFF]" />
                   <input type="text" value={editAttachmentNote} onChange={e => setEditAttachmentNote(e.target.value)} placeholder={t('attachmentNotePlaceholder')} className={`${inputClass} mt-3`} />
                 </div>
