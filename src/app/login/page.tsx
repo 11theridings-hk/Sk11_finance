@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { login } from "../actions/auth";
 import { LOCALE_COOKIE, createTranslator, normalizeLocale, type Locale } from "@/lib/i18n";
@@ -8,10 +8,7 @@ import { getDefaultHomePath } from "@/lib/access";
 import BrandLogo from "@/components/BrandLogo";
 
 export default function LoginPage() {
-  const initialLocale = typeof document === "undefined"
-    ? "zh-HK"
-    : normalizeLocale(document.cookie.match(/(?:^|;\s*)locale=([^;]+)/)?.[1]);
-  const [locale, setLocale] = useState<Locale>(initialLocale);
+  const [locale, setLocale] = useState<Locale>("zh-HK");
   const t = useMemo(() => createTranslator(locale), [locale]);
   const [isAdminTab, setIsAdminTab] = useState(false);
   const [account, setAccount] = useState("");
@@ -19,6 +16,13 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+
+  useEffect(() => {
+    const cookieLocale = normalizeLocale(
+      document.cookie.match(/(?:^|;\s*)locale=([^;]+)/)?.[1]
+    );
+    setLocale(cookieLocale);
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
