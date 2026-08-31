@@ -95,7 +95,7 @@
         <li>合約建立表單目前仍然依賴主分類 / 子分類 / 孫分類，並容許前端新增分類。相關位置：<span class="file-path">src/app/contracts/ContractsClient.tsx</span>、<span class="file-path">src/app/actions/contract.ts</span>。</li>
         <li>合約資料模型目前要求 <code>categoryId</code> 必填。相關位置：<span class="file-path">prisma/schema.prisma</span> 中的 <code>model Contract</code>。</li>
         <li>活動提醒目前只計 <code>daysUntilEvent &gt;= 0</code> 並落在提醒窗口內，已過期活動不會顯示。相關位置：<span class="file-path">src/app/activities/ActivitiesClient.tsx</span>。</li>
-        <li>合約提醒目前只顯示 15 日內到期且未過期項目，逾期合約不會出現在提示區。相關位置：<span class="file-path">src/app/contracts/ContractsClient.tsx</span>。</li>
+        <li>合約提醒目前只顯示固定 15 日內到期且未過期項目，既不支援逾期提醒，也不支援像活動一樣自訂提醒日。相關位置：<span class="file-path">src/app/contracts/ContractsClient.tsx</span>。</li>
         <li>全站導航目前只有審核頁有 badge 計數，<code>/contracts</code> 同 <code>/activities</code> 未有提醒小標籤。相關位置：<span class="file-path">src/app/TopNav.tsx</span>。</li>
         <li>所有主要表單都已經有備註欄及附件欄，但未有「圖像辨識附件」按鍵。相關位置：<span class="file-path">src/app/HomePageClient.tsx</span>、<span class="file-path">src/app/private-ledger/PrivateLedgerClient.tsx</span>、<span class="file-path">src/app/contracts/ContractsClient.tsx</span>、<span class="file-path">src/app/activities/ActivitiesClient.tsx</span>、<span class="file-path">src/app/report/ReportClient.tsx</span>。</li>
         <li>管理後台目前只有分類、附件、資金池、用戶四個 tab，未有系統設定或 AI 設定。相關位置：<span class="file-path">src/app/admin/AdminTabs.tsx</span>。</li>
@@ -115,7 +115,7 @@
 
       <h3>建議改動</h3>
       <ul class="compact-list">
-        <li>前端表單只保留：合約標題、生效日、到期日、金額、資金池、備註、附件。</li>
+        <li>前端表單只保留：合約標題、生效日、到期日、提醒日、金額、資金池、備註、附件。</li>
         <li>刪除合約頁的分類 dropdown 及新增分類按鈕。</li>
         <li><code>createContract()</code> 不再要求 <code>categoryId</code>，附件建立時 <code>Attachment.categoryId</code> 可直接留空。</li>
         <li>合約列表與詳情頁不再顯示分類欄位。</li>
@@ -131,6 +131,7 @@
   expiryDate      DateTime
   note            String?
   amount          Float
+  reminderDays    Int      @default(15)
 
   categoryId      String?      // 由 required 改成 optional
   subCategoryId   String?
@@ -151,7 +152,7 @@
     <section class="doc-block" id="reminder-redesign">
       <h2>2. 合約與事件提醒：必須包含逾期，並讓登入後即見</h2>
       <p>
-        目前提醒只覆蓋「將來 15 日內」或「未到期活動」，逾期資料完全消失，對實際跟進無幫助。建議所有提醒統一改成三層狀態：<strong>逾期</strong>、<strong>今日</strong>、<strong>即將到期 / 即將發生</strong>。
+        目前提醒只覆蓋「合約固定 15 日內」或「活動未到期且在提醒窗口內」，逾期資料完全消失，對實際跟進無幫助。建議所有提醒統一改成三層狀態：<strong>逾期</strong>、<strong>今日</strong>、<strong>即將到期 / 即將發生</strong>，而且合約要像活動一樣支援自訂提醒日。
       </p>
 
       <div class="doc-callout">
@@ -163,9 +164,10 @@
 
       <h3>提醒計算規則</h3>
       <ul class="compact-list">
-        <li><strong>合約：</strong><code>daysUntilExpiry &lt; 0</code> 視為逾期；<code>= 0</code> 視為今日到期；<code>1..15</code> 視為即將到期。</li>
+        <li><strong>合約：</strong><code>daysUntilExpiry &lt; 0</code> 視為逾期；<code>= 0</code> 視為今日到期；<code>1..contract.reminderDays</code> 視為即將到期。</li>
         <li><strong>活動：</strong><code>daysUntilEvent &lt; 0</code> 視為已過期；<code>= 0</code> 視為今日；<code>1..reminderDays</code> 視為提醒窗口內。</li>
         <li><strong>活動建議新增狀態：</strong><code>OPEN | DONE | CANCELLED</code>，只對 <code>OPEN</code> 做提醒，否則舊活動會永久掛住 badge。</li>
+        <li><strong>合約建議新增欄位：</strong><code>reminderDays</code>，預設 15，可由建立 / 編輯合約時自訂。</li>
         <li><strong>合約可選擇新增狀態：</strong><code>ACTIVE | CLOSED</code>，逾期但已處理的合約可手動關閉，避免長期干擾。</li>
       </ul>
 
@@ -174,7 +176,7 @@
         <li><strong>導覽 badge：</strong>在 <code>/contracts</code> 及 <code>/activities</code> 導航入口加小紅點 / 數字 badge。</li>
         <li><strong>手機 more 面板：</strong>因合約同活動部分入口喺 secondary nav，手機版 more drawer 都要同步 badge。</li>
         <li><strong>登入後首屏提示：</strong>在首頁或私帳首頁頂部加一條系統提示列，列出「逾期合約 X 項、逾期活動 Y 項」。</li>
-        <li><strong>頁內 banner：</strong>保留現有頁內提醒區，但要改為分組顯示逾期 / 今日 / 即將到期。</li>
+        <li><strong>頁內 banner：</strong>保留現有頁內提醒區，但要改為分組顯示逾期 / 今日 / 即將到期，並在列表中帶出每份合約各自的提醒日設定。</li>
       </ul>
 
       <h3>建議新增 helper</h3>
@@ -382,7 +384,7 @@ flowchart TD
             <tr>
               <td>合約簡化</td>
               <td><span class="file-path">prisma/schema.prisma</span><br /><span class="file-path">src/app/actions/contract.ts</span><br /><span class="file-path">src/app/contracts/ContractsClient.tsx</span><br /><span class="file-path">src/app/ContractDetailModal.tsx</span><br /><span class="file-path">src/app/contracts/page.tsx</span></td>
-              <td>移除分類欄位、放寬 schema、更新顯示與驗證</td>
+              <td>移除分類欄位、加入 <code>reminderDays</code>、放寬 schema、更新顯示與驗證</td>
             </tr>
             <tr>
               <td>提醒與 badge</td>
@@ -419,6 +421,7 @@ flowchart TD
       <ul class="compact-list">
         <li>合約頁不再出現系統分類 dropdown，建立合約只靠標題、日期、金額、備註、附件即可。</li>
         <li>合約提醒與活動提醒都會包含逾期項目。</li>
+        <li>合約建立 / 編輯時可像活動一樣輸入提醒日，且不同合約可用不同數值。</li>
         <li>登入後不用進頁面都可以在入口看到提醒 badge。</li>
         <li>至少一個主頁面在登入後即顯示提醒摘要條。</li>
         <li>所有主要備註欄均有「圖像辨識附件」按鍵。</li>
@@ -438,7 +441,7 @@ flowchart TD
       <h2>來源與現況定位</h2>
       <ul class="source-links">
         <li><span class="file-path">prisma/schema.prisma</span>：Contract、Activity、Attachment、note、categoryId、reminderDays 現況。</li>
-        <li><span class="file-path">src/app/contracts/ContractsClient.tsx</span>：合約表單仍使用主 / 子 / 孫分類，提醒只覆蓋 15 日內到期。</li>
+        <li><span class="file-path">src/app/contracts/ContractsClient.tsx</span>：合約表單仍使用主 / 子 / 孫分類，提醒只覆蓋固定 15 日內到期，未有自訂提醒日輸入。</li>
         <li><span class="file-path">src/app/actions/contract.ts</span>：建立合約仍要求 <code>categoryId</code>。</li>
         <li><span class="file-path">src/app/activities/ActivitiesClient.tsx</span>：活動提醒只顯示未過期且在提醒窗口內項目。</li>
         <li><span class="file-path">src/app/actions/activity.ts</span>：活動暫無 status，提醒生命週期未封口。</li>
