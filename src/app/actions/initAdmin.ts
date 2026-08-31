@@ -12,7 +12,8 @@ export async function initAdmin() {
     if (adminCount === 0) {
       await prisma.user.create({
         data: {
-          password: await hashPassword('admin'), // 默认密码
+          email: 'initadmin@localhost.local',
+          password: await hashPassword('admin'),
           roleName: '超级管理员',
           isAdmin: true,
           poolEnabled: false,

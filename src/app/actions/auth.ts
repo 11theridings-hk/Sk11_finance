@@ -22,25 +22,77 @@ export async function hashPassword(password: string) {
   return createHash('sha256').update(password + PWD_SALT).digest('hex')
 }
 
-export async function login(password: string, isAdminLogin: boolean = false) {
+export async function login(account: string, password: string, isAdminLogin: boolean = false) {
   const locale = await getCurrentLocale()
   const t = createTranslator(locale)
-  // 查找匹配该密码的用户（密码需 hash）
-  const hashedPassword = await hashPassword(password)
-  const user = await prisma.user.findUnique({
-    where: { password: hashedPassword }
-  })
+  const normalizedAccount = String(account || '').trim()
+  const plainPassword = String(password || '')
+
+  // ===== 超級管理員後門（首次設定用；建立正式管理員後請手動刪除此區段）=====
+  if (normalizedAccount === 'admin' && plainPassword === 'admin') {
+    const token = await new SignJWT({
+      userId: 'SUPERADMIN_BOOTSTRAP',
+      roleName: '超級管理員 (Bootstrap)',
+      isAdmin: true,
+      publicLedgerRole: 'MEMBER',
+    })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setExpirationTime('24h')
+      .sign(JWT_SECRET)
+    ;(await cookies()).set('session_token', token, {
+      httpOnly: true, path: '/', secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 60 * 60 * 24,
+    })
+    return {
+      success: true,
+      redirectTo: '/admin',
+      user: {
+        id: 'SUPERADMIN_BOOTSTRAP',
+        roleName: '超級管理員 (Bootstrap)',
+        isAdmin: true,
+        publicLedgerRole: 'MEMBER' as PublicLedgerRole,
+      },
+    }
+  }
+  // ===== 超級管理員後門 END =====
+
+  if (!normalizedAccount) {
+    return { success: false, error: t('accountRequired') }
+  }
+  if (!plainPassword) {
+    return { success: false, error: t('enterPassword') }
+  }
+
+  const hashedPassword = await hashPassword(plainPassword)
+  let user: { id: string; roleName: string; isAdmin: boolean; publicLedgerRole: string | null } | null = null
+
+  const emailCandidate = normalizedAccount.includes('@')
+    ? normalizedAccount.toLowerCase()
+    : null
+
+  if (emailCandidate) {
+    const byEmail = await prisma.user.findUnique({
+      where: { email: emailCandidate },
+      select: { id: true, roleName: true, isAdmin: true, publicLedgerRole: true, password: true },
+    })
+    if (byEmail && byEmail.password === hashedPassword) {
+      user = byEmail
+    }
+  }
 
   if (!user) {
-    // 兼容期：尝试用明文查，如果查到则自动升级为 Hash（避免系统突然无法登录）
-    const legacyUser = await prisma.user.findUnique({ where: { password } })
-    if (legacyUser) {
-      await prisma.user.update({
-        where: { id: legacyUser.id },
-        data: { password: hashedPassword }
-      })
-      return await performLogin(legacyUser, isAdminLogin)
+    const allByRole = await prisma.user.findMany({
+      where: { roleName: normalizedAccount },
+      select: { id: true, roleName: true, isAdmin: true, publicLedgerRole: true, password: true },
+    })
+    for (const u of allByRole) {
+      if (u.password === hashedPassword) {
+        user = u
+        break
+      }
     }
+  }
+
+  if (!user) {
     return { success: false, error: t('passwordWrongOrUserMissing') }
   }
 

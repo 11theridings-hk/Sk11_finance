@@ -4,8 +4,10 @@ import { useState } from "react";
 import { createCategory, deleteCategory } from "../actions/category";
 import { createCapitalPool, deleteCapitalPool } from "../actions/pool";
 import { createUser, updateUser, deleteUser, toggleUserPool } from "../actions/user";
+import { adminUpdateUserProfile, getMyProfile } from "../actions/payroll";
 import { createTranslator, formatCurrency, type Locale } from "@/lib/i18n";
 import { updateAISettings, type AISettings } from "../actions/settings";
+import type { UserProfileSnapshotInput } from "@/lib/payroll/calc";
 
 type AdminTabsProps = {
   initialCategories: any[]
@@ -56,7 +58,7 @@ export default function AdminTabs({ initialCategories, initialAttachments, initi
         {activeTab === "category" && <CategoryTab categories={initialCategories} locale={locale} />}
         {activeTab === "attachment" && <AttachmentTab attachments={initialAttachments} locale={locale} />}
         {activeTab === "pool" && <PoolTab pools={initialPools} users={initialUsers} locale={locale} />}
-        {activeTab === "user" && <UserTab users={initialUsers} locale={locale} />}
+        {activeTab === "user" && <UserTab initialUsers={initialUsers} locale={locale} />}
         {activeTab === "ai-settings" && <AISettingsTab initialSettings={initialAISettings} locale={locale} />}
       </div>
     </div>
@@ -347,62 +349,248 @@ function PoolTab({ pools, users, locale }: { pools: any[], users: any[], locale:
 }
 
 // ---------------- 用户管理组件 ----------------
-function UserTab({ users, locale }: { users: any[], locale: Locale }) {
-  const t = createTranslator(locale);
-  const [newPassword, setNewPassword] = useState("");
-  const [newRoleName, setNewRoleName] = useState("");
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [newPublicLedgerRole, setNewPublicLedgerRole] = useState<'NONE' | 'MEMBER'>("NONE");
-  const [newOcrEnabled, setNewOcrEnabled] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [savingUserId, setSavingUserId] = useState<string | null>(null);
+type FullProfileForm = {
+  legalNameEn: string
+  legalNameZh: string
+  hkid: string
+  passportNo: string
+  dateOfBirth: string
+  jobTitle: string
+  department: string
+  dateJoined: string
+  defaultBaseSalaryHkd: number
+  bankName: string
+  bankAccountNo: string
+  mpfAccountNo: string
+  addressLine1: string
+  addressLine2: string
+  contactPhone: string
+  contactEmail: string
+  emergencyName: string
+  emergencyPhone: string
+}
+
+const PROFILE_FIELD_DEFS: Array<{
+  tKey: string
+  key: keyof FullProfileForm
+  type?: 'text' | 'date' | 'email' | 'tel' | 'number'
+}> = [
+  { tKey: 'profileLegalNameEn', key: 'legalNameEn' },
+  { tKey: 'profileLegalNameZh', key: 'legalNameZh' },
+  { tKey: 'profileHkid', key: 'hkid' },
+  { tKey: 'profilePassport', key: 'passportNo' },
+  { tKey: 'profileDob', key: 'dateOfBirth', type: 'date' },
+  { tKey: 'profileJobTitle', key: 'jobTitle' },
+  { tKey: 'profileDepartment', key: 'department' },
+  { tKey: 'profileDateJoined', key: 'dateJoined', type: 'date' },
+  { tKey: 'profileDefaultBaseSalaryHkd', key: 'defaultBaseSalaryHkd', type: 'number' },
+  { tKey: 'profileBankName', key: 'bankName' },
+  { tKey: 'profileBankAccountNo', key: 'bankAccountNo' },
+  { tKey: 'profileMpfAccountNo', key: 'mpfAccountNo' },
+  { tKey: 'profileAddressLine1', key: 'addressLine1' },
+  { tKey: 'profileAddressLine2', key: 'addressLine2' },
+  { tKey: 'profileContactPhone', key: 'contactPhone', type: 'tel' },
+  { tKey: 'profileContactEmail', key: 'contactEmail', type: 'email' },
+  { tKey: 'profileEmergencyName', key: 'emergencyName' },
+  { tKey: 'profileEmergencyPhone', key: 'emergencyPhone', type: 'tel' },
+]
+
+const EMPTY_PROFILE: FullProfileForm = {
+  legalNameEn: '', legalNameZh: '', hkid: '', passportNo: '',
+  dateOfBirth: '', jobTitle: '', department: '', dateJoined: '',
+  defaultBaseSalaryHkd: 0, bankName: '', bankAccountNo: '',
+  mpfAccountNo: '', addressLine1: '', addressLine2: '',
+  contactPhone: '', contactEmail: '', emergencyName: '', emergencyPhone: '',
+}
+
+const isProfileNonEmpty = (p: FullProfileForm) =>
+  PROFILE_FIELD_DEFS.some(f => {
+    const v = p[f.key]
+    if (f.type === 'number') return Number(v) !== 0
+    return !!String(v || '').trim()
+  })
+
+function UserTab({ initialUsers, locale }: { initialUsers: any[], locale: Locale }) {
+  const t = createTranslator(locale)
+  const [users, setUsers] = useState<any[]>(initialUsers)
+
+  // ---- 新增用戶表單 ----
+  const [newEmail, setNewEmail] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [newRoleName, setNewRoleName] = useState('')
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [newPublicLedgerRole, setNewPublicLedgerRole] = useState<'NONE' | 'MEMBER'>('NONE')
+  const [newOcrEnabled, setNewOcrEnabled] = useState(true)
+  const [expandPersonalInfo, setExpandPersonalInfo] = useState(false)
+  const [newProfile, setNewProfile] = useState<FullProfileForm>({ ...EMPTY_PROFILE })
+  const [loading, setLoading] = useState(false)
+
+  // ---- 既有使用者編輯 Modal ----
+  const [editingUser, setEditingUser] = useState<any | null>(null)
+  const [editForm, setEditForm] = useState<{
+    email: string
+    roleName: string
+    newPassword: string
+    confirmPassword: string
+  } | null>(null)
+  const [editProfile, setEditProfile] = useState<FullProfileForm>({ ...EMPTY_PROFILE })
+  const [savingEdit, setSavingEdit] = useState(false)
+
+  // ---- 其他共用 ----
+  const [savingUserId, setSavingUserId] = useState<string | null>(null)
 
   const handleCreate = async () => {
-    if (!newPassword.trim() || !newRoleName.trim()) return;
-    setLoading(true);
-    const res = await createUser({
-      password: newPassword.trim(),
-      roleName: newRoleName.trim(),
+    const roleName = newRoleName.trim()
+    const email = newEmail.trim().toLowerCase()
+    const pwd = newPassword
+    const pwd2 = confirmPassword
+
+    if (!email) return alert(t('accountRequired'))
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return alert(t('emailInvalid'))
+    if (!roleName) return alert(t('roleNamePlaceholder'))
+    if (!pwd) return alert(t('enterPassword'))
+    if (pwd !== pwd2) return alert(t('passwordMismatch'))
+
+    setLoading(true)
+    const payload: any = {
+      email,
+      password: pwd,
+      roleName,
       isAdmin,
       publicLedgerRole: isAdmin ? 'MEMBER' : newPublicLedgerRole,
       ocrEnabled: newOcrEnabled,
-    });
-    if (!res.success) alert(res.error);
-    else {
-      setNewPassword("");
-      setNewRoleName("");
-      setIsAdmin(false);
-      setNewPublicLedgerRole("NONE");
-      setNewOcrEnabled(true);
     }
-    setLoading(false);
-  };
+    if (isProfileNonEmpty(newProfile)) payload.profile = { ...newProfile }
+
+    const res = await createUser(payload)
+    if (!res.success) {
+      alert(res.error)
+    } else {
+      if (res.user) setUsers(prev => [res.user, ...prev])
+      setNewEmail(''); setNewPassword(''); setConfirmPassword(''); setNewRoleName('')
+      setIsAdmin(false); setNewPublicLedgerRole('NONE'); setNewOcrEnabled(true)
+      setExpandPersonalInfo(false); setNewProfile({ ...EMPTY_PROFILE })
+    }
+    setLoading(false)
+  }
 
   const handleDelete = async (id: string) => {
     if (confirm(t('deleteUserConfirm'))) {
-      const res = await deleteUser(id);
-      if (!res.success) alert(res.error);
+      const res = await deleteUser(id)
+      if (!res.success) alert(res.error)
+      else setUsers(prev => prev.filter(u => u.id !== id))
     }
-  };
+  }
 
   const handleTogglePool = async (id: string, enabled: boolean) => {
-    const res = await toggleUserPool(id, enabled);
-    if (!res.success) alert(res.error);
-  };
+    const res = await toggleUserPool(id, enabled)
+    if (!res.success) alert(res.error)
+    else setUsers(prev => prev.map(u => u.id === id ? { ...u, poolEnabled: enabled } : u))
+  }
 
   const handleUpdatePublicLedgerRole = async (id: string, publicLedgerRole: 'NONE' | 'MEMBER') => {
-    setSavingUserId(id);
-    const res = await updateUser(id, { publicLedgerRole });
-    if (!res.success) alert(res.error);
-    setSavingUserId(null);
-  };
+    setSavingUserId(id)
+    const res = await updateUser(id, { publicLedgerRole })
+    if (!res.success) alert(res.error)
+    else setUsers(prev => prev.map(u => u.id === id ? { ...u, publicLedgerRole } : u))
+    setSavingUserId(null)
+  }
 
   const handleUpdateOcrPermission = async (id: string, ocrEnabled: boolean) => {
-    setSavingUserId(id);
-    const res = await updateUser(id, { ocrEnabled });
-    if (!res.success) alert(res.error);
-    setSavingUserId(null);
-  };
+    setSavingUserId(id)
+    const res = await updateUser(id, { ocrEnabled })
+    if (!res.success) alert(res.error)
+    else setUsers(prev => prev.map(u => u.id === id ? { ...u, ocrEnabled } : u))
+    setSavingUserId(null)
+  }
+
+  const openEditModal = async (user: any) => {
+    setEditingUser(user)
+    setEditForm({
+      email: user.email || '',
+      roleName: user.roleName || '',
+      newPassword: '',
+      confirmPassword: '',
+    })
+    let p: FullProfileForm = { ...EMPTY_PROFILE }
+    try {
+      const resp = await getMyProfile(user.id)
+      if (resp && (resp as any).profile) {
+        const raw = (resp as any).profile
+        p = {
+          legalNameEn: raw.legalNameEn || user.roleName || '',
+          legalNameZh: raw.legalNameZh || '',
+          hkid: raw.hkid || '',
+          passportNo: raw.passportNo || '',
+          dateOfBirth: raw.dateOfBirth ? new Date(raw.dateOfBirth).toISOString().slice(0, 10) : '',
+          jobTitle: raw.jobTitle || '',
+          department: raw.department || '',
+          dateJoined: raw.dateJoined ? new Date(raw.dateJoined).toISOString().slice(0, 10) : '',
+          defaultBaseSalaryHkd: Number(raw.defaultBaseSalaryHkd) || 0,
+          bankName: raw.bankName || '',
+          bankAccountNo: raw.bankAccountNo || '',
+          mpfAccountNo: raw.mpfAccountNo || '',
+          addressLine1: raw.addressLine1 || '',
+          addressLine2: raw.addressLine2 || '',
+          contactPhone: raw.contactPhone || '',
+          contactEmail: raw.contactEmail || '',
+          emergencyName: (raw as any).emergencyName || '',
+          emergencyPhone: (raw as any).emergencyPhone || '',
+        }
+      } else {
+        p.legalNameEn = user.roleName || ''
+      }
+    } catch (e) {
+      p.legalNameEn = user.roleName || ''
+    }
+    setEditProfile(p)
+  }
+
+  const closeEditModal = () => {
+    setEditingUser(null); setEditForm(null); setEditProfile({ ...EMPTY_PROFILE })
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editingUser || !editForm) return
+    const email = editForm.email.trim().toLowerCase()
+    const roleName = editForm.roleName.trim()
+    if (!email) return alert(t('accountRequired'))
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return alert(t('emailInvalid'))
+    if (!roleName) return alert(t('roleNamePlaceholder'))
+    if (editForm.newPassword && editForm.newPassword !== editForm.confirmPassword) {
+      return alert(t('passwordMismatch'))
+    }
+
+    setSavingEdit(true)
+    const userData: any = { email, roleName }
+    if (editForm.newPassword) userData.password = editForm.newPassword
+
+    let ok = true
+    let msg = ''
+    const res1 = await updateUser(editingUser.id, userData)
+    if (!res1.success) { ok = false; msg = res1.error || 'update failed' }
+
+    if (ok) {
+      try {
+        const profilePayload: any = { ...editProfile }
+        profilePayload.legalNameEn = editProfile.legalNameEn.trim() || roleName
+        await adminUpdateUserProfile(editingUser.id, profilePayload)
+      } catch (err: any) {
+        ok = false
+        msg = err.message || 'profile save failed'
+      }
+    }
+
+    if (ok) {
+      alert(t('savedSuccess'))
+      setUsers(prev => prev.map(u => u.id === editingUser.id ? { ...u, email, roleName } : u))
+      closeEditModal()
+    } else {
+      alert(msg)
+    }
+    setSavingEdit(false)
+  }
 
   return (
     <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6">
@@ -411,24 +599,38 @@ function UserTab({ users, locale }: { users: any[], locale: Locale }) {
       {/* 添加新用户 */}
       <div className="bg-[#F2F2F7] p-5 rounded-2xl border-transparent mb-8 space-y-4 shadow-sm">
         <h3 className="text-sm font-semibold text-gray-700">{t('addUser')}</h3>
-        <div className="flex flex-col sm:flex-row gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <input
+            type="email"
+            value={newEmail}
+            onChange={(e) => setNewEmail(e.target.value)}
+            placeholder={t('emailPlaceholder')}
+            className="px-4 py-3 bg-white border-transparent rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900 placeholder-gray-400"
+          />
           <input
             type="text"
             value={newRoleName}
             onChange={(e) => setNewRoleName(e.target.value)}
             placeholder={t('roleNamePlaceholder')}
-            className="flex-1 px-4 py-3 bg-white border-transparent rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900 placeholder-gray-400"
+            className="px-4 py-3 bg-white border-transparent rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900 placeholder-gray-400"
           />
           <input
             type="password"
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
             placeholder={t('password')}
-            className="flex-1 px-4 py-3 bg-white border-transparent rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900 placeholder-gray-400"
+            className="px-4 py-3 bg-white border-transparent rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900 placeholder-gray-400"
+          />
+          <input
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            placeholder={t('confirmPassword')}
+            className="px-4 py-3 bg-white border-transparent rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900 placeholder-gray-400"
           />
         </div>
-        <div className="flex items-center justify-between">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-4 sm:gap-x-6 sm:gap-y-3 items-center">
             <label className="flex items-center text-sm font-medium text-gray-700 cursor-pointer">
               <input
                 type="checkbox"
@@ -462,35 +664,85 @@ function UserTab({ users, locale }: { users: any[], locale: Locale }) {
               </select>
             </label>
           </div>
-          <button
-            onClick={handleCreate}
-            disabled={loading}
-            className="px-6 py-2.5 bg-[#007AFF] text-white rounded-xl text-sm font-semibold hover:bg-[#0066CC] disabled:opacity-50 shadow-sm disabled:shadow-none"
-          >
-            {t('addUser')}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setExpandPersonalInfo(prev => !prev)}
+              className="px-4 py-2.5 border border-gray-200 bg-white text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50"
+            >
+              {expandPersonalInfo ? t('collapsePersonalInfo') : t('expandPersonalInfo')}
+            </button>
+            <button
+              onClick={handleCreate}
+              disabled={loading}
+              className="px-6 py-2.5 bg-[#007AFF] text-white rounded-xl text-sm font-semibold hover:bg-[#0066CC] disabled:opacity-50 shadow-sm disabled:shadow-none"
+            >
+              {t('addUser')}
+            </button>
+          </div>
         </div>
+        <p className="text-xs text-gray-500 leading-relaxed">{t('personalInfoHint')}</p>
+        {expandPersonalInfo && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 pt-2 border-t border-gray-200 mt-3">
+            {PROFILE_FIELD_DEFS.map(f => (
+              <div key={f.key}>
+                <label className="block mb-1 text-xs font-medium text-gray-500 uppercase tracking-wide">
+                  {(t as any)(f.tKey)}
+                </label>
+                <input
+                  type={f.type || 'text'}
+                  value={(newProfile[f.key] ?? '') as string | number}
+                  onChange={(e) => setNewProfile((p: any) => ({
+                    ...p,
+                    [f.key]: f.type === 'number' ? Number(e.target.value || 0) : (e.target.value || null),
+                  }))}
+                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900 placeholder-gray-400"
+                />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 用户列表 */}
       <div className="space-y-4">
         {users.map((user) => (
           <div key={user.id} className="p-5 bg-white border border-gray-100 rounded-2xl shadow-sm hover:border-gray-200 transition-colors">
-            <div className="flex justify-between items-start mb-3">
-              <div>
-                <span className="font-semibold text-gray-900 text-lg mr-3">{user.roleName}</span>
-                {user.isAdmin && (
-                  <span className="inline-block px-2.5 py-1 bg-[#007AFF]/10 text-[#007AFF] text-xs font-semibold rounded-md">
-                    {t('admin')}
-                  </span>
-                )}
+            <div className="flex flex-wrap justify-between items-start gap-3 mb-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="font-semibold text-gray-900 text-lg">{user.roleName}</span>
+                  {user.isAdmin && (
+                    <span className="inline-block px-2.5 py-1 bg-[#007AFF]/10 text-[#007AFF] text-xs font-semibold rounded-md">
+                      {t('admin')}
+                    </span>
+                  )}
+                  {user.emailVerified ? (
+                    <span className="inline-block px-2 py-0.5 bg-emerald-50 text-emerald-700 text-[11px] font-medium rounded-md border border-emerald-200">
+                      {t('emailVerified')}
+                    </span>
+                  ) : user.email ? (
+                    <span className="inline-block px-2 py-0.5 bg-amber-50 text-amber-700 text-[11px] font-medium rounded-md border border-amber-200">
+                      {t('emailNotVerified')}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-1 text-xs text-gray-500 break-all">{user.email || '—'}</div>
               </div>
-              <button
-                onClick={() => handleDelete(user.id)}
-                className="text-[#FF3B30] hover:text-[#CC2E26] text-sm font-semibold"
-              >
-                {t('delete')}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => openEditModal(user)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-indigo-200 bg-indigo-50 text-indigo-800 text-xs font-semibold rounded-lg hover:bg-indigo-100"
+                >
+                  {t('editUserProfile')}
+                </button>
+                <button
+                  onClick={() => handleDelete(user.id)}
+                  className="text-[#FF3B30] hover:text-[#CC2E26] text-sm font-semibold"
+                >
+                  {t('delete')}
+                </button>
+              </div>
             </div>
             
             <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
@@ -499,7 +751,7 @@ function UserTab({ users, locale }: { users: any[], locale: Locale }) {
                 <input
                   type="checkbox"
                   className="sr-only peer"
-                  checked={user.poolEnabled}
+                  checked={!!user.poolEnabled}
                   onChange={(e) => handleTogglePool(user.id, e.target.checked)}
                 />
                 <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#34C759]"></div>
@@ -535,6 +787,104 @@ function UserTab({ users, locale }: { users: any[], locale: Locale }) {
           <p className="text-gray-500 text-center py-4 text-sm">{t('noUserData')}</p>
         )}
       </div>
+
+      {/* 編輯 Modal */}
+      {editingUser && editForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-white rounded-3xl shadow-2xl p-6 md:p-8 space-y-5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xl font-bold text-gray-900">{t('adminProfileEditTitle')}</h3>
+              <button
+                onClick={closeEditModal}
+                className="px-3 py-1.5 rounded-lg text-gray-500 hover:bg-gray-100 text-sm font-medium"
+              >{t('cancel')}</button>
+            </div>
+
+            <div className="rounded-2xl bg-[#F2F2F7] p-4 space-y-3">
+              <h4 className="text-sm font-semibold text-gray-700">{t('account')}</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block mb-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('email')}</label>
+                  <input
+                    type="email"
+                    value={editForm.email}
+                    onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                    placeholder={t('emailPlaceholder')}
+                    className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('roleName')}</label>
+                  <input
+                    type="text"
+                    value={editForm.roleName}
+                    onChange={(e) => setEditForm({ ...editForm, roleName: e.target.value })}
+                    placeholder={t('roleNamePlaceholder')}
+                    className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('newPassword')}</label>
+                  <input
+                    type="password"
+                    value={editForm.newPassword}
+                    onChange={(e) => setEditForm({ ...editForm, newPassword: e.target.value })}
+                    placeholder={t('newPassword')}
+                    className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('newPasswordConfirm')}</label>
+                  <input
+                    type="password"
+                    value={editForm.confirmPassword}
+                    onChange={(e) => setEditForm({ ...editForm, confirmPassword: e.target.value })}
+                    placeholder={t('newPasswordConfirm')}
+                    className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900"
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] text-gray-500">* 密碼兩格都留空 = 維持原本密碼不變</p>
+            </div>
+
+            <div className="space-y-3">
+              <h4 className="text-sm font-semibold text-gray-700">{t('personalInfo') || t('personalProfile') || '個人資料'}</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {PROFILE_FIELD_DEFS.map(f => (
+                  <div key={f.key}>
+                    <label className="block mb-1 text-xs font-medium text-gray-500 uppercase tracking-wide">
+                      {(t as any)(f.tKey)}
+                    </label>
+                    <input
+                      type={f.type || 'text'}
+                      value={(editProfile[f.key] ?? '') as string | number}
+                      onChange={(e) => setEditProfile((p: any) => ({
+                        ...p,
+                        [f.key]: f.type === 'number' ? Number(e.target.value || 0) : (e.target.value || null),
+                      }))}
+                      className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-100">
+              <button
+                onClick={closeEditModal}
+                className="px-4 py-2.5 border border-gray-200 bg-white text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50"
+              >{t('cancel')}</button>
+              <button
+                onClick={handleSaveEdit}
+                disabled={savingEdit}
+                className="px-6 py-2.5 bg-[#007AFF] text-white rounded-xl text-sm font-semibold hover:bg-[#0066CC] disabled:opacity-50 shadow-sm disabled:shadow-none"
+              >
+                {savingEdit ? t('saving') || 'Saving...' : t('saveProfile')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

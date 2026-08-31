@@ -12,8 +12,13 @@ datasource db {
 
 model User {
   id                     String   @id @default(uuid())
-  password               String   @unique // 明文密码作为登录凭证
-  roleName               String // 角色名称
+  email                  String   @unique // 登入帳號 (必填；每個 user 都要有)
+  emailVerified          Boolean  @default(false)
+  verificationToken      String?
+  verificationTokenExpiresAt DateTime?
+  verificationSentAt     DateTime?
+  password               String   // 密碼 (SHA-256 雜湊 + PWD_SALT)；移除 @unique 避免密碼重複無法建 User
+  roleName               String   // 角色顯示名稱 (也可當登入帳號)
   isAdmin                Boolean  @default(false) // 是否为管理员
   poolEnabled            Boolean  @default(false) // 是否启用资金池
   publicLedgerRole       String   @default("NONE") // "NONE" | "MEMBER"

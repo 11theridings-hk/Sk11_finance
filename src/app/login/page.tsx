@@ -14,6 +14,7 @@ export default function LoginPage() {
   const [locale, setLocale] = useState<Locale>(initialLocale);
   const t = useMemo(() => createTranslator(locale), [locale]);
   const [isAdminTab, setIsAdminTab] = useState(false);
+  const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -25,9 +26,11 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const res = await login(password, isAdminTab);
+      const res: any = await login(account, password, isAdminTab);
       if (res.success && res.user) {
-        if (isAdminTab) {
+        if (res.redirectTo) {
+          router.push(res.redirectTo);
+        } else if (isAdminTab || res.user.isAdmin) {
           router.push("/admin");
         } else {
           router.push(getDefaultHomePath({
@@ -79,6 +82,7 @@ export default function LoginPage() {
             onClick={() => {
               setIsAdminTab(false);
               setError("");
+              setAccount("");
               setPassword("");
             }}
           >
@@ -93,6 +97,7 @@ export default function LoginPage() {
             onClick={() => {
               setIsAdminTab(true);
               setError("");
+              setAccount("");
               setPassword("");
             }}
           >
@@ -108,6 +113,27 @@ export default function LoginPage() {
           <form onSubmit={handleLogin} className="space-y-6">
             <div>
               <label
+                htmlFor="account"
+                className="block text-sm font-medium text-gray-700 mb-2"
+              >
+                {t('account')}
+              </label>
+              <input
+                id="account"
+                type="text"
+                autoComplete="username"
+                value={account}
+                onChange={(e) => setAccount(e.target.value)}
+                placeholder={t('accountPlaceholder')}
+                className="w-full px-4 py-3 bg-gray-100 border-transparent rounded-xl focus:bg-white focus:border-[#007AFF] focus:ring-2 focus:ring-[#007AFF]/20 outline-none transition-all text-gray-900 placeholder-gray-400"
+                required
+              />
+              <p className="mt-1.5 text-xs text-gray-400 leading-relaxed pl-1">
+                {t('accountHint')}
+              </p>
+            </div>
+            <div>
+              <label
                 htmlFor="password"
                 className="block text-sm font-medium text-gray-700 mb-2"
               >
@@ -116,6 +142,7 @@ export default function LoginPage() {
               <input
                 id="password"
                 type="password"
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder={t('enterPassword')}
