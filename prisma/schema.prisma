@@ -30,6 +30,11 @@ model User {
   capitalPools   CapitalPool[]   @relation("UserCapitalPools")
   contracts      Contract[]      @relation("UserContracts")
   memos          Memo[]          @relation("UserMemos")
+  profile        UserProfile?
+  payrolls       Payroll[]       @relation("UserPayrolls")
+  payrollsSubmitted Payroll[]    @relation("AdminSubmittedPayrolls")
+  payrollsPaid   Payroll[]       @relation("AdminPaidPayrolls")
+  salaryCyclesCreated SalaryCycle[] @relation("AdminCreatedCycles")
 }
 
 model Category {
@@ -191,6 +196,8 @@ model Attachment {
   privateRecordId String?
   contractId String?
   activityId String?
+  payrollPaidId String? @unique
+  payrollPdfId  String? @unique
 
   // 关系
   uploader      User          @relation("UserAttachments", fields: [uploaderId], references: [id])
@@ -199,6 +206,8 @@ model Attachment {
   privateRecord PrivateRecord? @relation("PrivateRecordAttachments", fields: [privateRecordId], references: [id])
   contract      Contract?     @relation("ContractAttachments", fields: [contractId], references: [id])
   activity      Activity?     @relation("ActivityAttachments", fields: [activityId], references: [id])
+  payrollPaid   Payroll?      @relation("PaidReceiptAttachments", fields: [payrollPaidId], references: [id])
+  payrollPdf    Payroll?      @relation("PdfPayrollAttachments", fields: [payrollPdfId], references: [id])
 }
 
 model Memo {
@@ -225,3 +234,132 @@ model SystemSetting {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+model UserProfile {
+  userId               String   @id
+  legalNameEn          String
+  legalNameZh          String?
+  hkid                 String?
+  passportNo           String?
+  dateOfBirth          DateTime?
+  jobTitle             String?
+  department           String?
+  dateJoined           DateTime?
+  dateOfTermination    DateTime?
+  defaultBaseSalaryHkd Float?   @default(0)
+  bankName             String?
+  bankAccountNo        String?
+  mpfAccountNo         String?
+  addressLine1         String?
+  addressLine2         String?
+  contactPhone         String?
+  contactEmail         String?
+  emergencyName        String?
+  emergencyPhone       String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum SalaryCycleStatus {
+  OPEN
+  LOCKED
+  SETTLED
+}
+
+enum SalaryCycleType {
+  MONTHLY
+  SEMI_MONTHLY
+  WEEKLY
+  BI_WEEKLY
+  ONE_OFF
+}
+
+model SalaryCycle {
+  id                  String            @id @default(uuid())
+  cycleType           SalaryCycleType   @default(MONTHLY)
+  periodStart         DateTime
+  periodEnd           DateTime
+  payrollDate         DateTime
+  status              SalaryCycleStatus @default(OPEN)
+  note                String?
+  headcountTotal      Int               @default(0)
+  headcountConfirmed  Int               @default(0)
+  headcountPaid       Int               @default(0)
+  grossTotalHkd       Float             @default(0)
+  deductionTotalHkd   Float             @default(0)
+  netPayableTotalHkd  Float             @default(0)
+  amountPaidTotalHkd  Float             @default(0)
+  createdByUserId     String
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  createdBy User       @relation("AdminCreatedCycles", fields: [createdByUserId], references: [id])
+  payrolls  Payroll[]
+}
+
+enum PayrollStatus {
+  DRAFT
+  SUBMITTED
+  CONFIRMED
+  PAID
+  REJECTED
+}
+
+model Payroll {
+  id                   String           @id @default(uuid())
+  salaryCycleId        String
+  userId               String
+  snapshotProfileJson  Json
+  baseSalaryHkd        Float
+  overtimeHkd          Float            @default(0)
+  bonusHkd             Float            @default(0)
+  commissionHkd        Float            @default(0)
+  allowanceTotalHkd    Float            @default(0)
+  deductionTotalHkd    Float            @default(0)
+  grossTotalHkd        Float
+  netPayableHkd        Float
+  currency             String           @default("HKD")
+  status               PayrollStatus    @default(DRAFT)
+  adminNote            String?
+  employeeNote         String?
+  submittedAt          DateTime?
+  confirmedAt          DateTime?
+  rejectedAt           DateTime?
+  revisedAt            DateTime?
+  paidAt               DateTime?
+  submittedByUserId    String?
+  paidByUserId         String?
+  paidReference        String?
+  paidAttachmentId     String?
+  pdfGeneratedAt       DateTime?
+  pdfAttachmentId      String?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  cycle           SalaryCycle  @relation(fields: [salaryCycleId], references: [id], onDelete: Cascade)
+  user            User         @relation("UserPayrolls", fields: [userId], references: [id], onDelete: Cascade)
+  submittedBy     User?        @relation("AdminSubmittedPayrolls", fields: [submittedByUserId], references: [id])
+  paidBy          User?        @relation("AdminPaidPayrolls", fields: [paidByUserId], references: [id])
+  paidAttachment  Attachment?  @relation("PaidReceiptAttachments")
+  pdfAttachment   Attachment?  @relation("PdfPayrollAttachments")
+  items           PayrollItem[]
+}
+
+model PayrollItem {
+  id          String   @id @default(uuid())
+  payrollId   String
+  itemType    String // "EARNING" | "DEDUCTION"
+  itemCode    String // "BASE_SALARY" | "OVERTIME" | "BONUS_ANNUAL" | ...
+  itemName    String // 顯示給使用者 / PDF 抬頭
+  sourceText  String?  // 可追溯 source_text
+  unitCount   Float?   // 數量 (e.g. 12 小時加班)
+  unitRateHkd Float?   // 單價 (e.g. 時薪 140)
+  amountHkd   Float    // 正數; DEDUCTION 存正數, 彙總時減
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  payroll Payroll @relation(fields: [payrollId], references: [id], onDelete: Cascade)
+}
+
