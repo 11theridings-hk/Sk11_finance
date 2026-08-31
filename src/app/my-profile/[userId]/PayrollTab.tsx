@@ -67,9 +67,19 @@ type PayrollRow = {
 };
 
 const fmtHkd = (n: number) =>
-  n.toLocaleString('en-HK', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' HKD';
+  (Number.isFinite(n) ? n : 0).toLocaleString('en-HK', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' HKD';
 
-const shortDate = (s: string | null | undefined) => (s ? s.slice(0, 10) : '—');
+function toIsoDay(s: unknown): string {
+  if (s == null) return '—';
+  if (s instanceof Date) return s.toISOString().slice(0, 10);
+  const prim = String(s);
+  try {
+    const d = new Date(prim);
+    if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  } catch { /* ignore */ }
+  return prim.length >= 10 ? prim.slice(0, 10) : prim;
+}
+const shortDate = toIsoDay;
 
 const statusChip = (s: string) => {
   const map: Record<string, { label: string; cls: string }> = {

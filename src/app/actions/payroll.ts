@@ -41,6 +41,22 @@ async function getCompanySettings(): Promise<SystemSettingMap> {
   return map as SystemSettingMap;
 }
 
+function ser<T>(x: T): T {
+  return JSON.parse(JSON.stringify(x));
+}
+
+function toYmd(s: unknown): string {
+  if (s == null) return '';
+  if (s instanceof Date) return s.toISOString().slice(0, 10);
+  const prim = String(s);
+  if (prim.length >= 10) return prim.slice(0, 10);
+  try {
+    const d = new Date(prim);
+    if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  } catch { /* ignore */ }
+  return prim;
+}
+
 // ---------- Salary Cycle (Admin) ----------
 export async function createSalaryCycle(input: {
   cycleType: SalaryCycleType;
@@ -78,12 +94,12 @@ export async function updateSalaryCycle(cycleId: string, patch: {
   if (patch.periodEnd) data.periodEnd = new Date(patch.periodEnd);
   if (patch.payrollDate) data.payrollDate = new Date(patch.payrollDate);
   const cycle = await prisma.salaryCycle.update({ where: { id: cycleId }, data });
-  return cycle;
+  return ser(cycle);
 }
 
 export async function listSalaryCycles() {
   await requireSession();
-  return prisma.salaryCycle.findMany({
+  const rows = await prisma.salaryCycle.findMany({
     orderBy: [{ periodStart: 'desc' }, { createdAt: 'desc' }],
     select: {
       id: true,
@@ -104,6 +120,7 @@ export async function listSalaryCycles() {
       payrolls: { select: { id: true, userId: true, status: true } },
     },
   });
+  return ser(rows);
 }
 
 export async function refreshCycleStats(cycleId: string) {
@@ -149,7 +166,8 @@ export async function refreshCycleStats(cycleId: string) {
 export async function getMyProfile(userId: string) {
   const s = await requireSession();
   if (!s.isAdmin && s.userId !== userId) throw new Error('Forbidden');
-  return prisma.userProfile.findUnique({ where: { userId } });
+  const profile = await prisma.userProfile.findUnique({ where: { userId } });
+  return ser(profile);
 }
 
 export async function saveMyProfile(userId: string, profile: UserProfileSnapshotInput & { emergencyName?: string | null; emergencyPhone?: string | null }) {
@@ -158,7 +176,7 @@ export async function saveMyProfile(userId: string, profile: UserProfileSnapshot
   if (!profile.legalNameEn || !profile.legalNameEn.trim()) {
     throw new Error('legalNameEn 為必填');
   }
-  return prisma.userProfile.upsert({
+  const saved = await prisma.userProfile.upsert({
     where: { userId },
     create: {
       userId,
@@ -202,6 +220,7 @@ export async function saveMyProfile(userId: string, profile: UserProfileSnapshot
       emergencyPhone: profile.emergencyPhone || null,
     },
   });
+  return ser(saved);
 }
 
 // ---------- Payroll (Admin core) ----------
@@ -331,7 +350,7 @@ export async function submitPayrollForConfirmation(payrollId: string) {
     data: { status: 'SUBMITTED', submittedAt: new Date(), submittedByUserId: s.userId, rejectedAt: null, employeeNote: null },
   });
   if (p.salaryCycleId) await refreshCycleStats(p.salaryCycleId);
-  return updated;
+  return ser(updated);
 }
 
 export async function batchSubmitPayrolls(payrollIds: string[]) {
@@ -351,7 +370,7 @@ export async function withdrawPayroll(payrollId: string) {
     data: { status: 'DRAFT', submittedAt: null, submittedByUserId: null, revisedAt: new Date() },
   });
   if (p.salaryCycleId) await refreshCycleStats(p.salaryCycleId);
-  return updated;
+  return ser(updated);
 }
 
 export async function confirmPayroll(payrollId: string, employeeNote?: string) {
@@ -365,7 +384,7 @@ export async function confirmPayroll(payrollId: string, employeeNote?: string) {
     data: { status: 'CONFIRMED', confirmedAt: new Date(), employeeNote: employeeNote || null },
   });
   if (p.salaryCycleId) await refreshCycleStats(p.salaryCycleId);
-  return updated;
+  return ser(updated);
 }
 
 export async function rejectPayroll(payrollId: string, reason: string) {
@@ -380,7 +399,7 @@ export async function rejectPayroll(payrollId: string, reason: string) {
     data: { status: 'REJECTED', rejectedAt: new Date(), employeeNote: reason.trim() },
   });
   if (p.salaryCycleId) await refreshCycleStats(p.salaryCycleId);
-  return updated;
+  return ser(updated);
 }
 
 export async function markPayrollPaid(payrollId: string, info: { paidAt?: string; paidReference?: string; paidAttachmentId?: string }) {
@@ -399,7 +418,7 @@ export async function markPayrollPaid(payrollId: string, info: { paidAt?: string
     },
   });
   if (p.salaryCycleId) await refreshCycleStats(p.salaryCycleId);
-  return updated;
+  return ser(updated);
 }
 
 export async function deletePayroll(payrollId: string) {
@@ -479,13 +498,13 @@ export async function adminListPayrolls(q: AdminPayrollQuery) {
     countPaid: filtered.filter((r) => r.status === 'PAID').length,
     amountPaidHkd: filtered.filter((r) => r.status === 'PAID').reduce((s, r) => s + r.netPayableHkd, 0),
   };
-  return { rows: filtered, stats };
+  return JSON.parse(JSON.stringify({ rows: filtered, stats }));
 }
 
 export async function listMyPayrolls(userId: string) {
   const s = await requireSession();
   if (!s.isAdmin && s.userId !== userId) throw new Error('Forbidden');
-  return prisma.payroll.findMany({
+  const rows = await prisma.payroll.findMany({
     where: { userId },
     orderBy: [{ cycle: { periodStart: 'desc' } }],
     include: {
@@ -494,6 +513,7 @@ export async function listMyPayrolls(userId: string) {
     },
     take: 200,
   });
+  return JSON.parse(JSON.stringify(rows));
 }
 
 // ---------- PDF ----------
@@ -555,15 +575,17 @@ export async function downloadPayrollPdf(payrollId: string): Promise<{
 }> {
   const s = await requireSession();
   const { pdf, payroll } = await buildPdfForPayroll(payrollId, { isAdmin: !!s.isAdmin, sessionUserId: s.userId });
-  // If first time generating, also set pdfGeneratedAt (not attachment; for statelessness we don't persist binary to attachment).
   if (!payroll.pdfGeneratedAt) {
     await prisma.payroll.update({ where: { id: payrollId }, data: { pdfGeneratedAt: new Date() } });
   }
-  const periodLabel = `${payroll.cycle.periodStart.getFullYear()}${String(payroll.cycle.periodStart.getMonth()+1).padStart(2,'0')}`;
+  const ps = payroll.cycle.periodStart instanceof Date
+    ? payroll.cycle.periodStart
+    : new Date(String(payroll.cycle.periodStart));
+  const periodLabel = `${ps.getFullYear()}${String(ps.getMonth() + 1).padStart(2, '0')}`;
   const snap = payroll.snapshotProfileJson as unknown as { legalNameEn?: string };
-  const name = (snap.legalNameEn || payroll.userId.slice(-6)).replace(/\s+/g, '_');
+  const name = (snap.legalNameEn || String(payroll.userId).slice(-6)).replace(/\s+/g, '_');
   return {
-    filename: `Payslip_${periodLabel}_${name}_${payrollId.slice(-6)}.pdf`,
+    filename: `Payslip_${periodLabel}_${name}_${String(payrollId).slice(-6)}.pdf`,
     bytes: pdf,
   };
 }
@@ -601,31 +623,32 @@ export async function exportPayrollsCsv(q: AdminPayrollQuery): Promise<{ filenam
     if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
     return s;
   };
+  const safeFix = (n: unknown) => (Number.isFinite(n as number) ? Number(n) : 0).toFixed(2);
   const lines = [header.join(',')];
   for (const r of rows) {
     const snap = r.snapshotProfileJson as unknown as { legalNameEn?: string; legalNameZh?: string };
-    const who = [snap.legalNameZh, snap.legalNameEn].filter(Boolean).join('/') || r.userId;
+    const who = [snap.legalNameZh, snap.legalNameEn].filter(Boolean).join('/') || String(r.userId);
     lines.push([
       r.id,
-      `${r.cycle.periodStart.toISOString().slice(0,10)}~${r.cycle.periodEnd.toISOString().slice(0,10)}`,
-      r.cycle.payrollDate.toISOString().slice(0,10),
+      `${toYmd(r.cycle.periodStart)}~${toYmd(r.cycle.periodEnd)}`,
+      toYmd(r.cycle.payrollDate),
       esc(who),
       r.status,
-      r.baseSalaryHkd.toFixed(2),
-      r.overtimeHkd.toFixed(2),
-      r.bonusHkd.toFixed(2),
-      r.commissionHkd.toFixed(2),
-      r.allowanceTotalHkd.toFixed(2),
-      r.deductionTotalHkd.toFixed(2),
-      r.grossTotalHkd.toFixed(2),
-      r.netPayableHkd.toFixed(2),
-      r.confirmedAt?.toISOString().slice(0,10) ?? '',
-      r.paidAt?.toISOString().slice(0,10) ?? '',
+      safeFix(r.baseSalaryHkd),
+      safeFix(r.overtimeHkd),
+      safeFix(r.bonusHkd),
+      safeFix(r.commissionHkd),
+      safeFix(r.allowanceTotalHkd),
+      safeFix(r.deductionTotalHkd),
+      safeFix(r.grossTotalHkd),
+      safeFix(r.netPayableHkd),
+      toYmd((r as unknown as { confirmedAt?: unknown }).confirmedAt),
+      toYmd((r as unknown as { paidAt?: unknown }).paidAt),
       esc((r as unknown as { paidReference?: string }).paidReference ?? ''),
       esc((r as unknown as { adminNote?: string }).adminNote ?? ''),
     ].join(','));
   }
-  const bom = '\uFEFF'; // Excel 正確 UTF-8 BOM
+  const bom = '\uFEFF';
   const body = bom + lines.join('\n');
   const enc = new TextEncoder();
   const bytes = enc.encode(body);

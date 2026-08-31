@@ -90,8 +90,20 @@ type PayrollRow = {
   }[];
 };
 
-const fmtHkd = (n: number) => n.toLocaleString('en-HK', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' HKD';
-const shortDate = (s: string | null | undefined) => s ? s.slice(0, 10) : '';
+const fmtHkd = (n: number) =>
+  (Number.isFinite(n) ? n : 0).toLocaleString('en-HK', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' HKD';
+
+function toIsoDay(s: unknown): string {
+  if (s == null) return '';
+  if (s instanceof Date) return s.toISOString().slice(0, 10);
+  const prim = String(s);
+  try {
+    const d = new Date(prim);
+    if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  } catch { /* ignore */ }
+  return prim.length >= 10 ? prim.slice(0, 10) : prim;
+}
+const shortDate = toIsoDay;
 const statusChip = (s: string) => {
   const map: Record<string, { label: string; cls: string }> = {
     DRAFT: { label: '草稿', cls: 'bg-slate-100 text-slate-700 border border-slate-300' },
@@ -188,7 +200,7 @@ export default function AdminPayrollClient(props: Props) {
 
   const userDisplayName = (u: UserRow) => {
     const zh = u.profile?.legalNameZh;
-    const en = u.profile?.legalNameEn || u.roleName || u.id.slice(-6);
+    const en = u.profile?.legalNameEn || u.roleName || String(u.id).slice(-6);
     return zh ? `${zh} (${en})` : en;
   };
 
