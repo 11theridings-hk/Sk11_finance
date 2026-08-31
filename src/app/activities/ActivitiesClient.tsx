@@ -5,6 +5,7 @@ import { createActivity } from '../actions/activity'
 import { createTranslator, type Locale } from '@/lib/i18n'
 import { compressImage, type ClientAttachment } from '@/lib/image'
 import ActivityDetailModal from '../ActivityDetailModal'
+import OcrNoteButton from '@/components/OcrNoteButton'
 
 type ActivityItem = {
   id: string
@@ -43,22 +44,34 @@ export default function ActivitiesClient({ locale, currentUserId, isAdmin, initi
   const [attachmentNote, setAttachmentNote] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const upcomingActivities = useMemo(() => {
+  const reminderGroups = useMemo(() => {
     const today = new Date()
     const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate())
 
-    return initialActivities
+    const items = initialActivities
       .map((activity) => {
         const event = new Date(activity.eventDate)
         const eventDay = new Date(event.getFullYear(), event.getMonth(), event.getDate())
         const daysUntilEvent = Math.ceil((eventDay.getTime() - startOfToday.getTime()) / 86400000)
 
+        let bucket: 'overdue' | 'today' | 'upcoming' | null = null
+        if (daysUntilEvent < 0) bucket = 'overdue'
+        else if (daysUntilEvent === 0) bucket = 'today'
+        else if (daysUntilEvent <= activity.reminderDays) bucket = 'upcoming'
+
         return {
           ...activity,
           daysUntilEvent,
+          bucket,
         }
       })
-      .filter((activity) => activity.daysUntilEvent >= 0 && activity.daysUntilEvent <= activity.reminderDays)
+      .filter((activity) => Boolean(activity.bucket))
+
+    return {
+      overdue: items.filter((activity) => activity.bucket === 'overdue'),
+      today: items.filter((activity) => activity.bucket === 'today'),
+      upcoming: items.filter((activity) => activity.bucket === 'upcoming'),
+    }
   }, [initialActivities])
 
   const handleImageChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -99,35 +112,68 @@ export default function ActivitiesClient({ locale, currentUserId, isAdmin, initi
     setIsSubmitting(false)
   }
 
+  const appendRecognizedText = (recognizedText: string) => {
+    setNote((current) => (current.trim() ? `${current.trim()}\n${recognizedText}` : recognizedText))
+  }
+
+  const totalReminderCount =
+    reminderGroups.overdue.length + reminderGroups.today.length + reminderGroups.upcoming.length
+
+  const renderReminderGroup = (
+    titleText: string,
+    items: Array<ActivityItem & { daysUntilEvent: number }>,
+    pillClass: string
+  ) => {
+    if (items.length === 0) return null
+
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-gray-900">{titleText}</h3>
+          <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${pillClass}`}>{items.length}</span>
+        </div>
+        {items.slice(0, 4).map((activity) => (
+          <div key={activity.id} className="flex flex-col gap-1 rounded-xl bg-white/80 px-3 py-2 text-sm text-gray-700 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="font-medium text-gray-900">{activity.title}</div>
+              <div className="text-xs text-gray-500">{activity.visibility === 'PUBLIC' ? t('publicActivity') : t('privateActivity')}</div>
+            </div>
+            <div className="flex items-center gap-2 text-xs sm:text-sm">
+              <span>{new Date(activity.eventDate).toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK')}</span>
+              <span className="rounded-full bg-[#FFF7ED] px-2 py-0.5 font-medium text-[#C2410C]">
+                {activity.daysUntilEvent < 0
+                  ? locale === 'en'
+                    ? `${Math.abs(activity.daysUntilEvent)} days overdue`
+                    : `已過期 ${Math.abs(activity.daysUntilEvent)} 天`
+                  : activity.daysUntilEvent === 0
+                    ? t('eventToday')
+                    : locale === 'en'
+                      ? `${activity.daysUntilEvent} days left`
+                      : `尚餘 ${activity.daysUntilEvent} 天`}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
   const inputClass = 'w-full rounded-xl border-transparent bg-white p-3 text-gray-900 shadow-sm outline-none transition-all placeholder-gray-400 focus:border-[#007AFF] focus:bg-white focus:ring-2 focus:ring-[#007AFF]/30'
 
   return (
     <div className="space-y-4 pt-4 sm:space-y-6 sm:pt-6">
-      {upcomingActivities.length > 0 && (
+      {totalReminderCount > 0 && (
         <section className="rounded-2xl border border-[#FF9500]/20 bg-[#FFF7ED] px-4 py-4 shadow-sm sm:rounded-3xl sm:px-5">
           <div className="flex items-start gap-3">
             <div className="mt-0.5 rounded-full bg-[#FF9500]/10 p-2 text-[#FF9500]">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
             </div>
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 flex-1 space-y-3">
               <h2 className="text-base font-semibold text-[#9A3412]">{t('activityReminder')}</h2>
-              <p className="mt-1 text-sm text-[#C2410C]">{t('activitiesUpcomingHint')}</p>
-              <div className="mt-3 space-y-2">
-                {upcomingActivities.slice(0, 4).map((activity) => (
-                  <div key={activity.id} className="flex flex-col gap-1 rounded-xl bg-white/80 px-3 py-2 text-sm text-gray-700 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <div className="font-medium text-gray-900">{activity.title}</div>
-                      <div className="text-xs text-gray-500">{activity.visibility === 'PUBLIC' ? t('publicActivity') : t('privateActivity')}</div>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs sm:text-sm">
-                      <span>{new Date(activity.eventDate).toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK')}</span>
-                      <span className="rounded-full bg-[#FFEDD5] px-2 py-0.5 font-medium text-[#C2410C]">
-                        {activity.daysUntilEvent === 0 ? t('eventToday') : (locale === 'en' ? `${activity.daysUntilEvent} days left` : `尚餘 ${activity.daysUntilEvent} 天`)}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <p className="mt-1 text-sm text-[#C2410C]">{t('activitiesReminderGroupedHint')}</p>
+              {renderReminderGroup(t('reminderOverdue'), reminderGroups.overdue, 'bg-[#FF3B30]/10 text-[#FF3B30]')}
+              {renderReminderGroup(t('reminderToday'), reminderGroups.today, 'bg-[#FF9500]/10 text-[#C2410C]')}
+              {renderReminderGroup(t('reminderUpcoming'), reminderGroups.upcoming, 'bg-[#007AFF]/10 text-[#007AFF]')}
             </div>
           </div>
         </section>
@@ -169,6 +215,9 @@ export default function ActivitiesClient({ locale, currentUserId, isAdmin, initi
               <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('attachment')}</label>
               <input type="file" accept="image/*" onChange={handleImageChange} className="w-full text-sm text-gray-600 file:mr-4 file:rounded-xl file:border-0 file:bg-[#007AFF]/10 file:px-5 file:py-2.5 file:text-sm file:font-semibold file:text-[#007AFF]" />
               <input value={attachmentNote} onChange={(e) => setAttachmentNote(e.target.value)} placeholder={t('attachmentNotePlaceholder')} className={inputClass} />
+              <div className="flex justify-end">
+                <OcrNoteButton locale={locale} attachment={attachment} context="activity" onResolved={appendRecognizedText} disabled={isSubmitting} />
+              </div>
             </div>
           </div>
           <button type="submit" disabled={isSubmitting} className={`mt-6 hidden w-full rounded-xl py-4 font-semibold text-white shadow-sm transition-all md:block ${isSubmitting ? 'cursor-not-allowed bg-gray-300 text-gray-500 shadow-none' : 'bg-[#007AFF] hover:bg-[#0066CC]'}`}>

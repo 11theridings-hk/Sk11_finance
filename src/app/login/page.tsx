@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { login } from "../actions/auth";
 import { LOCALE_COOKIE, createTranslator, normalizeLocale, type Locale } from "@/lib/i18n";
 import { getDefaultHomePath } from "@/lib/access";
+import BrandLogo from "@/components/BrandLogo";
 
 export default function LoginPage() {
   const initialLocale = typeof document === "undefined"
@@ -63,6 +64,9 @@ export default function LoginPage() {
             <option value="zh-HK">{t('traditionalChinese')}</option>
             <option value="en">{t('english')}</option>
           </select>
+        </div>
+        <div className="px-6 pb-2 pt-1 sm:px-8">
+          <BrandLogo className="justify-center" />
         </div>
         {/* 顶部选项卡 */}
         <div className="flex border-b">

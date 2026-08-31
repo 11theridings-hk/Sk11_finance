@@ -9,6 +9,7 @@ import autoTable from 'jspdf-autotable'
 import JSZip from 'jszip'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
 import { compressImage, type ClientAttachment } from '@/lib/image'
+import OcrNoteButton from '@/components/OcrNoteButton'
 import RecordDetailModal from '../RecordDetailModal'
 
 type Props = {
@@ -107,6 +108,10 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     }
   }
 
+  const appendRecognizedText = (recognizedText: string) => {
+    setEditNote((current) => (current.trim() ? `${current.trim()}\n${recognizedText}` : recognizedText))
+  }
+
   const handleDeleteRecord = async (recordId: string) => {
     if (!window.confirm(t('deleteRecordConfirm'))) return
     setLoading(true)
@@ -125,7 +130,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         const fontUrl = '/fonts/NotoSansSC-Regular.ttf'
         const res = await fetch(fontUrl)
         if (!res.ok) {
-          throw new Error('字体文件获取失败: ' + res.statusText)
+          throw new Error('字�??�件?��?失败: ' + res.statusText)
         }
         const buffer = await res.arrayBuffer()
 
@@ -138,7 +143,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         const base64 = window.btoa(binary)
         setFontBase64(base64)
       } catch (err) {
-        console.error('加载中文字体失败:', err)
+        console.error('?�载中�?字�?失败:', err)
       }
     }
     loadFont()
@@ -219,7 +224,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     if (fontBase64) doc.setFont('NotoSansSC', 'normal')
 
     const timeRangeStr = startDate && endDate
-      ? `${startDate} 至 ${endDate}`
+      ? `${startDate} ??${endDate}`
       : (startDate ? `${startDate} -` : (endDate ? `- ${endDate}` : t('allTime')))
 
     const categoryName = categoryId ? categories.find(c => c.id === categoryId)?.name || t('unknown') : t('all')
@@ -326,7 +331,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       headStyles: { fillColor: [66, 139, 202], font: fontBase64 ? 'NotoSansSC' : 'helvetica' }
     })
 
-    doc.save(locale === 'en' ? 'financial-report.pdf' : '財務報表.pdf')
+    doc.save(locale === 'en' ? 'financial-report.pdf' : '財�??�表.pdf')
   }
 
   const exportAccountingPdfs = async () => {
@@ -338,7 +343,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     setExporting(true)
     try {
       const zip = new JSZip()
-      const folder = zip.folder(locale === 'en' ? 'accounting-details' : '會計明細')
+      const folder = zip.folder(locale === 'en' ? 'accounting-details' : '?��??�細')
 
       for (let i = 0; i < records.length; i++) {
         const r = records[i]
@@ -346,7 +351,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
 
         doc.setFontSize(16)
         if (fontBase64) doc.setFont('NotoSansSC', 'bold')
-        doc.text(locale === 'en' ? 'Accounting Detail' : '會計明細單', 105, 20, { align: 'center' })
+        doc.text(locale === 'en' ? 'Accounting Detail' : '?��??�細??, 105, 20, { align: 'center' })
 
         doc.setFontSize(12)
         if (fontBase64) doc.setFont('NotoSansSC', 'normal')
@@ -367,7 +372,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
             const format = match ? (match[1].toUpperCase() === 'JPG' ? 'JPEG' : match[1].toUpperCase()) : 'JPEG'
             doc.addImage(firstAttachment, format, 20, 125, 150, 150, undefined, 'FAST')
           } catch (e) {
-            console.error('添加图片附件失败:', e)
+            console.error('添�??��??�件失败:', e)
             doc.text('(image failed to load)', 40, 120)
           }
         }
@@ -384,7 +389,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       const url = window.URL.createObjectURL(zipContent)
       const link = document.createElement('a')
       link.href = url
-      link.download = locale === 'en' ? 'accounting-details.zip' : '會計明細.zip'
+      link.download = locale === 'en' ? 'accounting-details.zip' : '?��??�細.zip'
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
@@ -713,7 +718,16 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                 </div>
 
                 <div className="md:col-span-2 rounded-2xl border border-dashed border-gray-200 p-4 bg-[#F2F2F7]/50">
-                  <label className="block text-xs font-semibold text-gray-500 mb-2 uppercase">{t('appendAttachment')}</label>
+                  <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <label className="block text-xs font-semibold text-gray-500 uppercase">{t('appendAttachment')}</label>
+                    <OcrNoteButton
+                      locale={locale}
+                      attachment={editAttachment}
+                      context="record-edit"
+                      onResolved={appendRecognizedText}
+                      disabled={isSubmittingEdit}
+                    />
+                  </div>
                   <input type="file" accept="image/*" onChange={handleEditAttachmentChange} className="w-full text-sm text-gray-600 file:mr-4 file:py-2.5 file:px-5 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-[#007AFF]/10 file:text-[#007AFF]" />
                   <input type="text" value={editAttachmentNote} onChange={e => setEditAttachmentNote(e.target.value)} placeholder={t('attachmentNotePlaceholder')} className={`${inputClass} mt-3`} />
                 </div>

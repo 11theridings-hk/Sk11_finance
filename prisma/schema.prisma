@@ -17,6 +17,7 @@ model User {
   isAdmin                Boolean  @default(false) // 是否为管理员
   poolEnabled            Boolean  @default(false) // 是否启用资金池
   publicLedgerRole       String   @default("NONE") // "NONE" | "MEMBER"
+  ocrEnabled             Boolean  @default(true) // 是否允許使用圖片辨識
   privateLedgerVisibility String  @default("PRIVATE") // "PRIVATE" | "PUBLIC"
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
@@ -134,6 +135,7 @@ model Contract {
   type          String
   effectiveDate DateTime
   expiryDate    DateTime
+  reminderDays  Int      @default(15)
   note          String?
   amount        Float
   createdAt     DateTime @default(now())
@@ -141,14 +143,14 @@ model Contract {
 
   // 外键
   userId          String
-  categoryId      String
+  categoryId      String?
   subCategoryId   String?
   thirdCategoryId String?
   poolId          String?
 
   // 关系
   user          User         @relation("UserContracts", fields: [userId], references: [id])
-  category      Category     @relation("CategoryContracts", fields: [categoryId], references: [id])
+  category      Category?    @relation("CategoryContracts", fields: [categoryId], references: [id])
   subCategory   Category?    @relation("SubCategoryContracts", fields: [subCategoryId], references: [id])
   thirdCategory Category?    @relation("ThirdCategoryContracts", fields: [thirdCategoryId], references: [id])
   pool          CapitalPool? @relation("CapitalPoolContracts", fields: [poolId], references: [id])
@@ -214,4 +216,12 @@ model Memo {
   author   User      @relation("UserMemos", fields: [authorId], references: [id])
   record   Record?   @relation("RecordMemos", fields: [recordId], references: [id])
   contract Contract? @relation("ContractMemos", fields: [contractId], references: [id])
+}
+
+model SystemSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

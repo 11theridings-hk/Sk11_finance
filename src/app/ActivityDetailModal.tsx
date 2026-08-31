@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { addActivityAttachment, deleteActivity, updateActivity } from './actions/activity'
 import { createTranslator, type Locale } from '@/lib/i18n'
 import { compressImage, type ClientAttachment } from '@/lib/image'
+import OcrNoteButton from '@/components/OcrNoteButton'
 
 export default function ActivityDetailModal({
   activity,
@@ -85,6 +86,10 @@ export default function ActivityDetailModal({
     }
     alert(res.error)
     setLoading(false)
+  }
+
+  const appendRecognizedText = (recognizedText: string) => {
+    setNote((current: string) => (current.trim() ? `${current.trim()}\n${recognizedText}` : recognizedText))
   }
 
   const readOnlyFieldClass = 'font-semibold text-gray-900'
@@ -178,9 +183,12 @@ export default function ActivityDetailModal({
               <div className="grid grid-cols-1 gap-3 border-t border-gray-100 pt-3 md:grid-cols-[1fr,1fr,auto]">
                 <input type="file" accept="image/*" onChange={handleAttachmentChange} className="w-full text-sm text-gray-600 file:mr-4 file:rounded-xl file:border-0 file:bg-[#007AFF]/10 file:px-4 file:py-2 file:font-semibold file:text-[#007AFF]" />
                 <input value={attachmentNote} onChange={(e) => setAttachmentNote(e.target.value)} placeholder={t('attachmentNotePlaceholder')} className={inputClass} />
-                <button onClick={handleAppendAttachment} disabled={loading || !attachment} className="rounded-xl bg-[#007AFF] px-5 py-3 font-semibold text-white disabled:opacity-50">
-                  {t('appendAttachment')}
-                </button>
+                <div className="flex flex-col gap-3 md:flex-row">
+                  <OcrNoteButton locale={locale} attachment={attachment} context="activity-edit" onResolved={appendRecognizedText} disabled={loading} />
+                  <button onClick={handleAppendAttachment} disabled={loading || !attachment} className="rounded-xl bg-[#007AFF] px-5 py-3 font-semibold text-white disabled:opacity-50">
+                    {t('appendAttachment')}
+                  </button>
+                </div>
               </div>
             )}
           </div>
