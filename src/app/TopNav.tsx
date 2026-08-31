@@ -59,12 +59,17 @@ export default function TopNav({
   primaryNavItems.push({ name: t('privateLedger'), href: '/private-ledger' })
   primaryNavItems.push({ name: t('activities'), href: '/activities', count: activityReminderCount })
 
+  if (session) {
+    primaryNavItems.push({ name: t('personalProfile'), href: `/my-profile/${session.userId}` })
+  }
+
   const secondaryNavItems: NavItem[] = []
 
   if (session?.isAdmin) {
     secondaryNavItems.push({ name: t('review'), href: '/review', count: pendingCount })
     secondaryNavItems.push({ name: t('contracts'), href: '/contracts', count: contractReminderCount })
     secondaryNavItems.push({ name: t('report'), href: '/report' })
+    secondaryNavItems.push({ name: t('payroll'), href: '/admin/payroll' })
     secondaryNavItems.push({ name: t('admin'), href: '/admin' })
   }
 

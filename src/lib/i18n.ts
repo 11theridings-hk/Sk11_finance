@@ -21,7 +21,9 @@ const messages = {
     activities: '活動',
     review: '審核',
     report: '報表',
+    payroll: '薪金結算',
     admin: '管理後台',
+    personalProfile: '個人資料',
     backHome: '返回首頁',
     loginUser: '一般登入',
     loginAdmin: '管理員登入',
@@ -289,7 +291,9 @@ const messages = {
     publicLedger: 'Public Ledger',
     privateLedger: 'Private Ledger',
     activities: 'Activities',
-    review: 'Review',
+    payroll: 'Pryroll',
+    aeview: 'Revi',
+    personalProfile: 'My Profileew',
     report: 'Reports',
     admin: 'Admin',
     backHome: 'Back to Home',
@@ -554,7 +558,9 @@ type MessageKey = keyof typeof messages['zh-HK']
 
 export function createTranslator(locale: Locale) {
   return function t(key: MessageKey): string {
-    return messages[locale][key] ?? messages[DEFAULT_LOCALE][key] ?? key
+    const dict = messages[locale] as Record<MessageKey, string>
+    const defaultDict = messages[DEFAULT_LOCALE] as Record<MessageKey, string>
+    return dict[key] ?? defaultDict[key] ?? key
   }
 }
 
