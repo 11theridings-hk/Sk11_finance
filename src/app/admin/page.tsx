@@ -44,6 +44,12 @@ export default async function AdminPage() {
             </Link>
             <h1 className="text-lg font-bold text-gray-900">{t('adminPage')}</h1>
           </div>
+          <Link
+            href="/admin/payroll"
+            className="rounded-xl bg-[#FF9500] px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#E08600]"
+          >
+            💼 {t('payroll')}
+          </Link>
         </div>
       </header>
 
