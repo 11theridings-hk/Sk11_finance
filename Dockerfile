@@ -54,7 +54,6 @@ ENV PORT=3000
 # set hostname to localhost
 ENV HOSTNAME="0.0.0.0"
 
-# server.js is created by next build from the standalone output
-# https://nextjs.org/docs/pages/api-reference/next-config-js/output
-# Apply pending Prisma migrations before starting the server
-CMD ["sh", "-c", "npx prisma migrate deploy && node server.js"]
+# prisma/bootstrap.js performs: baseline legacy migrations -> prisma migrate deploy -> require server.js
+# This resolves P3005 (schema-not-empty) when the production DB predates _prisma_migrations records.
+CMD ["node", "prisma/bootstrap.js"]
