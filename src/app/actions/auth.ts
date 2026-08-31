@@ -155,6 +155,15 @@ export async function getSession() {
 
   try {
     const { payload } = await jwtVerify(token, JWT_SECRET)
+
+    if (payload.userId === 'SUPERADMIN_BOOTSTRAP' && payload.isAdmin) {
+      return {
+        userId: 'SUPERADMIN_BOOTSTRAP',
+        roleName: String(payload.roleName || '超級管理員 (Bootstrap)'),
+        isAdmin: true,
+        publicLedgerRole: ((payload.publicLedgerRole as string) || 'MEMBER') as PublicLedgerRole,
+      }
+    }
     
     // 二次核对数据库确保用户未被删除或撤销权限
     const user = await prisma.user.findUnique({
