@@ -36,6 +36,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
   const [exporting, setExporting] = useState(false)
   const [fontBase64, setFontBase64] = useState<string | null>(null)
 
+  // 修改记录相关状态
   const [editingRecord, setEditingRecord] = useState<any>(null)
   const [selectedRecord, setSelectedRecord] = useState<any>(null)
   const [editDate, setEditDate] = useState('')
@@ -70,7 +71,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
   const submitEdit = async () => {
     if (!editCategoryId || !editAmount) return alert(t('selectedCategoryMissing'))
     setIsSubmittingEdit(true)
-
+    
     let finalAmount = parseFloat(editAmount)
     if (editType === 'EXPENSE') finalAmount = -Math.abs(finalAmount)
     else finalAmount = Math.abs(finalAmount)
@@ -130,10 +131,10 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         const fontUrl = '/fonts/NotoSansSC-Regular.ttf'
         const res = await fetch(fontUrl)
         if (!res.ok) {
-          throw new Error('字�??�件?��?失败: ' + res.statusText)
+          throw new Error('字体文件获取失败: ' + res.statusText)
         }
         const buffer = await res.arrayBuffer()
-
+        
         let binary = ''
         const bytes = new Uint8Array(buffer)
         const len = bytes.byteLength
@@ -143,7 +144,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         const base64 = window.btoa(binary)
         setFontBase64(base64)
       } catch (err) {
-        console.error('?�载中�?字�?失败:', err)
+        console.error('加载中文字体失败:', err)
       }
     }
     loadFont()
@@ -207,7 +208,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     const balance = totalIncome - totalExpense
 
     const doc = createPdfDoc()
-
+    
     doc.setFillColor(242, 242, 247)
     doc.rect(0, 0, 210, 40, 'F')
 
@@ -215,29 +216,30 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     doc.setFontSize(24)
     doc.setTextColor(0, 122, 255)
     doc.text(t('financeSummaryReport'), 105, 25, { align: 'center' })
-
+    
     doc.setDrawColor(200, 200, 200)
     doc.line(15, 45, 195, 45)
 
     doc.setFontSize(11)
     doc.setTextColor(100, 100, 100)
     if (fontBase64) doc.setFont('NotoSansSC', 'normal')
-
-    const timeRangeStr = startDate && endDate
-      ? `${startDate} ??${endDate}`
+    
+    // 时间范围与总笔数
+    const timeRangeStr = startDate && endDate 
+      ? `${startDate} 至 ${endDate}` 
       : (startDate ? `${startDate} -` : (endDate ? `- ${endDate}` : t('allTime')))
-
+      
     const categoryName = categoryId ? categories.find(c => c.id === categoryId)?.name || t('unknown') : t('all')
     const roleName = userId ? users.find(u => u.id === userId)?.roleName || t('unknown') : t('all')
     const noteKeywordLabel = noteKeyword.trim() || t('all')
 
     doc.text(`${t('statisticsPeriod')}: ${timeRangeStr}`, 15, 45)
     doc.text(`${t('totalTransactions')}: ${totalCount}`, 145, 45)
-
+    
     doc.setTextColor(150, 150, 150)
     doc.text(`${t('filterSummary')} -> ${t('category')}: [${categoryName}] | ${t('role')}: [${roleName}]`, 15, 52)
     doc.text(`${t('reportNoteSearch')}: [${noteKeywordLabel}]`, 15, 58)
-
+    
     doc.setDrawColor(220, 220, 220)
     doc.setFillColor(250, 250, 252)
     doc.roundedRect(15, 66, 180, 45, 3, 3, 'FD')
@@ -256,16 +258,16 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     doc.setTextColor(0, 0, 0)
     if (fontBase64) doc.setFont('NotoSansSC', 'bold')
     doc.text(`${t('balance')}: ${balance >= 0 ? '+' : ''}${balance.toFixed(2)}`, 145, 91)
-
+    
     doc.line(15, 121, 195, 121)
     doc.setFontSize(14)
     doc.setTextColor(50, 50, 50)
     if (fontBase64) doc.setFont('NotoSansSC', 'bold')
     doc.text(t('categoryExpenseStats'), 15, 136)
-
+    
     if (fontBase64) doc.setFont('NotoSansSC', 'normal')
     doc.setFontSize(11)
-
+    
     const categoryStats: Record<string, number> = {}
     let totalExpenseMerged = 0
     records.filter(r => r.type === 'EXPENSE').forEach(r => {
@@ -274,18 +276,18 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       categoryStats[catName] = (categoryStats[catName] || 0) + val
       totalExpenseMerged += val
     })
-
+    
     let yPos = 146
     Object.entries(categoryStats).sort((a, b) => b[1] - a[1]).forEach(([name, amount], index) => {
       const percentage = totalExpenseMerged > 0 ? (amount / totalExpenseMerged) : 0
       const percentStr = (percentage * 100).toFixed(1)
-
+      
       doc.setTextColor(80, 80, 80)
       doc.text(`${name}: ${amount.toFixed(2)} (${percentStr}%)`, 15, yPos)
-
+      
       doc.setFillColor(230, 230, 230)
       doc.roundedRect(100, yPos - 4, 80, 6, 2, 2, 'F')
-
+      
       const colors = [
         [0, 122, 255],
         [52, 199, 89],
@@ -295,7 +297,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       ]
       const color = index < colors.length ? colors[index] : [142, 142, 147]
       doc.setFillColor(color[0], color[1], color[2])
-
+      
       const barWidth = Math.max(80 * percentage, 1)
       doc.roundedRect(100, yPos - 4, barWidth, 6, 2, 2, 'F')
 
@@ -331,7 +333,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       headStyles: { fillColor: [66, 139, 202], font: fontBase64 ? 'NotoSansSC' : 'helvetica' }
     })
 
-    doc.save(locale === 'en' ? 'financial-report.pdf' : '財�??�表.pdf')
+    doc.save(locale === 'en' ? 'financial-report.pdf' : '財務報表.pdf')
   }
 
   const exportAccountingPdfs = async () => {
@@ -343,16 +345,16 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     setExporting(true)
     try {
       const zip = new JSZip()
-      const folder = zip.folder(locale === 'en' ? 'accounting-details' : '?��??�細')
+      const folder = zip.folder(locale === 'en' ? 'accounting-details' : '會計明細')
 
       for (let i = 0; i < records.length; i++) {
         const r = records[i]
         const doc = createPdfDoc()
-
+        
         doc.setFontSize(16)
         if (fontBase64) doc.setFont('NotoSansSC', 'bold')
-        doc.text(locale === 'en' ? 'Accounting Detail' : '?��??�細??, 105, 20, { align: 'center' })
-
+        doc.text(locale === 'en' ? 'Accounting Detail' : '會計明細單', 105, 20, { align: 'center' })
+        
         doc.setFontSize(12)
         if (fontBase64) doc.setFont('NotoSansSC', 'normal')
         doc.text(`${t('date')}: ${new Date(r.date).toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK')}`, 20, 40)
@@ -372,7 +374,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
             const format = match ? (match[1].toUpperCase() === 'JPG' ? 'JPEG' : match[1].toUpperCase()) : 'JPEG'
             doc.addImage(firstAttachment, format, 20, 125, 150, 150, undefined, 'FAST')
           } catch (e) {
-            console.error('添�??��??�件失败:', e)
+            console.error('添加图片附件失败:', e)
             doc.text('(image failed to load)', 40, 120)
           }
         }
@@ -380,16 +382,16 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         const pdfBlob = doc.output('blob')
         const safeDate = new Date(r.date).toLocaleDateString().replace(/\//g, '-')
         const fileName = `${safeDate}_${r.category?.name || t('uncategorized')}_${i + 1}.pdf`
-
+        
         folder?.file(fileName, pdfBlob)
       }
 
       const zipContent = await zip.generateAsync({ type: 'blob' })
-
+      
       const url = window.URL.createObjectURL(zipContent)
       const link = document.createElement('a')
       link.href = url
-      link.download = locale === 'en' ? 'accounting-details.zip' : '?��??�細.zip'
+      link.download = locale === 'en' ? 'accounting-details.zip' : '會計明細.zip'
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
@@ -410,18 +412,18 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div>
           <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('startDate')}</label>
-          <input
-            type="date"
-            value={startDate}
+          <input 
+            type="date" 
+            value={startDate} 
             onChange={e => setStartDate(e.target.value)}
             className={inputClass}
           />
         </div>
         <div>
           <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('endDate')}</label>
-          <input
-            type="date"
-            value={endDate}
+          <input 
+            type="date" 
+            value={endDate} 
             onChange={e => setEndDate(e.target.value)}
             className={inputClass}
           />
@@ -438,8 +440,8 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         </div>
         <div>
           <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('mainCategory')}</label>
-          <select
-            value={categoryId}
+          <select 
+            value={categoryId} 
             onChange={e => {
               setCategoryId(e.target.value)
               setSubCategoryId('')
@@ -482,8 +484,8 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         </div>
         <div>
           <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('role')}</label>
-          <select
-            value={userId}
+          <select 
+            value={userId} 
             onChange={e => setUserId(e.target.value)}
             className={inputClass}
           >
@@ -504,21 +506,21 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       </div>
 
       <div className="flex flex-wrap gap-3 mb-8">
-        <button
+        <button 
           onClick={handleSearch}
           disabled={loading}
           className="px-6 py-2.5 bg-[#007AFF] text-white rounded-xl text-sm font-semibold hover:bg-[#0066CC] transition-colors shadow-sm disabled:opacity-50 disabled:shadow-none"
         >
           {loading ? t('queryLoading') : t('queryResults')}
         </button>
-        <button
+        <button 
           onClick={exportListPdf}
           disabled={loading || exporting || records.length === 0}
           className="px-6 py-2.5 bg-[#34C759] text-white rounded-xl text-sm font-semibold hover:bg-[#2EB850] transition-colors shadow-sm disabled:opacity-50 disabled:shadow-none"
         >
           {t('exportListPdf')}
         </button>
-        <button
+        <button 
           onClick={exportAccountingPdfs}
           disabled={loading || exporting || records.length === 0}
           className="px-6 py-2.5 bg-[#5856D6] text-white rounded-xl text-sm font-semibold hover:bg-[#4B49B8] transition-colors shadow-sm disabled:opacity-50 disabled:shadow-none"
@@ -577,7 +579,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                     </td>
                     <td className="px-6 py-4">
                       {!record.isReviewing && (
-                        <button
+                        <button 
                           onClick={() => handleEditClick(record)}
                           className="text-[#007AFF] hover:underline font-medium text-sm"
                         >
@@ -654,7 +656,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
               </button>
             </div>
-
+            
             <div className="p-4 md:p-6 space-y-4 md:space-y-5 overflow-y-auto">
               <div className="flex space-x-3 mb-2 md:mb-4">
                 <button
@@ -676,7 +678,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                   <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">{t('date')}</label>
                   <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} className={inputClass} />
                 </div>
-
+                
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">{t('mainCategory')}</label>
                   <select value={editCategoryId} onChange={e => { setEditCategoryId(e.target.value); setEditSubCategoryId(''); setEditThirdCategoryId(''); }} className={inputClass}>
