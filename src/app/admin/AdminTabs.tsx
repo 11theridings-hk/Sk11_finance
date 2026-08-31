@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createCategory, deleteCategory } from "../actions/category";
 import { createCapitalPool, deleteCapitalPool } from "../actions/pool";
 import { createUser, updateUser, deleteUser, toggleUserPool } from "../actions/user";
@@ -410,6 +410,57 @@ const isProfileNonEmpty = (p: FullProfileForm) =>
     return !!String(v || '').trim()
   })
 
+function normalizeNumericInputValue(value: number | null | undefined) {
+  return Number.isFinite(value as number) ? String(Number(value)) : '0'
+}
+
+function ZeroFriendlyNumberInput({
+  value,
+  onChange,
+  className,
+}: {
+  value: number | null | undefined
+  onChange: (value: number) => void
+  className: string
+}) {
+  const [text, setText] = useState(() => normalizeNumericInputValue(value))
+  const [focused, setFocused] = useState(false)
+
+  useEffect(() => {
+    if (!focused) setText(normalizeNumericInputValue(value))
+  }, [value, focused])
+
+  return (
+    <input
+      type="number"
+      step="0.01"
+      value={text}
+      onFocus={(e) => {
+        setFocused(true)
+        if (Number(value ?? 0) === 0) setText('')
+        requestAnimationFrame(() => e.currentTarget.select())
+      }}
+      onChange={(e) => {
+        const next = e.target.value
+        setText(next)
+        onChange(next === '' ? 0 : Number(next))
+      }}
+      onBlur={() => {
+        setFocused(false)
+        if (text === '' || Number.isNaN(Number(text))) {
+          setText('0')
+          onChange(0)
+          return
+        }
+        const normalized = normalizeNumericInputValue(Number(text))
+        setText(normalized)
+        onChange(Number(text))
+      }}
+      className={className}
+    />
+  )
+}
+
 function UserTab({ initialUsers, locale }: { initialUsers: any[], locale: Locale }) {
   const t = createTranslator(locale)
   const [users, setUsers] = useState<any[]>(initialUsers)
@@ -689,15 +740,26 @@ function UserTab({ initialUsers, locale }: { initialUsers: any[], locale: Locale
                 <label className="block mb-1 text-xs font-medium text-gray-500 uppercase tracking-wide">
                   {(t as any)(f.tKey)}
                 </label>
-                <input
-                  type={f.type || 'text'}
-                  value={(newProfile[f.key] ?? '') as string | number}
-                  onChange={(e) => setNewProfile((p: any) => ({
-                    ...p,
-                    [f.key]: f.type === 'number' ? Number(e.target.value || 0) : (e.target.value || null),
-                  }))}
-                  className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900 placeholder-gray-400"
-                />
+                {f.type === 'number' ? (
+                  <ZeroFriendlyNumberInput
+                    value={newProfile[f.key] as number}
+                    onChange={(value) => setNewProfile((p: any) => ({
+                      ...p,
+                      [f.key]: value,
+                    }))}
+                    className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900 placeholder-gray-400"
+                  />
+                ) : (
+                  <input
+                    type={f.type || 'text'}
+                    value={(newProfile[f.key] ?? '') as string | number}
+                    onChange={(e) => setNewProfile((p: any) => ({
+                      ...p,
+                      [f.key]: e.target.value || null,
+                    }))}
+                    className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900 placeholder-gray-400"
+                  />
+                )}
               </div>
             ))}
           </div>
@@ -855,15 +917,26 @@ function UserTab({ initialUsers, locale }: { initialUsers: any[], locale: Locale
                     <label className="block mb-1 text-xs font-medium text-gray-500 uppercase tracking-wide">
                       {(t as any)(f.tKey)}
                     </label>
-                    <input
-                      type={f.type || 'text'}
-                      value={(editProfile[f.key] ?? '') as string | number}
-                      onChange={(e) => setEditProfile((p: any) => ({
-                        ...p,
-                        [f.key]: f.type === 'number' ? Number(e.target.value || 0) : (e.target.value || null),
-                      }))}
-                      className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900"
-                    />
+                    {f.type === 'number' ? (
+                      <ZeroFriendlyNumberInput
+                        value={editProfile[f.key] as number}
+                        onChange={(value) => setEditProfile((p: any) => ({
+                          ...p,
+                          [f.key]: value,
+                        }))}
+                        className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900"
+                      />
+                    ) : (
+                      <input
+                        type={f.type || 'text'}
+                        value={(editProfile[f.key] ?? '') as string | number}
+                        onChange={(e) => setEditProfile((p: any) => ({
+                          ...p,
+                          [f.key]: e.target.value || null,
+                        }))}
+                        className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900"
+                      />
+                    )}
                   </div>
                 ))}
               </div>

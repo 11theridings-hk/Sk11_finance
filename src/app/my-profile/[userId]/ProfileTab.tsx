@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CheckCircle2, Loader2, Save, User as UserIcon } from 'lucide-react';
 import { getMyProfile, saveMyProfile } from '@/app/actions/payroll';
 
@@ -45,6 +45,60 @@ function toInputDate(s: string | Date | null | undefined) {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+function normalizeNumericInputValue(value: number | null | undefined) {
+  return Number.isFinite(value as number) ? String(Number(value)) : '0';
+}
+
+function ZeroFriendlyNumberInput({
+  value,
+  onChange,
+  className,
+  disabled = false,
+}: {
+  value: number | null | undefined;
+  onChange: (value: number) => void;
+  className: string;
+  disabled?: boolean;
+}) {
+  const [text, setText] = useState(() => normalizeNumericInputValue(value));
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!focused) setText(normalizeNumericInputValue(value));
+  }, [value, focused]);
+
+  return (
+    <input
+      type="number"
+      step="0.01"
+      disabled={disabled}
+      className={className}
+      value={text}
+      onFocus={(e) => {
+        setFocused(true);
+        if (Number(value ?? 0) === 0) setText('');
+        requestAnimationFrame(() => e.currentTarget.select());
+      }}
+      onChange={(e) => {
+        const next = e.target.value;
+        setText(next);
+        onChange(next === '' ? 0 : Number(next));
+      }}
+      onBlur={() => {
+        setFocused(false);
+        if (text === '' || Number.isNaN(Number(text))) {
+          setText('0');
+          onChange(0);
+          return;
+        }
+        const normalized = normalizeNumericInputValue(Number(text));
+        setText(normalized);
+        onChange(Number(text));
+      }}
+    />
+  );
 }
 
 export default function ProfileTab(props: Props) {
@@ -167,7 +221,12 @@ export default function ProfileTab(props: Props) {
             </Field>
           )}
           <Field label="預設基本底薪 (HKS / HKD)">
-            <input type="number" step="0.01" className="w-full border border-slate-300 rounded px-2 py-1.5 disabled:bg-slate-50" disabled={!props.isAdmin} value={form.defaultBaseSalaryHkd ?? 0} onChange={(e) => onChange('defaultBaseSalaryHkd', Number(e.target.value || 0))}/>
+            <ZeroFriendlyNumberInput
+              value={form.defaultBaseSalaryHkd ?? 0}
+              onChange={(value) => onChange('defaultBaseSalaryHkd', value)}
+              disabled={!props.isAdmin}
+              className="w-full border border-slate-300 rounded px-2 py-1.5 disabled:bg-slate-50"
+            />
             {!props.isAdmin && <p className="text-[11px] text-slate-500 mt-1">由管理員設定；開薪資週期時自動帶入。</p>}
           </Field>
         </Section>

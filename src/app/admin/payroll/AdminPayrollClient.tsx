@@ -845,22 +845,30 @@ export default function AdminPayrollClient(props: Props) {
               ] as const).map(([tKey, formKey, type]) => (
                 <div key={formKey}>
                   <label className="text-xs font-medium text-slate-500 mb-1 block">{t(tKey)}</label>
-                  <input
-                    type={type}
-                    className="w-full border border-slate-300 rounded px-2 py-1.5"
-                    value={(profileForm as any)[formKey] ?? ''}
-                    onChange={(e) =>
-                      setProfileForm((p: FullProfileForm) => ({
-                        ...p,
-                        [formKey]:
-                          type === 'number'
-                            ? Number(e.target.value || 0)
-                            : e.target.value
-                            ? e.target.value
-                            : null,
-                      }))
-                    }
-                  />
+                  {type === 'number' ? (
+                    <ZeroFriendlyNumberInput
+                      value={(profileForm as any)[formKey] ?? 0}
+                      onChange={(value) =>
+                        setProfileForm((p: FullProfileForm) => ({
+                          ...p,
+                          [formKey]: value,
+                        }))
+                      }
+                      className="w-full border border-slate-300 rounded px-2 py-1.5"
+                    />
+                  ) : (
+                    <input
+                      type={type}
+                      className="w-full border border-slate-300 rounded px-2 py-1.5"
+                      value={(profileForm as any)[formKey] ?? ''}
+                      onChange={(e) =>
+                        setProfileForm((p: FullProfileForm) => ({
+                          ...p,
+                          [formKey]: e.target.value ? e.target.value : null,
+                        }))
+                      }
+                    />
+                  )}
                 </div>
               ))}
             </div>
@@ -898,11 +906,73 @@ function downloadBlob(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function normalizeNumericInputValue(value: number | null | undefined) {
+  return Number.isFinite(value as number) ? String(Number(value)) : '0';
+}
+
+function ZeroFriendlyNumberInput({
+  value,
+  onChange,
+  className,
+  step = '0.01',
+  disabled = false,
+}: {
+  value: number | null | undefined;
+  onChange: (n: number) => void;
+  className: string;
+  step?: string;
+  disabled?: boolean;
+}) {
+  const [text, setText] = useState(() => normalizeNumericInputValue(value));
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!focused) setText(normalizeNumericInputValue(value));
+  }, [value, focused]);
+
+  return (
+    <input
+      type="number"
+      step={step}
+      disabled={disabled}
+      className={className}
+      value={text}
+      onFocus={(e) => {
+        setFocused(true);
+        if (Number(value ?? 0) === 0) {
+          setText('');
+        }
+        requestAnimationFrame(() => e.currentTarget.select());
+      }}
+      onChange={(e) => {
+        const next = e.target.value;
+        setText(next);
+        onChange(next === '' ? 0 : Number(next));
+      }}
+      onBlur={() => {
+        setFocused(false);
+        if (text === '' || Number.isNaN(Number(text))) {
+          setText('0');
+          onChange(0);
+          return;
+        }
+        const normalized = normalizeNumericInputValue(Number(text));
+        setText(normalized);
+        onChange(Number(text));
+      }}
+    />
+  );
+}
+
 function NumberField({ label, value, onChange }: { label: string; value: number; onChange: (n: number) => void }) {
   return (
     <div>
       <label className="text-xs font-medium text-slate-500">{label}</label>
-      <input type="number" step="0.01" className="w-full border border-slate-300 rounded px-2 py-1.5" value={Number.isFinite(value) ? value : 0} onChange={(e) => onChange(Number(e.target.value || 0))}/>
+      <ZeroFriendlyNumberInput
+        value={value}
+        onChange={onChange}
+        className="w-full border border-slate-300 rounded px-2 py-1.5"
+      />
     </div>
   );
 }
