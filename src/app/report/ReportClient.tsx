@@ -308,14 +308,14 @@ export default function ReportClient({ categories, users, pools, locale }: Props
   const pdfFont = () => (fontBase64 ? 'NotoSansSC' : 'helvetica')
 
   const exportListPdf = () => {
+    const t = createTranslator(exportLocale)
+    const dateLocale = exportLocale === 'en' ? 'en-HK' : 'zh-HK'
+    const locale = exportLocale
+
     if (records.length === 0) {
       alert(t('noDataToExport'))
       return
     }
-
-    const t = createTranslator(exportLocale)
-    const dateLocale = exportLocale === 'en' ? 'en-HK' : 'zh-HK'
-    const locale = exportLocale
 
     const totalCount = records.length
     let totalIncome = 0
@@ -476,14 +476,14 @@ export default function ReportClient({ categories, users, pools, locale }: Props
   }
 
   const exportActivityListPdf = () => {
+    const t = createTranslator(exportLocale)
+    const dateLocale = exportLocale === 'en' ? 'en-HK' : 'zh-HK'
+    const locale = exportLocale
+
     if (activities.length === 0) {
       alert(t('noDataToExport'))
       return
     }
-
-    const t = createTranslator(exportLocale)
-    const dateLocale = exportLocale === 'en' ? 'en-HK' : 'zh-HK'
-    const locale = exportLocale
 
     const doc = createPdfDoc('landscape')
     const pageW = doc.internal.pageSize.getWidth()
@@ -534,14 +534,14 @@ export default function ReportClient({ categories, users, pools, locale }: Props
   }
 
   const exportContractListPdf = () => {
+    const t = createTranslator(exportLocale)
+    const dateLocale = exportLocale === 'en' ? 'en-HK' : 'zh-HK'
+    const locale = exportLocale
+
     if (contracts.length === 0) {
       alert(t('noDataToExport'))
       return
     }
-
-    const t = createTranslator(exportLocale)
-    const dateLocale = exportLocale === 'en' ? 'en-HK' : 'zh-HK'
-    const locale = exportLocale
 
     const doc = createPdfDoc('landscape')
     const pageW = doc.internal.pageSize.getWidth()
@@ -602,14 +602,14 @@ export default function ReportClient({ categories, users, pools, locale }: Props
   }
 
   const exportAccountingPdfs = async () => {
+    const t = createTranslator(exportLocale)
+    const dateLocale = exportLocale === 'en' ? 'en-HK' : 'zh-HK'
+    const locale = exportLocale
+
     if (records.length === 0) {
       alert(t('noDataToExport'))
       return
     }
-
-    const t = createTranslator(exportLocale)
-    const dateLocale = exportLocale === 'en' ? 'en-HK' : 'zh-HK'
-    const locale = exportLocale
 
     setExporting(true)
     try {
