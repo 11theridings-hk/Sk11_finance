@@ -38,11 +38,24 @@
    - 首次部署后创建超级管理员：访问 `http://your-domain/api/init?secret=your-init-secret`（secret 需与 `.env` 一致）。默认超级管理员密码为 `admin`。
    - 访问 `/login` 登录后台修改密码及配置用户。
 
-5. **到期邮件提醒（Railway Cron）**
-   - 端点：`POST /api/cron/reminders`（或 GET），需 `Authorization: Bearer $CRON_SECRET` 或 `?secret=`
-   - 建议每日一次，例如 Cron `0 1 * * *`（UTC ≈ 香港 09:00）
-   - 范围：全部合约 + 公开活动
-   - 触发：提前提醒日、到期前 5 天、到期当天、过期第 1/7/30 天（`ReminderEmailLog` 去重）
+5. **到期邮件提醒（常驻 cron-worker，不依赖外部 Cron SaaS）**
+   - Web 端点：`POST /api/cron/reminders`（`Authorization: Bearer $CRON_SECRET`）
+   - 仓库内另有 [`cron-worker/`](./cron-worker/)：用 `node-cron` 每天（默认香港 09:00）请求上述端点
+   - **Railway 第二台服务**（与网站同仓库）：
+     1. Project 内 **New → Empty Service / GitHub Repo**（同一 `Sk11_finance` 仓库）
+     2. Settings → **Root Directory** 设为 `cron-worker`（或 Dockerfile Path = `cron-worker/Dockerfile`）
+     3. **不要**在网站服务或 worker 上填 Railway「Cron Schedule」（worker 靠 node-cron 常驻）
+     4. Worker 环境变量（可与网站共享）：
+        ```env
+        APP_BASE_URL=https://sk11finance.up.railway.app
+        CRON_SECRET=与网站相同
+        CRON_EXPR=0 9 * * *
+        CRON_TZ=Asia/Hong_Kong
+        RUN_ON_START=true
+        ```
+        （`RUN_ON_START=true` 仅测试用，确认日志 OK 后可改回 `false`）
+   - Resend 相关变量仍配在**网站**服务：`RESEND_API_KEY`、`RESEND_FROM`、`REMINDER_EMAILS`
+   - 范围：全部合约 + 公开活动；触发：提前提醒日、到期前 5 天、到期当天、过期第 1/7/30 天
 
 ## 核心功能说明
 

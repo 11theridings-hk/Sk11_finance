@@ -34,6 +34,9 @@
   - 收件人：`REMINDER_EMAILS`；發送：Resend（`RESEND_API_KEY` / `RESEND_FROM`）。
   - 範圍：全部合約 + 公開活動；時區 Asia/Hong_Kong。
   - 觸發：提前提醒日、到期前 5 天、到期當天、過期第 1/7/30 天。
+- **[2026-09-06] 常駐 cron-worker（node-cron）**:
+  - 新增 [`cron-worker/`](./cron-worker/)：不依賴 cron-job.org；Railway 另開一台服務，Root=`cron-worker`。
+  - 預設每天香港 09:00 `POST` 網站 `/api/cron/reminders`；**不要**在網站服務開 Railway Cron Schedule。
 
 ### 1.5 部署到 Railway 相關問題與修復
 *   **Next.js 靜態打包錯誤 (Prerender Error)**：Next.js 在 `npm run build` 時會嘗試預渲染頁面，導致存取資料庫失敗。
@@ -112,10 +115,11 @@
     *   *其他管理員*：核心欄位唯讀；可新增附件與備註。
 *   **到期提醒**：依提醒天數分組顯示已過期 / 今天 / 即將到期。
 *   **郵件提醒（Resend）**：
-    *   環境變數：`RESEND_API_KEY`、`RESEND_FROM`、`REMINDER_EMAILS`、`CRON_SECRET`、`APP_BASE_URL`。
-    *   每日 Cron 呼叫 `POST /api/cron/reminders`（Bearer `CRON_SECRET`）。
+    *   環境變數（網站服務）：`RESEND_API_KEY`、`RESEND_FROM`、`REMINDER_EMAILS`、`CRON_SECRET`、`APP_BASE_URL`。
+    *   端點：`POST /api/cron/reminders`（Bearer `CRON_SECRET`）。
     *   觸發點：`reminderDays` 當天、到期前 5 天、到期當天、過期第 1/7/30 天；`ReminderEmailLog` 防重發。
     *   僅公開活動會進入郵件掃描；私人活動不發。
+    *   **常駐 worker**：倉庫 `cron-worker/`（node-cron），Railway 另開服務、Root Directory=`cron-worker`；預設香港每日 09:00 打網站 API。網站服務與 worker **都不要**開 Railway Cron Schedule。
 
 ## 5. UI/UX 规范 (UI/UX Guidelines)
 *   **布局**：H5 手机端自适应，避免过度装饰，追求高信息密度。
