@@ -4,6 +4,38 @@ export type ClientAttachment = {
   note?: string
 }
 
+/** Open attachment in a new tab. data: URLs cannot be top-level navigated in modern browsers. */
+export function openAttachment(fileUrl: string) {
+  if (!fileUrl) return
+
+  if (fileUrl.startsWith('data:')) {
+    const comma = fileUrl.indexOf(',')
+    if (comma < 0) return
+    const header = fileUrl.slice(0, comma)
+    const data = fileUrl.slice(comma + 1)
+    const mime = header.match(/data:([^;]+)/)?.[1] || 'application/octet-stream'
+    const isBase64 = /;base64/i.test(header)
+    const bytes = isBase64
+      ? Uint8Array.from(atob(data), (c) => c.charCodeAt(0))
+      : new TextEncoder().encode(decodeURIComponent(data))
+    const blobUrl = URL.createObjectURL(new Blob([bytes], { type: mime }))
+    const opened = window.open(blobUrl, '_blank', 'noopener,noreferrer')
+    if (!opened) {
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.target = '_blank'
+      a.rel = 'noopener noreferrer'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+    }
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000)
+    return
+  }
+
+  window.open(fileUrl, '_blank', 'noopener,noreferrer')
+}
+
 export function compressImage(file: File, maxSizeKB: number = 200): Promise<ClientAttachment> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()

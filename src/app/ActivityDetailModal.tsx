@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { addActivityAttachment, deleteActivity, updateActivity } from './actions/activity'
 import { createTranslator, type Locale } from '@/lib/i18n'
-import { compressImage, type ClientAttachment } from '@/lib/image'
+import { compressImage, openAttachment, type ClientAttachment } from '@/lib/image'
 import OcrNoteButton from '@/components/OcrNoteButton'
 
 export default function ActivityDetailModal({
@@ -168,9 +168,13 @@ export default function ActivityDetailModal({
                 activity.attachments.map((item: any) => (
                   <div key={item.id} className="rounded-xl border border-gray-100 p-3 text-sm">
                     <div className="flex items-center justify-between gap-3">
-                      <a href={item.fileUrl} target="_blank" rel="noreferrer" className="font-medium text-[#007AFF] hover:underline">
+                      <button
+                        type="button"
+                        onClick={() => openAttachment(item.fileUrl)}
+                        className="font-medium text-[#007AFF] hover:underline"
+                      >
                         {t('viewAttachment')}
-                      </a>
+                      </button>
                       <span className="text-xs text-gray-400">{new Date(item.createdAt).toLocaleString(locale === 'en' ? 'en-HK' : 'zh-HK')}</span>
                     </div>
                     <div className="mt-1 text-gray-500">{item.note || '-'}</div>

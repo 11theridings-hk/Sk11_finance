@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { reviewRecord } from '../actions/review'
+import { openAttachment } from '@/lib/image'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
 
 export default function ReviewClient({
@@ -163,7 +164,16 @@ export default function ReviewClient({
                     ) : (
                       modalRecord.attachments.map((item: any) => (
                         <div key={item.id} className="rounded-xl border border-gray-100 p-3">
-                          <a href={item.fileUrl} target="_blank" rel="noreferrer" className="text-[#007AFF] hover:underline font-medium">{t('viewAttachment')}</a>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openAttachment(item.fileUrl)
+                            }}
+                            className="text-[#007AFF] hover:underline font-medium"
+                          >
+                            {t('viewAttachment')}
+                          </button>
                           <div className="text-gray-500 mt-1">{item.note || '-'}</div>
                         </div>
                       ))

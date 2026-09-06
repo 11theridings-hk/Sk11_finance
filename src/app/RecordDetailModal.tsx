@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { addRecordAttachment, addRecordMemo, deleteRecord } from './actions/record'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
-import { compressImage, type ClientAttachment } from '@/lib/image'
+import { compressImage, openAttachment, type ClientAttachment } from '@/lib/image'
 
 export default function RecordDetailModal({
   record,
@@ -127,9 +127,13 @@ export default function RecordDetailModal({
                 record.attachments.map((item: any) => (
                   <div key={item.id} className="rounded-xl border border-gray-100 p-3 text-sm">
                     <div className="flex items-center justify-between gap-3">
-                      <a href={item.fileUrl} target="_blank" rel="noreferrer" className="text-[#007AFF] hover:underline font-medium">
+                      <button
+                        type="button"
+                        onClick={() => openAttachment(item.fileUrl)}
+                        className="text-[#007AFF] hover:underline font-medium"
+                      >
                         {t('viewAttachment')}
-                      </a>
+                      </button>
                       <span className="text-xs text-gray-400">{new Date(item.createdAt).toLocaleString(locale === 'en' ? 'en-HK' : 'zh-HK')}</span>
                     </div>
                     <div className="text-gray-500 mt-1">{item.note || '-'}</div>

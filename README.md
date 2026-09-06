@@ -1,6 +1,6 @@
 # FINNE18 - 财务收支记录程序
 
-本项目是一个侧重于手机端使用的 H5 财务收支记录程序，包含收支数据录入、资金池管理、分类管理、用户管理以及报表和 PDF 导出功能。项目前端与后端均基于 Next.js 16 + App Router + Prisma (PostgreSQL) 打造，并且所有的样式基于 Tailwind CSS 实现移动端优先与高信息密度的设计。
+本项目是一个侧重于手机端使用的 H5 财务收支记录程序，包含收支数据录入、资金池管理、分类管理、用户管理、薪金、活动/合约，以及报表与 PDF / 会计结算包导出。项目前端与后端均基于 Next.js (App Router) + Prisma (PostgreSQL) 打造，样式基于 Tailwind CSS，移动端优先。
 
 ## 开发手册与文档
 
@@ -23,25 +23,35 @@
    ```
 
 3. **数据库初始化与迁移**
-   请使用 Prisma Migrate 来初始化或升级生产数据库：
    ```bash
    npx prisma migrate deploy
    npx prisma generate
    ```
 
 4. **系统初始化与首次登录**
-   - 首次部署后，需要创建超级管理员。请访问：`http://your-domain/api/init?secret=your-init-secret` (这里的 secret 需要与 `.env` 中一致)。这会自动为您创建一个默认的超级管理员账户（密码为：`admin`）。
-   - 访问 `/login`，在“管理员登录”中输入 `admin` 即可登录并进入后台修改密码及配置白名单。
+   - 首次部署后创建超级管理员：访问 `http://your-domain/api/init?secret=your-init-secret`（secret 需与 `.env` 一致）。默认超级管理员密码为 `admin`。
+   - 访问 `/login` 登录后台修改密码及配置用户。
 
 ## 核心功能说明
-- **普通用户/管理员双登录**：无账号名设计，凭白名单密码直接登录。
-- **高信息密度录入**：包含收入（淡蓝）、支出（淡红）双模板，支持上传凭证并自动在前端压缩为 `200KB` 以下，防止空间浪费。
-- **防呆倒计时设计**：提交后二次确认拥有 5 秒倒计时，避免重复点击与误操作。
-- **动态图表与 PDF 导出**：支持列表 PDF 及逐条带凭证图片的会计明细压缩包 (Zip) 下载。
+
+- **账号 / 角色登录**：支持邮箱账号与角色白名单登录；管理员可维护用户资料。
+- **高信息密度录入**：收入 / 支出双模板，附件前端压缩至约 `200KB` 以下。
+- **审核流**：待审记录可查看附件（Blob 预览，避免 `data:` URL 被浏览器拦截）。
+- **报表中心（管理员）**
+  - 分页：收支报表 / 活动报表 / 合约报表
+  - **汇出语文可选**：繁体中文或 English（仅影响 PDF / CSV / ZIP，不改变页面 UI 语言）
+  - 收支：横向明细列表 PDF；会计结算包 ZIP（`00_凭証索引.csv` + `01` 正式 PDF + `02_凭証/` 可读文件名）
+  - 活动 / 合约：可导出横向列表 PDF
+- **薪金（Payroll）**：管理员结算、个人薪金查阅与 PDF 工资单
 
 ## 技术栈
+
 - **Next.js (App Router)**
 - **Tailwind CSS**
-- **Prisma + SQLite**
-- **jspdf, jspdf-autotable, jszip** (用于报表导出)
-- **browser-image-compression** (用于前端图片压缩)
+- **Prisma + PostgreSQL**
+- **jspdf, jspdf-autotable, jszip**（报表导出）
+- **browser-image-compression**（前端图片压缩）
+
+## 仓库
+
+GitHub：https://github.com/11theridings-hk/Sk11_finance
