@@ -212,8 +212,40 @@ async function applyProgrammaticDDL() {
     }
   }
 
+  // Step 6: ReminderEmailLog table
+  const hasReminderEmailLog = await tableExists('ReminderEmailLog');
+  if (!hasReminderEmailLog) {
+    await execSafe(
+      'CREATE TABLE "ReminderEmailLog" (...)',
+      `CREATE TABLE IF NOT EXISTS "ReminderEmailLog" (
+        "id" TEXT NOT NULL,
+        "entityType" TEXT NOT NULL,
+        "entityId" TEXT NOT NULL,
+        "kind" TEXT NOT NULL,
+        "anchorDate" TEXT NOT NULL,
+        "sentAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "toEmails" TEXT NOT NULL,
+        "subject" TEXT,
+        "status" TEXT NOT NULL DEFAULT 'SENT',
+        "error" TEXT,
+        CONSTRAINT "ReminderEmailLog_pkey" PRIMARY KEY ("id")
+      )`,
+    );
+    await execSafe(
+      'CREATE UNIQUE INDEX ReminderEmailLog unique key',
+      `CREATE UNIQUE INDEX IF NOT EXISTS "ReminderEmailLog_entityType_entityId_kind_anchorDate_key" ON "ReminderEmailLog"("entityType", "entityId", "kind", "anchorDate")`,
+    );
+    await execSafe(
+      'CREATE INDEX ReminderEmailLog entity idx',
+      `CREATE INDEX IF NOT EXISTS "ReminderEmailLog_entityType_entityId_idx" ON "ReminderEmailLog"("entityType", "entityId")`,
+    );
+  } else {
+    console.log('[bootstrap] -> ReminderEmailLog table already exists; skipping.');
+  }
+
   const after = {
     SystemSetting: await tableExists('SystemSetting'),
+    ReminderEmailLog: await tableExists('ReminderEmailLog'),
     UserOcrEnabled: await columnExists('User', 'ocrEnabled'),
     PrivateCustomCategory: await columnExists('PrivateRecord', 'customCategory'),
     ContractReminderDays: await columnExists('Contract', 'reminderDays'),

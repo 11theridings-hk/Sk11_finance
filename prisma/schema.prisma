@@ -240,6 +240,22 @@ model SystemSetting {
   updatedAt DateTime @updatedAt
 }
 
+model ReminderEmailLog {
+  id         String   @id @default(uuid())
+  entityType String // CONTRACT | ACTIVITY
+  entityId   String
+  kind       String // advance | d5 | due | overdue_1 | overdue_7 | overdue_30 | combined
+  anchorDate String // YYYY-MM-DD of target date
+  sentAt     DateTime @default(now())
+  toEmails   String
+  subject    String?
+  status     String   @default("SENT") // SENT | FAILED
+  error      String?
+
+  @@unique([entityType, entityId, kind, anchorDate])
+  @@index([entityType, entityId])
+}
+
 model UserProfile {
   userId               String   @id
   legalNameEn          String
