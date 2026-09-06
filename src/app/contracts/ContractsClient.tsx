@@ -9,6 +9,7 @@ import OcrNoteButton from '@/components/OcrNoteButton'
 
 type ContractItem = {
   id: string
+  userId: string
   title: string
   type: string
   effectiveDate: string | Date
@@ -16,7 +17,14 @@ type ContractItem = {
   reminderDays: number
   note?: string | null
   amount: number
+  poolId?: string | null
+  categoryId?: string | null
+  subCategoryId?: string | null
+  thirdCategoryId?: string | null
   pool?: { name: string } | null
+  category?: { name: string } | null
+  subCategory?: { name: string } | null
+  thirdCategory?: { name: string } | null
   attachments?: any[]
   memos?: any[]
 }
@@ -24,6 +32,7 @@ type ContractItem = {
 type Props = {
   locale: Locale
   pools: any[]
+  currentUserId: string
   initialContracts: ContractItem[]
 }
 
@@ -35,7 +44,7 @@ function getDaysDiff(value: string | Date) {
   return Math.ceil((targetDay.getTime() - startOfToday.getTime()) / 86400000)
 }
 
-export default function ContractsClient({ locale, pools, initialContracts }: Props) {
+export default function ContractsClient({ locale, pools, currentUserId, initialContracts }: Props) {
   const t = createTranslator(locale)
   const [selectedContract, setSelectedContract] = useState<ContractItem | null>(null)
   const [type, setType] = useState<'INCOME' | 'EXPENSE'>('EXPENSE')
@@ -311,7 +320,13 @@ export default function ContractsClient({ locale, pools, initialContracts }: Pro
       </section>
 
       {selectedContract && (
-        <ContractDetailModal contract={selectedContract} locale={locale} onClose={() => setSelectedContract(null)} />
+        <ContractDetailModal
+          contract={selectedContract}
+          locale={locale}
+          pools={pools}
+          canManage={selectedContract.userId === currentUserId}
+          onClose={() => setSelectedContract(null)}
+        />
       )}
     </div>
   )

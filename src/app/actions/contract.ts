@@ -35,7 +35,8 @@ function getDeepestCategoryId(data: {
   return data.thirdCategoryId || data.subCategoryId || data.categoryId || undefined
 }
 
-async function assertContractPermission(contractId: string) {
+/** Any admin may view / append attachment / memo. */
+async function assertContractAdminAccess(contractId: string) {
   const locale = await getCurrentLocale()
   const t = createTranslator(locale)
   const session = await getSession()
@@ -55,11 +56,34 @@ async function assertContractPermission(contractId: string) {
     throw new Error(t('contractNotFound'))
   }
 
-  if (contract.userId !== session.userId && !session.isAdmin) {
+  return { session, contract }
+}
+
+/** Only the creator may edit core fields or delete. */
+async function assertContractOwner(contractId: string) {
+  const { session, contract } = await assertContractAdminAccess(contractId)
+  const locale = await getCurrentLocale()
+  const t = createTranslator(locale)
+
+  if (contract.userId !== session.userId) {
     throw new Error(t('canOnlyModifyOwnContract'))
   }
 
   return { session, contract }
+}
+
+export type UpdateContractInput = {
+  title: string
+  type: 'INCOME' | 'EXPENSE'
+  effectiveDate: Date
+  expiryDate: Date
+  reminderDays: number
+  note?: string
+  amount: number
+  categoryId?: string
+  subCategoryId?: string
+  thirdCategoryId?: string
+  poolId?: string
 }
 
 export async function getContracts() {
@@ -148,9 +172,39 @@ export async function createContract(data: CreateContractInput) {
   }
 }
 
+export async function updateContract(contractId: string, data: UpdateContractInput) {
+  try {
+    await assertContractOwner(contractId)
+
+    const updated = await prisma.contract.update({
+      where: { id: contractId },
+      data: {
+        title: data.title,
+        type: data.type,
+        effectiveDate: data.effectiveDate,
+        expiryDate: data.expiryDate,
+        reminderDays: data.reminderDays,
+        note: data.note,
+        amount: data.amount,
+        categoryId: data.categoryId || null,
+        subCategoryId: data.categoryId ? data.subCategoryId || null : null,
+        thirdCategoryId: data.categoryId ? data.thirdCategoryId || null : null,
+        poolId: data.poolId || null,
+      },
+    })
+
+    revalidatePath('/contracts')
+    revalidatePath('/admin')
+    revalidatePath('/report')
+    return { success: true, contract: updated }
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
+}
+
 export async function addContractAttachment(contractId: string, attachment: AttachmentPayload) {
   try {
-    const { session, contract } = await assertContractPermission(contractId)
+    const { session, contract } = await assertContractAdminAccess(contractId)
 
     await prisma.attachment.create({
       data: {
@@ -173,7 +227,7 @@ export async function addContractAttachment(contractId: string, attachment: Atta
 
 export async function addContractMemo(contractId: string, content: string) {
   try {
-    const { session } = await assertContractPermission(contractId)
+    const { session } = await assertContractAdminAccess(contractId)
 
     await prisma.memo.create({
       data: {
@@ -192,7 +246,7 @@ export async function addContractMemo(contractId: string, content: string) {
 
 export async function deleteContract(contractId: string) {
   try {
-    await assertContractPermission(contractId)
+    await assertContractOwner(contractId)
 
     await prisma.$transaction(async (tx) => {
       await tx.memo.deleteMany({ where: { contractId } })

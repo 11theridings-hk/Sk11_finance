@@ -30,6 +30,7 @@ export default async function ContractsPage() {
       <ContractsClient
         locale={locale}
         pools={pools}
+        currentUserId={session.userId}
         initialContracts={contracts}
       />
     </div>
