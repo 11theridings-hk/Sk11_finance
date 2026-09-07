@@ -7,7 +7,13 @@ import { createUser, updateUser, deleteUser, toggleUserPool } from "../actions/u
 import { adminUpdateUserProfile, getMyProfile } from "../actions/payroll";
 import { createTranslator, formatCurrency, type Locale } from "@/lib/i18n";
 import { updateAISettings, type AISettings } from "../actions/settings";
+import {
+  queryAttachmentsForAdmin,
+  bulkDeleteAttachments,
+  type AttachmentSourceFilter,
+} from "../actions/attachment";
 import type { UserProfileSnapshotInput } from "@/lib/payroll/calc";
+import { openAttachment } from "@/lib/image";
 
 type AdminTabsProps = {
   initialCategories: any[]
@@ -56,7 +62,13 @@ export default function AdminTabs({ initialCategories, initialAttachments, initi
       {/* 内容区域 */}
       <div className="max-w-5xl mx-auto p-4 sm:px-6 lg:px-8 mt-4">
         {activeTab === "category" && <CategoryTab categories={initialCategories} locale={locale} />}
-        {activeTab === "attachment" && <AttachmentTab attachments={initialAttachments} locale={locale} />}
+        {activeTab === "attachment" && (
+          <AttachmentTab
+            initialAttachments={initialAttachments}
+            pools={initialPools}
+            locale={locale}
+          />
+        )}
         {activeTab === "pool" && <PoolTab pools={initialPools} users={initialUsers} locale={locale} />}
         {activeTab === "user" && <UserTab initialUsers={initialUsers} locale={locale} />}
         {activeTab === "ai-settings" && <AISettingsTab initialSettings={initialAISettings} locale={locale} />}
@@ -208,37 +220,246 @@ function CategoryTab({ categories, locale }: { categories: any[], locale: Locale
 }
 
 // ---------------- 附件管理组件 ----------------
-function AttachmentTab({ attachments, locale }: { attachments: any[], locale: Locale }) {
-  const t = createTranslator(locale);
+function attachmentSourceOf(att: any): AttachmentSourceFilter | 'OTHER' {
+  if (att.recordId || att.record) return 'RECORD'
+  if (att.privateRecordId || att.privateRecord) return 'PRIVATE'
+  if (att.activityId || att.activity) return 'ACTIVITY'
+  if (att.contractId || att.contract) return 'CONTRACT'
+  return 'OTHER'
+}
+
+function AttachmentTab({
+  initialAttachments,
+  pools,
+  locale,
+}: {
+  initialAttachments: any[]
+  pools: any[]
+  locale: Locale
+}) {
+  const t = createTranslator(locale)
+  const dateLocale = locale === 'en' ? 'en-HK' : 'zh-HK'
+  const inputClass =
+    'w-full rounded-xl border border-transparent bg-[#F2F2F7] px-3 py-2.5 text-sm text-gray-900 outline-none focus:bg-white focus:ring-2 focus:ring-[#007AFF]/30'
+
+  const [attachments, setAttachments] = useState<any[]>(initialAttachments)
+  const [source, setSource] = useState<AttachmentSourceFilter>('ALL')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [poolId, setPoolId] = useState('')
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  const sourceLabel = (att: any) => {
+    const s = attachmentSourceOf(att)
+    if (s === 'RECORD') return t('attachmentSourceRecord')
+    if (s === 'PRIVATE') return t('attachmentSourcePrivate')
+    if (s === 'ACTIVITY') return t('attachmentSourceActivity')
+    if (s === 'CONTRACT') return t('attachmentSourceContract')
+    return t('unknown')
+  }
+
+  const detailLabel = (att: any) => {
+    if (att.record) return att.record.note || att.record.id.slice(-8)
+    if (att.privateRecord) return att.privateRecord.note || att.privateRecord.id.slice(-8)
+    if (att.activity) return att.activity.title
+    if (att.contract) return att.contract.title
+    return '-'
+  }
+
+  const poolLabel = (att: any) =>
+    att.record?.pool?.name || att.contract?.pool?.name || '-'
+
+  const allSelected =
+    attachments.length > 0 && attachments.every((a) => selectedIds.includes(a.id))
+
+  const toggleOne = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    )
+  }
+
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelectedIds([])
+      return
+    }
+    setSelectedIds(attachments.map((a) => a.id))
+  }
+
+  const handleSearch = async () => {
+    setLoading(true)
+    try {
+      const filter: {
+        source: AttachmentSourceFilter
+        startDate?: Date
+        endDate?: Date
+        poolId?: string
+      } = { source }
+      if (startDate) filter.startDate = new Date(startDate)
+      if (endDate) {
+        const end = new Date(endDate)
+        end.setHours(23, 59, 59, 999)
+        filter.endDate = end
+      }
+      if (poolId) filter.poolId = poolId
+
+      const rows = await queryAttachmentsForAdmin(filter)
+      setAttachments(rows)
+      setSelectedIds([])
+    } catch (e) {
+      console.error(e)
+      alert(t('queryFailed'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) {
+      alert(t('noAttachmentSelected'))
+      return
+    }
+    const msg = t('bulkDeleteAttachmentsConfirm').replace('{count}', String(selectedIds.length))
+    if (!window.confirm(msg)) return
+
+    setDeleting(true)
+    const res = await bulkDeleteAttachments(selectedIds)
+    if (!res.success) {
+      alert(res.error)
+      setDeleting(false)
+      return
+    }
+    alert(t('bulkDeleteAttachmentsDone').replace('{count}', String(res.deleted)))
+    setSelectedIds([])
+    await handleSearch()
+    setDeleting(false)
+  }
+
   return (
-    <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6">
-      <h2 className="text-lg font-semibold text-gray-800 mb-6">{t('attachmentManagement')}</h2>
-      
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-5">
-        {attachments.map((att) => (
-          <div key={att.id} className="bg-white border border-gray-100 rounded-2xl overflow-hidden flex flex-col shadow-sm">
-            <div className="h-32 bg-[#F2F2F7] flex items-center justify-center relative">
-              <img src={att.fileUrl} alt={t('attachmentPreview')} className="w-full h-full object-cover" onError={(e) => {
-                (e.currentTarget as HTMLImageElement).style.display = 'none';
-              }} />
+    <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-5">
+      <div>
+        <h2 className="text-lg font-semibold text-gray-800">{t('attachmentManagement')}</h2>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div>
+          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+            {t('attachmentSource')}
+          </label>
+          <select value={source} onChange={(e) => setSource(e.target.value as AttachmentSourceFilter)} className={inputClass}>
+            <option value="ALL">{t('attachmentSourceAll')}</option>
+            <option value="RECORD">{t('attachmentSourceRecord')}</option>
+            <option value="PRIVATE">{t('attachmentSourcePrivate')}</option>
+            <option value="ACTIVITY">{t('attachmentSourceActivity')}</option>
+            <option value="CONTRACT">{t('attachmentSourceContract')}</option>
+          </select>
+        </div>
+        <div>
+          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+            {t('startDate')}
+          </label>
+          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+            {t('endDate')}
+          </label>
+          <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+            {t('attachmentPool')}
+          </label>
+          <select value={poolId} onChange={(e) => setPoolId(e.target.value)} className={inputClass}>
+            <option value="">{t('all')}</option>
+            {pools.map((pool: any) => (
+              <option key={pool.id} value={pool.id}>{pool.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2.5">
+        <button
+          type="button"
+          onClick={handleSearch}
+          disabled={loading || deleting}
+          className="rounded-xl bg-[#007AFF] px-5 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-50"
+        >
+          {loading ? t('queryLoading') : t('queryAttachments')}
+        </button>
+        <button
+          type="button"
+          onClick={toggleAll}
+          disabled={attachments.length === 0 || loading || deleting}
+          className="rounded-xl bg-[#F2F2F7] px-4 py-2.5 text-sm font-semibold text-gray-700 disabled:opacity-50"
+        >
+          {t('selectAllAttachments')}
+        </button>
+        <span className="text-sm text-gray-500">
+          {t('selectedAttachmentCount').replace('{count}', String(selectedIds.length))}
+        </span>
+        <button
+          type="button"
+          onClick={handleBulkDelete}
+          disabled={selectedIds.length === 0 || loading || deleting}
+          className="ml-auto rounded-xl bg-[#FF3B30] px-5 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-50"
+        >
+          {deleting ? t('saving') : t('bulkDeleteAttachments')}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+        {attachments.map((att) => {
+          const checked = selectedIds.includes(att.id)
+          return (
+            <div
+              key={att.id}
+              className={`flex flex-col overflow-hidden rounded-2xl border bg-white shadow-sm ${
+                checked ? 'border-[#007AFF] ring-2 ring-[#007AFF]/20' : 'border-gray-100'
+              }`}
+            >
+              <div className="relative flex h-32 items-center justify-center bg-[#F2F2F7]">
+                <label className="absolute left-2 top-2 z-10 flex items-center gap-1 rounded-lg bg-white/90 px-2 py-1 text-xs font-medium text-gray-700 shadow-sm">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleOne(att.id)}
+                    className="h-4 w-4 rounded text-[#007AFF]"
+                  />
+                </label>
+                <img
+                  src={att.fileUrl}
+                  alt={t('attachmentPreview')}
+                  className="h-full w-full cursor-pointer object-cover"
+                  onClick={() => openAttachment(att.fileUrl)}
+                  onError={(e) => {
+                    ;(e.currentTarget as HTMLImageElement).style.display = 'none'
+                  }}
+                />
+              </div>
+              <div className="flex flex-col gap-1 p-3 text-xs text-gray-500">
+                <span className="truncate font-medium text-gray-900">{att.uploader?.roleName || t('unknown')}</span>
+                <span className="truncate">{t('attachmentSourceLabel')}: {sourceLabel(att)}</span>
+                <span className="truncate">{t('detail')}: {detailLabel(att)}</span>
+                <span className="truncate">{t('attachmentPool')}: {poolLabel(att)}</span>
+                <span className="truncate">{t('attachmentUploadDate')}: {new Date(att.createdAt).toLocaleString(dateLocale)}</span>
+                <span className="truncate">{t('note')}: {att.note || '-'}</span>
+                <span className="truncate">{t('attachmentSize')}: {(att.size / 1024).toFixed(1)} KB</span>
+              </div>
             </div>
-            <div className="p-3 bg-white text-xs text-gray-500 flex flex-col gap-1.5">
-              <span className="truncate font-medium text-gray-900">{att.uploader?.roleName || t('unknown')}</span>
-              <span className="truncate">{t('attachmentCategory')}: {att.category?.name || t('unknown')}</span>
-              <span className="truncate">{t('detail')}: {att.record ? t('recordDetails') : att.contract ? att.contract.title : t('unknown')}</span>
-              <span className="truncate">{t('note')}: {att.note || '-'}</span>
-              <span className="truncate">{t('attachmentSize')}: {(att.size / 1024).toFixed(1)} KB</span>
-            </div>
-          </div>
-        ))}
+          )
+        })}
         {attachments.length === 0 && (
-          <div className="col-span-full py-8 text-center text-gray-500 text-sm">
-            {t('noAttachmentData')}
+          <div className="col-span-full py-10 text-center text-sm text-gray-500">
+            {t('noAttachmentMatch')}
           </div>
         )}
       </div>
     </div>
-  );
+  )
 }
 
 // ---------------- 资金池管理组件 ----------------

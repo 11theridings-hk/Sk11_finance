@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession } from "../actions/auth";
 import { getCategories } from "../actions/category";
-import { getAttachments } from "../actions/record";
+import { queryAttachmentsForAdmin } from "../actions/attachment";
 import { getCapitalPools } from "../actions/pool";
 import { getUsers } from "../actions/user";
 import AdminTabs from "./AdminTabs";
@@ -28,7 +28,7 @@ export default async function AdminPage() {
 
   // 获取各个模块的数据
   const categories = await getCategories();
-  const attachments = await getAttachments();
+  const attachments = await queryAttachmentsForAdmin({ source: 'ALL' });
   const pools = await getCapitalPools();
   const users = await getUsers();
   const aiSettings = await getAISettings();

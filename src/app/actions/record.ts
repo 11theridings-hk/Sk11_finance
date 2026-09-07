@@ -172,16 +172,40 @@ export async function getRecentRecords(userId?: string) {
 export async function getAttachments() {
   const session = await getSession()
   if (!session || (!session.isAdmin && !hasPublicLedgerAccess(session))) return []
-  
+
+  // Admin attachment management uses queryAttachmentsForAdmin; this remains for legacy callers.
   return await prisma.attachment.findMany({
-    where: !session.isAdmin ? { uploaderId: session.userId } : undefined,
+    where: {
+      ...(session.isAdmin
+        ? {
+            payrollPaidId: null,
+            payrollPdfId: null,
+          }
+        : { uploaderId: session.userId }),
+    },
     orderBy: { createdAt: 'desc' },
     include: {
       uploader: { select: { roleName: true } },
       category: { select: { name: true } },
-      record: { select: { id: true, note: true, date: true } },
-      contract: { select: { id: true, title: true, expiryDate: true } }
-    }
+      record: {
+        select: {
+          id: true,
+          note: true,
+          date: true,
+          pool: { select: { name: true } },
+        },
+      },
+      privateRecord: { select: { id: true, note: true, date: true } },
+      activity: { select: { id: true, title: true, eventDate: true } },
+      contract: {
+        select: {
+          id: true,
+          title: true,
+          expiryDate: true,
+          pool: { select: { name: true } },
+        },
+      },
+    },
   })
 }
 
