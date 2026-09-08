@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { getSession } from './auth'
 import { getCurrentLocale } from '@/lib/locale'
 import { createTranslator } from '@/lib/i18n'
+import { maybeSendReminderCatchUp } from '@/lib/reminders/emailReminders'
 
 type AttachmentPayload = {
   url: string
@@ -116,6 +117,22 @@ export async function createActivity(data: CreateActivityInput) {
       return created
     })
 
+    // If create day is a trigger day (30/15/7/3/1/due/…), send immediately.
+    if (activity.visibility === 'PUBLIC') {
+      try {
+        await maybeSendReminderCatchUp({
+          entityType: 'ACTIVITY',
+          entityId: activity.id,
+          title: activity.title,
+          targetDate: activity.eventDate,
+          reminderDays: activity.reminderDays,
+          eligible: true,
+        })
+      } catch (e) {
+        console.error('[createActivity] reminder catch-up failed', e)
+      }
+    }
+
     revalidatePath('/activities')
     return { success: true, activity }
   } catch (error: any) {
@@ -137,6 +154,21 @@ export async function updateActivity(activityId: string, data: UpdateActivityInp
         visibility: data.visibility,
       },
     })
+
+    if (activity.visibility === 'PUBLIC') {
+      try {
+        await maybeSendReminderCatchUp({
+          entityType: 'ACTIVITY',
+          entityId: activity.id,
+          title: activity.title,
+          targetDate: activity.eventDate,
+          reminderDays: activity.reminderDays,
+          eligible: true,
+        })
+      } catch (e) {
+        console.error('[updateActivity] reminder catch-up failed', e)
+      }
+    }
 
     revalidatePath('/activities')
     return { success: true, activity }

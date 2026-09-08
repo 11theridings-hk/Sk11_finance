@@ -1,11 +1,15 @@
 import { Resend } from 'resend'
 
+/** Resend's sandbox FROM address — must never be used as a recipient. */
+const RESEND_SANDBOX_FROM = 'onboarding@resend.dev'
+
 export function getReminderRecipients(): string[] {
   const raw = process.env.REMINDER_EMAILS || ''
   return raw
     .split(/[,;\s]+/)
     .map((s) => s.trim())
     .filter((s) => s.includes('@'))
+    .filter((s) => s.toLowerCase() !== RESEND_SANDBOX_FROM)
 }
 
 export function isReminderEmailConfigured() {
@@ -19,13 +23,15 @@ export async function sendReminderEmail(input: {
   text: string
 }) {
   const apiKey = process.env.RESEND_API_KEY
-  const from = process.env.RESEND_FROM || 'FINNE18 <onboarding@resend.dev>'
+  const from = process.env.RESEND_FROM || `FINNE18 <${RESEND_SANDBOX_FROM}>`
 
   if (!apiKey) {
     throw new Error('RESEND_API_KEY is not configured')
   }
   if (!input.to.length) {
-    throw new Error('No reminder recipients configured')
+    throw new Error(
+      'No reminder recipients configured. Set REMINDER_EMAILS to your real inbox (e.g. you@gmail.com), not onboarding@resend.dev.',
+    )
   }
 
   const resend = new Resend(apiKey)

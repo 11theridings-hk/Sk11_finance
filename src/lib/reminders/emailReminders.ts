@@ -8,11 +8,18 @@ import {
 export type ReminderEntityType = 'CONTRACT' | 'ACTIVITY'
 export type ReminderKind =
   | 'advance'
-  | 'd5'
+  | 'd30'
+  | 'd15'
+  | 'd7'
+  | 'd3'
+  | 'd1'
   | 'due'
   | 'overdue_1'
   | 'overdue_7'
   | 'overdue_30'
+
+/** Default pre-due milestones (calendar days before target). */
+export const DEFAULT_PRE_DUE_DAYS = [30, 15, 7, 3, 1] as const
 
 export type ReminderCandidate = {
   entityType: ReminderEntityType
@@ -26,12 +33,24 @@ export type ReminderCandidate = {
 }
 
 const KIND_LABEL_ZH: Record<ReminderKind, string> = {
-  advance: '提前提醒日',
-  d5: '到期前 5 天',
+  advance: '自訂提前提醒日',
+  d30: '到期前 30 天',
+  d15: '到期前 15 天',
+  d7: '到期前 7 天',
+  d3: '到期前 3 天',
+  d1: '到期前 1 天',
   due: '到期當天',
   overdue_1: '過期第 1 天',
   overdue_7: '過期第 7 天',
   overdue_30: '過期第 30 天',
+}
+
+const PRE_DUE_KIND_BY_DAYS: Record<number, ReminderKind> = {
+  30: 'd30',
+  15: 'd15',
+  7: 'd7',
+  3: 'd3',
+  1: 'd1',
 }
 
 /** Calendar YYYY-MM-DD in Asia/Hong_Kong */
@@ -59,17 +78,36 @@ export function daysDiffHongKong(targetDate: Date, todayYmd = hongKongYmd()): nu
   return Math.round((t1 - t0) / 86400000)
 }
 
+/**
+ * Match trigger kinds for a given day.
+ * - Fixed: 30 / 15 / 7 / 3 / 1 days before, due day, overdue 1/7/30
+ * - Custom advance: when daysDiff === reminderDays and that day is not already a fixed milestone
+ * - Only fire pre-due milestones that fall within the entity's reminder window
+ *   (daysDiff <= reminderDays), so a short window (e.g. 7) won't spam d30/d15.
+ */
 export function matchReminderKinds(daysDiff: number, reminderDays: number): ReminderKind[] {
   const kinds: ReminderKind[] = []
-  if (reminderDays > 0 && daysDiff === reminderDays) kinds.push('advance')
-  if (daysDiff === 5) kinds.push('d5')
+  const window = Math.max(0, reminderDays)
+
+  for (const day of DEFAULT_PRE_DUE_DAYS) {
+    if (daysDiff === day && day <= window) {
+      kinds.push(PRE_DUE_KIND_BY_DAYS[day])
+    }
+  }
+
+  if (
+    reminderDays > 0 &&
+    daysDiff === reminderDays &&
+    !(reminderDays in PRE_DUE_KIND_BY_DAYS)
+  ) {
+    kinds.push('advance')
+  }
+
   if (daysDiff === 0) kinds.push('due')
   if (daysDiff === -1) kinds.push('overdue_1')
   if (daysDiff === -7) kinds.push('overdue_7')
   if (daysDiff === -30) kinds.push('overdue_30')
 
-  // If advance and d5 collide (reminderDays === 5), keep both labels but one email;
-  // still return both so logs cover each kind.
   return kinds
 }
 
@@ -87,15 +125,29 @@ function formatDaysDiffLabel(daysDiff: number) {
   return `已逾期 ${Math.abs(daysDiff)} 天`
 }
 
+/** Subject urgency prefix by proximity to due date. */
+export function urgencySubjectPrefix(daysDiff: number): string {
+  if (daysDiff <= -30) return '【已逾期 30 天·至急】'
+  if (daysDiff <= -7) return '【已逾期 7 天·至急】'
+  if (daysDiff <= -1) return '【已逾期·至急】'
+  if (daysDiff === 0) return '【今天到期·至急】'
+  if (daysDiff === 1) return '【明日到期·緊急】'
+  if (daysDiff <= 3) return '【緊急·尚餘數天】'
+  if (daysDiff <= 7) return '【即將到期】'
+  if (daysDiff <= 15) return '【請留意】'
+  return '【提前提醒】'
+}
+
 function buildEmailContent(candidate: ReminderCandidate, kinds: ReminderKind[]) {
   const typeLabel = candidate.entityType === 'CONTRACT' ? '合約' : '公開活動'
   const reasonText = kinds.map((k) => KIND_LABEL_ZH[k]).join('、')
   const dateStr = hongKongYmd(candidate.targetDate)
   const link = `${appBaseUrl()}${candidate.hrefPath}`
-  const subject = `[FINNE18 提醒] ${typeLabel}「${candidate.title}」· ${reasonText}`
+  const urgency = urgencySubjectPrefix(candidate.daysDiff)
+  const subject = `${urgency}[FINNE18] ${typeLabel}「${candidate.title}」· ${formatDaysDiffLabel(candidate.daysDiff)}`
 
   const text = [
-    `FINNE18 到期提醒`,
+    `FINNE18 到期提醒 ${urgency}`,
     ``,
     `類型：${typeLabel}`,
     `標題：${candidate.title}`,
@@ -109,7 +161,7 @@ function buildEmailContent(candidate: ReminderCandidate, kinds: ReminderKind[]) 
 
   const html = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #1f2937; line-height: 1.6;">
-      <h2 style="margin: 0 0 12px; color: #1e3a5f;">FINNE18 到期提醒</h2>
+      <h2 style="margin: 0 0 12px; color: #1e3a5f;">FINNE18 到期提醒 ${escapeHtml(urgency)}</h2>
       <table style="border-collapse: collapse; width: 100%; max-width: 520px;">
         <tr><td style="padding: 6px 0; color: #6b7280;">類型</td><td style="padding: 6px 0; font-weight: 600;">${typeLabel}</td></tr>
         <tr><td style="padding: 6px 0; color: #6b7280;">標題</td><td style="padding: 6px 0; font-weight: 600;">${escapeHtml(candidate.title)}</td></tr>
@@ -133,6 +185,31 @@ function escapeHtml(value: string) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+}
+
+function toCandidate(input: {
+  entityType: ReminderEntityType
+  entityId: string
+  title: string
+  targetDate: Date
+  reminderDays: number
+  hrefPath: string
+  todayYmd?: string
+}): ReminderCandidate | null {
+  const todayYmd = input.todayYmd || hongKongYmd()
+  const daysDiff = daysDiffHongKong(input.targetDate, todayYmd)
+  const kinds = matchReminderKinds(daysDiff, input.reminderDays)
+  if (!kinds.length) return null
+  return {
+    entityType: input.entityType,
+    entityId: input.entityId,
+    title: input.title,
+    targetDate: input.targetDate,
+    reminderDays: input.reminderDays,
+    daysDiff,
+    kinds,
+    hrefPath: input.hrefPath,
+  }
 }
 
 export async function collectReminderCandidates(todayYmd = hongKongYmd()): Promise<ReminderCandidate[]> {
@@ -159,85 +236,81 @@ export async function collectReminderCandidates(todayYmd = hongKongYmd()): Promi
   const candidates: ReminderCandidate[] = []
 
   for (const c of contracts) {
-    const daysDiff = daysDiffHongKong(c.expiryDate, todayYmd)
-    const kinds = matchReminderKinds(daysDiff, c.reminderDays)
-    if (!kinds.length) continue
-    candidates.push({
+    const candidate = toCandidate({
       entityType: 'CONTRACT',
       entityId: c.id,
       title: c.title,
       targetDate: c.expiryDate,
       reminderDays: c.reminderDays,
-      daysDiff,
-      kinds,
       hrefPath: '/contracts',
+      todayYmd,
     })
+    if (candidate) candidates.push(candidate)
   }
 
   for (const a of activities) {
-    const daysDiff = daysDiffHongKong(a.eventDate, todayYmd)
-    const kinds = matchReminderKinds(daysDiff, a.reminderDays)
-    if (!kinds.length) continue
-    candidates.push({
+    const candidate = toCandidate({
       entityType: 'ACTIVITY',
       entityId: a.id,
       title: a.title,
       targetDate: a.eventDate,
       reminderDays: a.reminderDays,
-      daysDiff,
-      kinds,
       hrefPath: '/activities',
+      todayYmd,
     })
+    if (candidate) candidates.push(candidate)
   }
 
   return candidates
 }
 
-export type ReminderJobResult = {
-  ok: boolean
-  skippedReason?: string
-  today: string
-  sent: number
-  skipped: number
-  failed: number
-  details: Array<{
-    entityType: ReminderEntityType
-    entityId: string
-    title: string
-    kinds: ReminderKind[]
-    status: 'SENT' | 'SKIPPED' | 'FAILED'
-    error?: string
-  }>
+export type ReminderSendDetail = {
+  entityType: ReminderEntityType
+  entityId: string
+  title: string
+  kinds: ReminderKind[]
+  status: 'SENT' | 'SKIPPED' | 'FAILED'
+  error?: string
 }
 
-export async function runReminderEmailJob(): Promise<ReminderJobResult> {
-  const today = hongKongYmd()
-  const details: ReminderJobResult['details'] = []
+async function sendOneCandidate(candidate: ReminderCandidate): Promise<ReminderSendDetail> {
+  const recipients = getReminderRecipients()
+  const anchorDate = anchorDateYmd(candidate.targetDate)
+  const pendingKinds: ReminderKind[] = []
 
-  if (!isReminderEmailConfigured()) {
+  for (const kind of candidate.kinds) {
+    const existing = await prisma.reminderEmailLog.findUnique({
+      where: {
+        entityType_entityId_kind_anchorDate: {
+          entityType: candidate.entityType,
+          entityId: candidate.entityId,
+          kind,
+          anchorDate,
+        },
+      },
+    })
+    if (existing?.status === 'SENT') continue
+    pendingKinds.push(kind)
+  }
+
+  if (!pendingKinds.length) {
     return {
-      ok: true,
-      skippedReason: 'RESEND_API_KEY or REMINDER_EMAILS not configured',
-      today,
-      sent: 0,
-      skipped: 0,
-      failed: 0,
-      details: [],
+      entityType: candidate.entityType,
+      entityId: candidate.entityId,
+      title: candidate.title,
+      kinds: candidate.kinds,
+      status: 'SKIPPED',
     }
   }
 
-  const recipients = getReminderRecipients()
-  const candidates = await collectReminderCandidates(today)
-  let sent = 0
-  let skipped = 0
-  let failed = 0
+  const { subject, html, text } = buildEmailContent(candidate, pendingKinds)
+  const toEmails = recipients.join(',')
 
-  for (const candidate of candidates) {
-    const anchorDate = anchorDateYmd(candidate.targetDate)
-    const pendingKinds: ReminderKind[] = []
+  try {
+    await sendReminderEmail({ to: recipients, subject, html, text })
 
-    for (const kind of candidate.kinds) {
-      const existing = await prisma.reminderEmailLog.findUnique({
+    for (const kind of pendingKinds) {
+      await prisma.reminderEmailLog.upsert({
         where: {
           entityType_entityId_kind_anchorDate: {
             entityType: candidate.entityType,
@@ -246,30 +319,37 @@ export async function runReminderEmailJob(): Promise<ReminderJobResult> {
             anchorDate,
           },
         },
+        create: {
+          entityType: candidate.entityType,
+          entityId: candidate.entityId,
+          kind,
+          anchorDate,
+          toEmails,
+          subject,
+          status: 'SENT',
+        },
+        update: {
+          toEmails,
+          subject,
+          status: 'SENT',
+          error: null,
+          sentAt: new Date(),
+        },
       })
-      if (existing?.status === 'SENT') continue
-      pendingKinds.push(kind)
     }
 
-    if (!pendingKinds.length) {
-      skipped += 1
-      details.push({
-        entityType: candidate.entityType,
-        entityId: candidate.entityId,
-        title: candidate.title,
-        kinds: candidate.kinds,
-        status: 'SKIPPED',
-      })
-      continue
+    return {
+      entityType: candidate.entityType,
+      entityId: candidate.entityId,
+      title: candidate.title,
+      kinds: pendingKinds,
+      status: 'SENT',
     }
+  } catch (e: any) {
+    const message = e?.message || String(e)
 
-    const { subject, html, text } = buildEmailContent(candidate, pendingKinds)
-    const toEmails = recipients.join(',')
-
-    try {
-      await sendReminderEmail({ to: recipients, subject, html, text })
-
-      for (const kind of pendingKinds) {
+    for (const kind of pendingKinds) {
+      try {
         await prisma.reminderEmailLog.upsert({
           where: {
             entityType_entityId_kind_anchorDate: {
@@ -286,72 +366,98 @@ export async function runReminderEmailJob(): Promise<ReminderJobResult> {
             anchorDate,
             toEmails,
             subject,
-            status: 'SENT',
+            status: 'FAILED',
+            error: message.slice(0, 1000),
           },
           update: {
-            toEmails,
+            status: 'FAILED',
+            error: message.slice(0, 1000),
             subject,
-            status: 'SENT',
-            error: null,
-            sentAt: new Date(),
+            toEmails,
           },
         })
+      } catch (_logErr) {
+        /* ignore log write failure */
       }
-
-      sent += 1
-      details.push({
-        entityType: candidate.entityType,
-        entityId: candidate.entityId,
-        title: candidate.title,
-        kinds: pendingKinds,
-        status: 'SENT',
-      })
-    } catch (e: any) {
-      const message = e?.message || String(e)
-      failed += 1
-
-      for (const kind of pendingKinds) {
-        try {
-          await prisma.reminderEmailLog.upsert({
-            where: {
-              entityType_entityId_kind_anchorDate: {
-                entityType: candidate.entityType,
-                entityId: candidate.entityId,
-                kind,
-                anchorDate,
-              },
-            },
-            create: {
-              entityType: candidate.entityType,
-              entityId: candidate.entityId,
-              kind,
-              anchorDate,
-              toEmails,
-              subject,
-              status: 'FAILED',
-              error: message.slice(0, 1000),
-            },
-            update: {
-              status: 'FAILED',
-              error: message.slice(0, 1000),
-              subject,
-              toEmails,
-            },
-          })
-        } catch (_logErr) {
-          /* ignore log write failure */
-        }
-      }
-
-      details.push({
-        entityType: candidate.entityType,
-        entityId: candidate.entityId,
-        title: candidate.title,
-        kinds: pendingKinds,
-        status: 'FAILED',
-        error: message,
-      })
     }
+
+    return {
+      entityType: candidate.entityType,
+      entityId: candidate.entityId,
+      title: candidate.title,
+      kinds: pendingKinds,
+      status: 'FAILED',
+      error: message,
+    }
+  }
+}
+
+/**
+ * Immediate catch-up when creating/updating an entity that lands on a trigger day today.
+ * No-op if not configured, private activity, or today is not a trigger day.
+ */
+export async function maybeSendReminderCatchUp(input: {
+  entityType: ReminderEntityType
+  entityId: string
+  title: string
+  targetDate: Date
+  reminderDays: number
+  /** Activities: only PUBLIC; contracts always eligible. */
+  eligible?: boolean
+}): Promise<ReminderSendDetail | null> {
+  if (input.eligible === false) return null
+  if (!isReminderEmailConfigured()) return null
+
+  const candidate = toCandidate({
+    entityType: input.entityType,
+    entityId: input.entityId,
+    title: input.title,
+    targetDate: input.targetDate,
+    reminderDays: input.reminderDays,
+    hrefPath: input.entityType === 'CONTRACT' ? '/contracts' : '/activities',
+  })
+  if (!candidate) return null
+
+  return sendOneCandidate(candidate)
+}
+
+export type ReminderJobResult = {
+  ok: boolean
+  skippedReason?: string
+  today: string
+  sent: number
+  skipped: number
+  failed: number
+  details: ReminderSendDetail[]
+}
+
+export async function runReminderEmailJob(): Promise<ReminderJobResult> {
+  const today = hongKongYmd()
+  const details: ReminderSendDetail[] = []
+
+  if (!isReminderEmailConfigured()) {
+    return {
+      ok: true,
+      skippedReason: 'RESEND_API_KEY or REMINDER_EMAILS not configured',
+      today,
+      sent: 0,
+      skipped: 0,
+      failed: 0,
+      details: [],
+    }
+  }
+
+  const candidates = await collectReminderCandidates(today)
+  let sent = 0
+  let skipped = 0
+  let failed = 0
+
+  for (const candidate of candidates) {
+    const detail = await sendOneCandidate(candidate)
+    details.push(detail)
+    if (detail.status === 'SENT') sent += 1
+    else if (detail.status === 'SKIPPED') skipped += 1
+    else failed += 1
   }
 
   return { ok: failed === 0, today, sent, skipped, failed, details }

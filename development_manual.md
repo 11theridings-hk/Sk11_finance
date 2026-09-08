@@ -115,11 +115,14 @@
     *   *其他管理員*：核心欄位唯讀；可新增附件與備註。
 *   **到期提醒**：依提醒天數分組顯示已過期 / 今天 / 即將到期。
 *   **郵件提醒（Resend）**：
-    *   環境變數（網站服務）：`RESEND_API_KEY`、`RESEND_FROM`、`REMINDER_EMAILS`、`CRON_SECRET`、`APP_BASE_URL`。
+    *   環境變數（**網站服務** Sk11_finance）：`RESEND_API_KEY`、`RESEND_FROM`、`REMINDER_EMAILS`、`CRON_SECRET`、`APP_BASE_URL`。
+    *   **收件人**：`REMINDER_EMAILS` 必須是真實信箱（如 `you@gmail.com`）。**不要**填 `onboarding@resend.dev`（那是發件人沙盒位址，不是收件人）。
     *   端點：`POST /api/cron/reminders`（Bearer `CRON_SECRET`）。
-    *   觸發點：`reminderDays` 當天、到期前 5 天、到期當天、過期第 1/7/30 天；`ReminderEmailLog` 防重發。
+    *   觸發點（在「提前提醒天數」窗口內）：到期前 **30 / 15 / 7 / 3 / 1** 天、到期當天、過期第 1/7/30 天；自訂 `reminderDays` 若不在上述列表則另加一封；`ReminderEmailLog` 防重發。
+    *   標題會依急迫性加前綴（提前提醒 → 請留意 → 即將到期 → 緊急 → 今天到期/已逾期）。
+    *   建立／更新公開活動或合約時，若當天剛好是觸發日會立刻補寄。
     *   僅公開活動會進入郵件掃描；私人活動不發。
-    *   **常駐 worker**：倉庫 `cron-worker/`（node-cron），Railway 另開服務、Root Directory=`cron-worker`；預設香港每日 09:00 打網站 API。網站服務與 worker **都不要**開 Railway Cron Schedule。
+    *   **常駐 worker**：倉庫 `cron-worker/`（node-cron），Railway 另開服務、Root Directory=`cron-worker`；預設香港每日 09:00 打網站 API。測完請把 `RUN_ON_START` 設回 `false`。網站服務與 worker **都不要**開 Railway Cron Schedule。
 
 ## 5. UI/UX 规范 (UI/UX Guidelines)
 *   **布局**：H5 手机端自适应，避免过度装饰，追求高信息密度。

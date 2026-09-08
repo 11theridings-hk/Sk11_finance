@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { getSession } from './auth'
 import { getCurrentLocale } from '@/lib/locale'
 import { createTranslator } from '@/lib/i18n'
+import { maybeSendReminderCatchUp } from '@/lib/reminders/emailReminders'
 
 type AttachmentPayload = {
   url: string
@@ -164,6 +165,19 @@ export async function createContract(data: CreateContractInput) {
       return contract
     })
 
+    try {
+      await maybeSendReminderCatchUp({
+        entityType: 'CONTRACT',
+        entityId: result.id,
+        title: result.title,
+        targetDate: result.expiryDate,
+        reminderDays: result.reminderDays,
+        eligible: true,
+      })
+    } catch (e) {
+      console.error('[createContract] reminder catch-up failed', e)
+    }
+
     revalidatePath('/contracts')
     revalidatePath('/admin')
     return { success: true, contract: result }
@@ -192,6 +206,19 @@ export async function updateContract(contractId: string, data: UpdateContractInp
         poolId: data.poolId || null,
       },
     })
+
+    try {
+      await maybeSendReminderCatchUp({
+        entityType: 'CONTRACT',
+        entityId: updated.id,
+        title: updated.title,
+        targetDate: updated.expiryDate,
+        reminderDays: updated.reminderDays,
+        eligible: true,
+      })
+    } catch (e) {
+      console.error('[updateContract] reminder catch-up failed', e)
+    }
 
     revalidatePath('/contracts')
     revalidatePath('/admin')
