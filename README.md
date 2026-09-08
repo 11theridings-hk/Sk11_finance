@@ -17,7 +17,7 @@
    INIT_SECRET="your-init-secret"
    # Email reminders (Resend) — optional; job no-ops if missing
    RESEND_API_KEY="re_xxx"
-   RESEND_FROM="FINNE18 <noreply@your-verified-domain.com>"
+   RESEND_FROM="SK11-system <noreply@your-verified-domain.com>"
    REMINDER_EMAILS="you@example.com"
    CRON_SECRET="long-random-string"
    APP_BASE_URL="https://sk11finance.up.railway.app"
