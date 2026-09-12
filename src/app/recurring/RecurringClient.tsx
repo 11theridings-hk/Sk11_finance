@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { createTranslator, type Locale } from '@/lib/i18n'
-import { prepareAttachment, type ClientAttachment } from '@/lib/image'
+import { prepareAttachment } from '@/lib/image'
 import {
   createRecurringTemplate,
   deleteRecurringTemplate,
@@ -169,24 +169,6 @@ export default function RecurringClient({
     refresh()
   }
 
-  const handleAttach = async (instanceId: string, file: File | null) => {
-    if (!file) return
-    setBusy(true)
-    try {
-      const prepared = await prepareAttachment(file)
-      const res = await updateOpenInstance({
-        instanceId,
-        amount: 0, // keep existing on server if 0? update always sets — fetch amount from templates
-        attachment: { url: prepared.url, size: prepared.size },
-      })
-      // Better: pass current amount
-      void res
-    } catch (e: any) {
-      alert(e.message || t('submitFailed'))
-    }
-    setBusy(false)
-    refresh()
-  }
 
   const inputClass =
     'w-full rounded-xl border border-gray-200 bg-white px-3 py-3 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-[#007AFF]/30'
