@@ -6,7 +6,8 @@ import { createCapitalPool, deleteCapitalPool } from "../actions/pool";
 import { createUser, updateUser, deleteUser, toggleUserPool } from "../actions/user";
 import { adminUpdateUserProfile, getMyProfile } from "../actions/payroll";
 import { createTranslator, formatCurrency, type Locale } from "@/lib/i18n";
-import { updateAISettings, type AISettings } from "../actions/settings";
+import { updateAISettings, updatePluginFlags, type AISettings } from "../actions/settings";
+import type { PluginFlags } from "@/lib/plugins";
 import {
   queryAttachmentsForAdmin,
   bulkDeleteAttachments,
@@ -21,10 +22,11 @@ type AdminTabsProps = {
   initialPools: any[]
   initialUsers: any[]
   initialAISettings: AISettings
+  initialPluginFlags: PluginFlags
   locale: Locale
 }
 
-export default function AdminTabs({ initialCategories, initialAttachments, initialPools, initialUsers, initialAISettings, locale }: AdminTabsProps) {
+export default function AdminTabs({ initialCategories, initialAttachments, initialPools, initialUsers, initialAISettings, initialPluginFlags, locale }: AdminTabsProps) {
   const t = createTranslator(locale as Locale);
   const [activeTab, setActiveTab] = useState("category");
   
@@ -34,6 +36,7 @@ export default function AdminTabs({ initialCategories, initialAttachments, initi
     { id: "pool", label: t('poolManagement') },
     { id: "user", label: t('userManagement') },
     { id: "ai-settings", label: t('aiSettings') },
+    { id: "plugins", label: t('plugins') },
   ];
 
   return (
@@ -72,6 +75,7 @@ export default function AdminTabs({ initialCategories, initialAttachments, initi
         {activeTab === "pool" && <PoolTab pools={initialPools} users={initialUsers} locale={locale} />}
         {activeTab === "user" && <UserTab initialUsers={initialUsers} locale={locale} />}
         {activeTab === "ai-settings" && <AISettingsTab initialSettings={initialAISettings} locale={locale} />}
+        {activeTab === "plugins" && <PluginsTab initialFlags={initialPluginFlags} locale={locale} />}
       </div>
     </div>
   );
@@ -1269,6 +1273,71 @@ function AISettingsTab({ initialSettings, locale }: { initialSettings: AISetting
           className="rounded-xl bg-[#007AFF] px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#0066CC] disabled:opacity-50"
         >
           {saving ? t('saving') : t('saveAiSettings')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PluginsTab({ initialFlags, locale }: { initialFlags: PluginFlags; locale: Locale }) {
+  const t = createTranslator(locale);
+  const [flags, setFlags] = useState<PluginFlags>(initialFlags);
+  const [saving, setSaving] = useState(false);
+
+  const toggle = (key: keyof PluginFlags) => {
+    setFlags((current) => ({ ...current, [key]: !current[key] }));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    const res = await updatePluginFlags(flags);
+    if (!res.success) {
+      alert(res.error);
+      setSaving(false);
+      return;
+    }
+    alert(t('pluginsSaved'));
+    setSaving(false);
+  };
+
+  const rows: Array<{ key: keyof PluginFlags; label: string }> = [
+    { key: 'matters', label: t('pluginMatters') },
+    { key: 'contracts', label: t('pluginContracts') },
+    { key: 'payroll', label: t('pluginPayroll') },
+    { key: 'recurring', label: t('pluginRecurring') },
+  ];
+
+  return (
+    <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-5">
+      <div>
+        <h2 className="text-lg font-semibold text-gray-800">{t('plugins')}</h2>
+        <p className="mt-2 text-sm text-gray-500">{t('pluginsHint')}</p>
+      </div>
+
+      <div className="space-y-3">
+        {rows.map((row) => (
+          <label
+            key={row.key}
+            className="flex items-center justify-between gap-3 rounded-2xl bg-[#F2F2F7] p-4 text-sm font-medium text-gray-700"
+          >
+            <span>{row.label}</span>
+            <input
+              type="checkbox"
+              checked={flags[row.key]}
+              onChange={() => toggle(row.key)}
+              className="h-4 w-4 rounded text-[#007AFF] focus:ring-[#007AFF]"
+            />
+          </label>
+        ))}
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="rounded-xl bg-[#007AFF] px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#0066CC] disabled:opacity-50"
+        >
+          {saving ? t('saving') : t('savePlugins')}
         </button>
       </div>
     </div>

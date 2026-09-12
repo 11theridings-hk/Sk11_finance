@@ -4,8 +4,15 @@ import {
   isReminderEmailConfigured,
   sendReminderEmail,
 } from '@/lib/email/resend'
+import {
+  DEFAULT_PLUGIN_FLAGS,
+  PLUGIN_SETTING_KEYS,
+  type PluginFlags,
+  type PluginId,
+} from '@/lib/plugins'
+import { normalizeDueDate } from '@/lib/recurring'
 
-export type ReminderEntityType = 'CONTRACT' | 'ACTIVITY'
+export type ReminderEntityType = 'CONTRACT' | 'ACTIVITY' | 'RECURRING'
 export type ReminderKind =
   | 'advance'
   | 'd30'
@@ -138,8 +145,39 @@ export function urgencySubjectPrefix(daysDiff: number): string {
   return '【提前提醒】'
 }
 
+function entityTypeLabel(entityType: ReminderEntityType) {
+  if (entityType === 'CONTRACT') return '合約'
+  if (entityType === 'RECURRING') return '恆常收支'
+  return '公開事項'
+}
+
+function entityHrefPath(entityType: ReminderEntityType) {
+  if (entityType === 'CONTRACT') return '/contracts'
+  if (entityType === 'RECURRING') return '/recurring'
+  return '/activities'
+}
+
+async function loadPluginFlags(): Promise<PluginFlags> {
+  try {
+    const settings = await prisma.systemSetting.findMany({
+      where: { key: { in: Object.values(PLUGIN_SETTING_KEYS) } },
+    })
+    const map = new Map(settings.map((item) => [item.key, item.value]))
+    const flags = { ...DEFAULT_PLUGIN_FLAGS }
+    ;(Object.keys(PLUGIN_SETTING_KEYS) as PluginId[]).forEach((id) => {
+      const key = PLUGIN_SETTING_KEYS[id]
+      if (map.has(key)) {
+        flags[id] = map.get(key) === 'true'
+      }
+    })
+    return flags
+  } catch {
+    return { ...DEFAULT_PLUGIN_FLAGS }
+  }
+}
+
 function buildEmailContent(candidate: ReminderCandidate, kinds: ReminderKind[]) {
-  const typeLabel = candidate.entityType === 'CONTRACT' ? '合約' : '公開活動'
+  const typeLabel = entityTypeLabel(candidate.entityType)
   const reasonText = kinds.map((k) => KIND_LABEL_ZH[k]).join('、')
   const dateStr = hongKongYmd(candidate.targetDate)
   const link = `${appBaseUrl()}${candidate.hrefPath}`
@@ -213,24 +251,40 @@ function toCandidate(input: {
 }
 
 export async function collectReminderCandidates(todayYmd = hongKongYmd()): Promise<ReminderCandidate[]> {
-  const [contracts, activities] = await Promise.all([
-    prisma.contract.findMany({
-      select: {
-        id: true,
-        title: true,
-        expiryDate: true,
-        reminderDays: true,
-      },
-    }),
-    prisma.activity.findMany({
-      where: { visibility: 'PUBLIC' },
-      select: {
-        id: true,
-        title: true,
-        eventDate: true,
-        reminderDays: true,
-      },
-    }),
+  const flags = await loadPluginFlags()
+
+  const [contracts, activities, recurringTemplates] = await Promise.all([
+    flags.contracts
+      ? prisma.contract.findMany({
+          select: {
+            id: true,
+            title: true,
+            expiryDate: true,
+            reminderDays: true,
+          },
+        })
+      : Promise.resolve([]),
+    flags.matters
+      ? prisma.activity.findMany({
+          where: { visibility: 'PUBLIC' },
+          select: {
+            id: true,
+            title: true,
+            eventDate: true,
+            reminderDays: true,
+          },
+        })
+      : Promise.resolve([]),
+    flags.recurring
+      ? prisma.recurringTemplate.findMany({
+          select: {
+            id: true,
+            title: true,
+            nextDueDate: true,
+            reminderDays: true,
+          },
+        })
+      : Promise.resolve([]),
   ])
 
   const candidates: ReminderCandidate[] = []
@@ -256,6 +310,19 @@ export async function collectReminderCandidates(todayYmd = hongKongYmd()): Promi
       targetDate: a.eventDate,
       reminderDays: a.reminderDays,
       hrefPath: '/activities',
+      todayYmd,
+    })
+    if (candidate) candidates.push(candidate)
+  }
+
+  for (const r of recurringTemplates) {
+    const candidate = toCandidate({
+      entityType: 'RECURRING',
+      entityId: r.id,
+      title: r.title,
+      targetDate: normalizeDueDate(r.nextDueDate),
+      reminderDays: r.reminderDays,
+      hrefPath: '/recurring',
       todayYmd,
     })
     if (candidate) candidates.push(candidate)
@@ -408,13 +475,18 @@ export async function maybeSendReminderCatchUp(input: {
   if (input.eligible === false) return null
   if (!isReminderEmailConfigured()) return null
 
+  const flags = await loadPluginFlags()
+  if (input.entityType === 'CONTRACT' && !flags.contracts) return null
+  if (input.entityType === 'ACTIVITY' && !flags.matters) return null
+  if (input.entityType === 'RECURRING' && !flags.recurring) return null
+
   const candidate = toCandidate({
     entityType: input.entityType,
     entityId: input.entityId,
     title: input.title,
     targetDate: input.targetDate,
     reminderDays: input.reminderDays,
-    hrefPath: input.entityType === 'CONTRACT' ? '/contracts' : '/activities',
+    hrefPath: entityHrefPath(input.entityType),
   })
   if (!candidate) return null
 

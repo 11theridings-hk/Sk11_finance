@@ -3,8 +3,8 @@
 import { useState } from 'react'
 import { addActivityAttachment, deleteActivity, updateActivity } from './actions/activity'
 import { createTranslator, type Locale } from '@/lib/i18n'
-import { compressImage, openAttachment, type ClientAttachment } from '@/lib/image'
-import OcrNoteButton from '@/components/OcrNoteButton'
+import { compressImage, openAttachment, prepareAttachment, type ClientAttachment } from '@/lib/image'
+import OcrNoteButton, { type OcrResolvedPayload } from '@/components/OcrNoteButton'
 
 export default function ActivityDetailModal({
   activity,
@@ -32,10 +32,14 @@ export default function ActivityDetailModal({
     if (!file) return
 
     try {
-      const compressed = await compressImage(file, 200)
-      setAttachment(compressed)
+      const prepared = await prepareAttachment(file)
+      setAttachment(prepared)
     } catch {
-      alert(t('imageCompressionFailed'))
+      try {
+        setAttachment(await compressImage(file, 200))
+      } catch {
+        alert(t('imageCompressionFailed'))
+      }
     }
   }
 
@@ -88,8 +92,19 @@ export default function ActivityDetailModal({
     setLoading(false)
   }
 
-  const appendRecognizedText = (recognizedText: string) => {
-    setNote((current: string) => (current.trim() ? `${current.trim()}\n${recognizedText}` : recognizedText))
+  const appendRecognizedText = (payload: OcrResolvedPayload | string) => {
+    if (typeof payload === 'string') {
+      setNote((current: string) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
+      return
+    }
+    if (payload.noteText) {
+      setNote((current: string) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
+    }
+    if (payload.attachmentMemo) {
+      setAttachmentNote((current) =>
+        current.trim() ? `${current.trim()}；${payload.attachmentMemo}` : payload.attachmentMemo
+      )
+    }
   }
 
   const readOnlyFieldClass = 'font-semibold text-gray-900'
@@ -149,7 +164,7 @@ export default function ActivityDetailModal({
             <div className="md:col-span-2">
               <div className="mb-1 text-gray-500">{t('note')}</div>
               {canManage ? (
-                <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={4} className={inputClass} />
+                <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={4} className={inputClass} placeholder={t('noteLongPlaceholder')} />
               ) : (
                 <div className={`${readOnlyFieldClass} whitespace-pre-wrap`}>{activity.note || '-'}</div>
               )}
@@ -185,7 +200,7 @@ export default function ActivityDetailModal({
             </div>
             {canManage && (
               <div className="grid grid-cols-1 gap-3 border-t border-gray-100 pt-3 md:grid-cols-[1fr,1fr,auto]">
-                <input type="file" accept="image/*" onChange={handleAttachmentChange} className="w-full text-sm text-gray-600 file:mr-4 file:rounded-xl file:border-0 file:bg-[#007AFF]/10 file:px-4 file:py-2 file:font-semibold file:text-[#007AFF]" />
+                <input type="file" accept="image/*,application/pdf" onChange={handleAttachmentChange} className="w-full text-sm text-gray-600 file:mr-4 file:rounded-xl file:border-0 file:bg-[#007AFF]/10 file:px-4 file:py-2 file:font-semibold file:text-[#007AFF]" />
                 <input value={attachmentNote} onChange={(e) => setAttachmentNote(e.target.value)} placeholder={t('attachmentNotePlaceholder')} className={inputClass} />
                 <div className="flex flex-col gap-3 md:flex-row">
                   <OcrNoteButton locale={locale} attachment={attachment} context="activity-edit" onResolved={appendRecognizedText} disabled={loading} />

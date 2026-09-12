@@ -6,8 +6,8 @@ import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { createPrivateRecord, updatePrivateLedgerVisibility } from '../actions/private-record'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
-import { compressImage, type ClientAttachment } from '@/lib/image'
-import OcrNoteButton from '@/components/OcrNoteButton'
+import { compressImage, prepareAttachment, type ClientAttachment } from '@/lib/image'
+import OcrNoteButton, { type OcrResolvedPayload } from '@/components/OcrNoteButton'
 import PrivateRecordDetailModal from '../PrivateRecordDetailModal'
 
 type PrivateRecordItem = {
@@ -87,15 +87,33 @@ export default function PrivateLedgerClient({
     const file = event.target.files?.[0]
     if (!file) return
     try {
-      const compressed = await compressImage(file, 200)
-      setAttachment(compressed)
+      const prepared = await prepareAttachment(file)
+      setAttachment(prepared)
     } catch {
-      alert(t('imageCompressionFailed'))
+      try {
+        setAttachment(await compressImage(file, 200))
+      } catch {
+        alert(t('imageCompressionFailed'))
+      }
     }
   }
 
-  const appendRecognizedText = (recognizedText: string) => {
-    setNote((current) => (current.trim() ? `${current.trim()}\n${recognizedText}` : recognizedText))
+  const appendRecognizedText = (payload: OcrResolvedPayload | string) => {
+    if (typeof payload === 'string') {
+      setNote((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
+      return
+    }
+    if (payload.amount != null) {
+      setAmount(String(Math.abs(payload.amount)))
+    }
+    if (payload.noteText) {
+      setNote((current) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
+    }
+    if (payload.attachmentMemo) {
+      setAttachmentNote((current) =>
+        current.trim() ? `${current.trim()}；${payload.attachmentMemo}` : payload.attachmentMemo
+      )
+    }
   }
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -273,11 +291,11 @@ export default function PrivateLedgerClient({
                 </div>
                 <div className="md:col-span-2">
                   <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('noteOptional')}</label>
-                  <input value={note} onChange={(e) => setNote(e.target.value)} className={inputClass} placeholder={t('notePlaceholder')} />
+                  <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={4} className={inputClass} placeholder={t('noteLongPlaceholder')} />
                 </div>
                 <div className="space-y-3 rounded-2xl border border-dashed border-gray-300 bg-white/50 p-4 md:col-span-2">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('attachment')}</label>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('attachment')} <span className="normal-case font-normal">({t('attachmentAcceptHint')})</span></label>
                     <OcrNoteButton
                       locale={locale}
                       attachment={attachment}
@@ -286,7 +304,7 @@ export default function PrivateLedgerClient({
                       disabled={isSubmitting}
                     />
                   </div>
-                  <input type="file" accept="image/*" onChange={handleImageChange} className="w-full text-sm text-gray-600 file:mr-4 file:rounded-xl file:border-0 file:bg-[#007AFF]/10 file:px-5 file:py-2.5 file:text-sm file:font-semibold file:text-[#007AFF]" />
+                  <input type="file" accept="image/*,application/pdf" onChange={handleImageChange} className="w-full text-sm text-gray-600 file:mr-4 file:rounded-xl file:border-0 file:bg-[#007AFF]/10 file:px-5 file:py-2.5 file:text-sm file:font-semibold file:text-[#007AFF]" />
                   <input value={attachmentNote} onChange={(e) => setAttachmentNote(e.target.value)} placeholder={t('attachmentNotePlaceholder')} className={inputClass} />
                 </div>
               </div>

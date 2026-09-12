@@ -7,9 +7,11 @@ import { createTranslator, normalizeLocale } from '@/lib/i18n'
 import { getAISettings } from './settings'
 import {
   fillOcrUserPrompt,
-  formatOcrResultForNote,
+  formatOcrAttachmentMemo,
+  formatOcrKeywordsForNote,
   normalizeOcrResult,
   parseJsonFromText,
+  parseOcrAmount,
   resolveOcrEndpoint,
   type OcrContext,
 } from '@/lib/ocr'
@@ -119,17 +121,22 @@ export async function recognizeAttachmentNote(input: RecognizeAttachmentInput) {
 
       const text = extractAssistantText(payload)
       const parsed = normalizeOcrResult(parseJsonFromText(text))
-      const noteText = formatOcrResultForNote(parsed, locale)
+      const noteLocale = locale === 'en' ? 'en' : 'zh-HK'
+      const noteText = formatOcrKeywordsForNote(parsed, 30)
+      const attachmentMemo = formatOcrAttachmentMemo(parsed, noteLocale, 40)
+      const amount = parseOcrAmount(parsed.amount)
 
       return {
-        success: true,
+        success: true as const,
         noteText,
+        attachmentMemo,
+        amount,
         parsed,
       }
     } finally {
       clearTimeout(timer)
     }
   } catch (error: any) {
-    return { success: false, error: error.message }
+    return { success: false as const, error: error.message }
   }
 }

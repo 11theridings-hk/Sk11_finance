@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { getSession } from '@/app/actions/auth';
 import prisma from '@/lib/prisma';
 import AdminPayrollClient from './AdminPayrollClient';
+import { getPluginFlags } from '@/app/actions/settings';
 import { access } from 'fs';
 
 export const dynamic = 'force-dynamic';
@@ -9,6 +10,9 @@ export const dynamic = 'force-dynamic';
 export default async function AdminPayrollPage() {
   const session = await getSession();
   if (!session?.isAdmin) redirect('/');
+
+  const flags = await getPluginFlags();
+  if (!flags.payroll) redirect('/');
 
   const initialCycles = await prisma.salaryCycle.findMany({
     orderBy: [{ periodStart: 'desc' }, { createdAt: 'desc' }],

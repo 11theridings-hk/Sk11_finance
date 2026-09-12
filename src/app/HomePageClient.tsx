@@ -4,8 +4,8 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { createRecord } from './actions/record'
 import { createCategory } from './actions/category'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
-import { compressImage, type ClientAttachment } from '@/lib/image'
-import OcrNoteButton from '@/components/OcrNoteButton'
+import { compressImage, prepareAttachment, type ClientAttachment } from '@/lib/image'
+import OcrNoteButton, { type OcrResolvedPayload } from '@/components/OcrNoteButton'
 import RecordDetailModal from './RecordDetailModal'
 
 type SessionInfo = {
@@ -127,16 +127,34 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
     const file = e.target.files?.[0]
     if (file) {
       try {
-        const compressed = await compressImage(file, 200)
-        setAttachment(compressed)
+        const prepared = await prepareAttachment(file)
+        setAttachment(prepared)
       } catch {
-        alert(t('imageCompressionFailed'))
+        try {
+          setAttachment(await compressImage(file, 200))
+        } catch {
+          alert(t('imageCompressionFailed'))
+        }
       }
     }
   }
 
-  const appendRecognizedText = (recognizedText: string) => {
-    setNote((current) => (current.trim() ? `${current.trim()}\n${recognizedText}` : recognizedText))
+  const appendRecognizedText = (payload: OcrResolvedPayload | string) => {
+    if (typeof payload === 'string') {
+      setNote((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
+      return
+    }
+    if (payload.amount != null) {
+      setAmount(String(Math.abs(payload.amount)))
+    }
+    if (payload.noteText) {
+      setNote((current) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
+    }
+    if (payload.attachmentMemo) {
+      setAttachmentNote((current) =>
+        current.trim() ? `${current.trim()}；${payload.attachmentMemo}` : payload.attachmentMemo
+      )
+    }
   }
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -384,18 +402,18 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
 
             <div className="md:col-span-2">
               <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('noteOptional')}</label>
-              <input
-                type="text"
+              <textarea
                 value={note}
                 onChange={e => setNote(e.target.value)}
+                rows={4}
                 className={inputClass}
-                placeholder={t('notePlaceholder')}
+                placeholder={t('noteLongPlaceholder')}
               />
             </div>
             
             <div className="md:col-span-2 bg-white/50 p-4 rounded-2xl border border-dashed border-gray-300">
               <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('attachment')} <span className="normal-case font-normal">(image &lt; 200KB)</span></label>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('attachment')} <span className="normal-case font-normal">({t('attachmentAcceptHint')})</span></label>
                 <OcrNoteButton
                   locale={locale}
                   attachment={attachment}
@@ -406,7 +424,7 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
               </div>
               <input
                 type="file"
-                accept="image/*"
+                accept="image/*,application/pdf"
                 onChange={handleImageChange}
                 className="w-full text-sm text-gray-600 file:mr-4 file:py-2.5 file:px-5 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-[#007AFF]/10 file:text-[#007AFF] hover:file:bg-[#007AFF]/20 transition-colors cursor-pointer"
               />

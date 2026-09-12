@@ -8,8 +8,8 @@ import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import JSZip from 'jszip'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
-import { compressImage, type ClientAttachment } from '@/lib/image'
-import OcrNoteButton from '@/components/OcrNoteButton'
+import { compressImage, prepareAttachment, type ClientAttachment } from '@/lib/image'
+import OcrNoteButton, { type OcrResolvedPayload } from '@/components/OcrNoteButton'
 import RecordDetailModal from '../RecordDetailModal'
 
 type Props = {
@@ -189,15 +189,33 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     const file = event.target.files?.[0]
     if (!file) return
     try {
-      const compressed = await compressImage(file, 200)
-      setEditAttachment(compressed)
+      const prepared = await prepareAttachment(file)
+      setEditAttachment(prepared)
     } catch {
-      alert(t('imageCompressionFailed'))
+      try {
+        setEditAttachment(await compressImage(file, 200))
+      } catch {
+        alert(t('imageCompressionFailed'))
+      }
     }
   }
 
-  const appendRecognizedText = (recognizedText: string) => {
-    setEditNote((current) => (current.trim() ? `${current.trim()}\n${recognizedText}` : recognizedText))
+  const appendRecognizedText = (payload: OcrResolvedPayload | string) => {
+    if (typeof payload === 'string') {
+      setEditNote((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
+      return
+    }
+    if (payload.amount != null) {
+      setEditAmount(String(Math.abs(payload.amount)))
+    }
+    if (payload.noteText) {
+      setEditNote((current) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
+    }
+    if (payload.attachmentMemo) {
+      setEditAttachmentNote((current) =>
+        current.trim() ? `${current.trim()}；${payload.attachmentMemo}` : payload.attachmentMemo
+      )
+    }
   }
 
   const handleDeleteRecord = async (recordId: string) => {
@@ -1486,12 +1504,12 @@ export default function ReportClient({ categories, users, pools, locale }: Props
 
                 <div className="md:col-span-2">
                   <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">{t('note')}</label>
-                  <input type="text" value={editNote} onChange={e => setEditNote(e.target.value)} className={inputClass} />
+                  <textarea value={editNote} onChange={e => setEditNote(e.target.value)} rows={4} className={inputClass} placeholder={t('noteLongPlaceholder')} />
                 </div>
 
                 <div className="md:col-span-2 rounded-2xl border border-dashed border-gray-200 p-4 bg-[#F2F2F7]/50">
                   <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <label className="block text-xs font-semibold text-gray-500 uppercase">{t('appendAttachment')}</label>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase">{t('appendAttachment')} <span className="normal-case font-normal">({t('attachmentAcceptHint')})</span></label>
                     <OcrNoteButton
                       locale={locale}
                       attachment={editAttachment}
@@ -1500,7 +1518,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                       disabled={isSubmittingEdit}
                     />
                   </div>
-                  <input type="file" accept="image/*" onChange={handleEditAttachmentChange} className="w-full text-sm text-gray-600 file:mr-4 file:py-2.5 file:px-5 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-[#007AFF]/10 file:text-[#007AFF]" />
+                  <input type="file" accept="image/*,application/pdf" onChange={handleEditAttachmentChange} className="w-full text-sm text-gray-600 file:mr-4 file:py-2.5 file:px-5 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-[#007AFF]/10 file:text-[#007AFF]" />
                   <input type="text" value={editAttachmentNote} onChange={e => setEditAttachmentNote(e.target.value)} placeholder={t('attachmentNotePlaceholder')} className={`${inputClass} mt-3`} />
                 </div>
               </div>

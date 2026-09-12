@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { logout } from './actions/auth'
 import { LOCALE_COOKIE, createTranslator, type Locale } from '@/lib/i18n'
 import { hasPublicLedgerAccess } from '@/lib/access'
+import type { PluginFlags } from '@/lib/plugins'
 import BrandLogo from '@/components/BrandLogo'
 import BrandMark from '@/components/BrandMark'
 
@@ -37,12 +38,16 @@ export default function TopNav({
   pendingCount = 0,
   contractReminderCount = 0,
   activityReminderCount = 0,
+  recurringReminderCount = 0,
+  pluginFlags,
   locale,
 }: {
   session: NavSession | null
   pendingCount?: number
   contractReminderCount?: number
   activityReminderCount?: number
+  recurringReminderCount?: number
+  pluginFlags: PluginFlags
   locale: Locale
 }) {
   const pathname = usePathname()
@@ -57,7 +62,14 @@ export default function TopNav({
   }
 
   primaryNavItems.push({ name: t('privateLedger'), href: '/private-ledger' })
-  primaryNavItems.push({ name: t('activities'), href: '/activities', count: activityReminderCount })
+
+  if (pluginFlags.matters) {
+    primaryNavItems.push({ name: t('activities'), href: '/activities', count: activityReminderCount })
+  }
+
+  if (hasPublicLedgerAccess(session) && pluginFlags.recurring) {
+    primaryNavItems.push({ name: t('recurring'), href: '/recurring', count: recurringReminderCount })
+  }
 
   if (session) {
     primaryNavItems.push({ name: t('personalProfile'), href: `/my-profile/${session.userId}` })
@@ -67,9 +79,13 @@ export default function TopNav({
 
   if (session?.isAdmin) {
     secondaryNavItems.push({ name: t('review'), href: '/review', count: pendingCount })
-    secondaryNavItems.push({ name: t('contracts'), href: '/contracts', count: contractReminderCount })
+    if (pluginFlags.contracts) {
+      secondaryNavItems.push({ name: t('contracts'), href: '/contracts', count: contractReminderCount })
+    }
     secondaryNavItems.push({ name: t('report'), href: '/report' })
-    secondaryNavItems.push({ name: t('payroll'), href: '/admin/payroll' })
+    if (pluginFlags.payroll) {
+      secondaryNavItems.push({ name: t('payroll'), href: '/admin/payroll' })
+    }
     secondaryNavItems.push({ name: t('admin'), href: '/admin' })
   }
 

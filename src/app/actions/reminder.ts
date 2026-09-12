@@ -2,6 +2,8 @@
 
 import prisma from '@/lib/prisma'
 import { getSession } from './auth'
+import { getPluginFlags } from './settings'
+import { getRecurringReminderItems } from './recurring'
 
 export type ReminderBucket = 'overdue' | 'today' | 'upcoming'
 
@@ -50,6 +52,9 @@ export async function getContractReminderItems() {
     const session = await getSession()
     if (!session?.isAdmin) return []
 
+    const flags = await getPluginFlags()
+    if (!flags.contracts) return []
+
     const contracts = await prisma.contract.findMany({
       orderBy: [{ expiryDate: 'asc' }, { createdAt: 'desc' }],
       select: {
@@ -91,6 +96,9 @@ export async function getActivityReminderItems() {
     const session = await getSession()
     if (!session) return []
 
+    const flags = await getPluginFlags()
+    if (!flags.matters) return []
+
     const activities = await prisma.activity.findMany({
       where: {
         OR: [{ visibility: 'PUBLIC' }, { userId: session.userId }],
@@ -131,18 +139,29 @@ export async function getActivityReminderItems() {
 
 export async function getReminderOverview() {
   try {
-    const [contracts, activities] = await Promise.all([
-      getContractReminderItems(),
-      getActivityReminderItems(),
+    const flags = await getPluginFlags()
+    const [contracts, activities, recurring] = await Promise.all([
+      flags.contracts ? getContractReminderItems() : Promise.resolve([] as ReminderItem[]),
+      flags.matters ? getActivityReminderItems() : Promise.resolve([] as ReminderItem[]),
+      flags.recurring ? getRecurringReminderItems() : Promise.resolve([] as ReminderItem[]),
     ])
 
     return {
       contracts,
       activities,
+      recurring: recurring as ReminderItem[],
       contractCount: contracts.length,
       activityCount: activities.length,
+      recurringCount: (recurring as ReminderItem[]).length,
     }
   } catch (_e) {
-    return { contracts: [], activities: [], contractCount: 0, activityCount: 0 }
+    return {
+      contracts: [],
+      activities: [],
+      recurring: [],
+      contractCount: 0,
+      activityCount: 0,
+      recurringCount: 0,
+    }
   }
 }

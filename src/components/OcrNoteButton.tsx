@@ -4,14 +4,23 @@ import { useState } from 'react'
 import { recognizeAttachmentNote } from '@/app/actions/ocr'
 import type { ClientAttachment } from '@/lib/image'
 import { createTranslator, type Locale } from '@/lib/i18n'
-import type { OcrContext } from '@/lib/ocr'
+import type { OcrContext, OcrParsedResult } from '@/lib/ocr'
+
+export type OcrResolvedPayload = {
+  /** Short keywords for record note (≤30 chars) */
+  noteText: string
+  /** Document type memo for attachment note */
+  attachmentMemo: string
+  amount: number | null
+  parsed: OcrParsedResult | null
+}
 
 type Props = {
   locale: Locale
   attachment: ClientAttachment | null
   context: OcrContext
   disabled?: boolean
-  onResolved: (noteText: string) => void
+  onResolved: (payload: OcrResolvedPayload | string) => void
 }
 
 export default function OcrNoteButton({
@@ -37,7 +46,13 @@ export default function OcrNoteButton({
     })
 
     if (result.success) {
-      onResolved(result.noteText || '')
+      const payload: OcrResolvedPayload = {
+        noteText: result.noteText || '',
+        attachmentMemo: result.attachmentMemo || '',
+        amount: result.amount ?? null,
+        parsed: result.parsed || null,
+      }
+      onResolved(payload)
       alert(t('ocrFilledNote'))
     } else {
       alert(`${t('ocrActionLabel')}: ${result.error}`)

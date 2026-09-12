@@ -40,6 +40,8 @@ model User {
   payrollsSubmitted Payroll[]    @relation("AdminSubmittedPayrolls")
   payrollsPaid   Payroll[]       @relation("AdminPaidPayrolls")
   salaryCyclesCreated SalaryCycle[] @relation("AdminCreatedCycles")
+  recurringTemplates RecurringTemplate[] @relation("UserRecurringTemplates")
+  recurringInstances RecurringInstance[] @relation("UserRecurringInstances")
 }
 
 model Category {
@@ -63,6 +65,9 @@ model Category {
   subContracts   Contract[]   @relation("SubCategoryContracts")
   thirdContracts Contract[]   @relation("ThirdCategoryContracts")
   attachments    Attachment[] @relation("CategoryAttachments")
+  recurringTemplates RecurringTemplate[] @relation("CategoryRecurringTemplates")
+  subRecurringTemplates RecurringTemplate[] @relation("SubCategoryRecurringTemplates")
+  thirdRecurringTemplates RecurringTemplate[] @relation("ThirdCategoryRecurringTemplates")
 }
 
 model CapitalPool {
@@ -78,6 +83,7 @@ model CapitalPool {
   user      User?      @relation("UserCapitalPools", fields: [userId], references: [id])
   records   Record[]   @relation("CapitalPoolRecords")
   contracts Contract[] @relation("CapitalPoolContracts")
+  recurringTemplates RecurringTemplate[] @relation("CapitalPoolRecurringTemplates")
 }
 
 model Record {
@@ -203,6 +209,7 @@ model Attachment {
   activityId String?
   payrollPaidId String? @unique
   payrollPdfId  String? @unique
+  recurringInstanceId String?
 
   // 关系
   uploader      User          @relation("UserAttachments", fields: [uploaderId], references: [id])
@@ -213,6 +220,7 @@ model Attachment {
   activity      Activity?     @relation("ActivityAttachments", fields: [activityId], references: [id])
   payrollPaid   Payroll?      @relation("PaidReceiptAttachments", fields: [payrollPaidId], references: [id])
   payrollPdf    Payroll?      @relation("PdfPayrollAttachments", fields: [payrollPdfId], references: [id])
+  recurringInstance RecurringInstance? @relation("RecurringInstanceAttachments", fields: [recurringInstanceId], references: [id])
 }
 
 model Memo {
@@ -242,7 +250,7 @@ model SystemSetting {
 
 model ReminderEmailLog {
   id         String   @id @default(uuid())
-  entityType String // CONTRACT | ACTIVITY
+  entityType String // CONTRACT | ACTIVITY | RECURRING
   entityId   String
   kind       String // advance | d5 | due | overdue_1 | overdue_7 | overdue_30 | combined
   anchorDate String // YYYY-MM-DD of target date
@@ -384,3 +392,53 @@ model PayrollItem {
   payroll Payroll @relation(fields: [payrollId], references: [id], onDelete: Cascade)
 }
 
+
+
+model RecurringTemplate {
+  id              String   @id @default(uuid())
+  type            String // INCOME | EXPENSE
+  title           String
+  note            String?
+  amount          Float
+  intervalMonths  Int      @default(1) // every N months
+  dayOfMonth      Int // preferred day; clamped to month end
+  nextDueDate     DateTime
+  reminderDays    Int      @default(15)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  userId          String
+  categoryId      String
+  subCategoryId   String?
+  thirdCategoryId String?
+  poolId          String?
+  sourceContractId String?
+
+  user          User         @relation("UserRecurringTemplates", fields: [userId], references: [id])
+  category      Category     @relation("CategoryRecurringTemplates", fields: [categoryId], references: [id])
+  subCategory   Category?    @relation("SubCategoryRecurringTemplates", fields: [subCategoryId], references: [id])
+  thirdCategory Category?    @relation("ThirdCategoryRecurringTemplates", fields: [thirdCategoryId], references: [id])
+  pool          CapitalPool? @relation("CapitalPoolRecurringTemplates", fields: [poolId], references: [id])
+  instances     RecurringInstance[]
+}
+
+model RecurringInstance {
+  id           String   @id @default(uuid())
+  dueDate      DateTime
+  status       String   @default("OPEN") // OPEN | CONVERTED | SKIPPED
+  amount       Float?
+  note         String?
+  processedAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  templateId String
+  userId     String
+
+  template    RecurringTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  user        User              @relation("UserRecurringInstances", fields: [userId], references: [id])
+  attachments Attachment[]      @relation("RecurringInstanceAttachments")
+
+  @@unique([templateId, dueDate])
+  @@index([status, dueDate])
+}

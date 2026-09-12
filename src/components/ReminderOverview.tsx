@@ -6,6 +6,7 @@ type Props = {
   locale: Locale
   contracts: ReminderItem[]
   activities: ReminderItem[]
+  recurring?: ReminderItem[]
 }
 
 function formatBadgeText(item: ReminderItem, locale: Locale) {
@@ -53,10 +54,10 @@ function Section({
   )
 }
 
-export default function ReminderOverview({ locale, contracts, activities }: Props) {
+export default function ReminderOverview({ locale, contracts, activities, recurring = [] }: Props) {
   const t = createTranslator(locale)
 
-  if (contracts.length === 0 && activities.length === 0) {
+  if (contracts.length === 0 && activities.length === 0 && recurring.length === 0) {
     return null
   }
 
@@ -64,6 +65,7 @@ export default function ReminderOverview({ locale, contracts, activities }: Prop
     <div className="mx-auto mt-4 grid max-w-4xl grid-cols-1 gap-3 px-4 sm:px-0 md:grid-cols-2">
       <Section title={t('contractExpiryReminder')} href="/contracts" items={contracts} locale={locale} />
       <Section title={t('activityReminder')} href="/activities" items={activities} locale={locale} />
+      <Section title={t('recurring')} href="/recurring" items={recurring} locale={locale} />
     </div>
   )
 }

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { addContractAttachment, addContractMemo, deleteContract, updateContract } from './actions/contract'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
-import { compressImage, openAttachment, type ClientAttachment } from '@/lib/image'
+import { compressImage, openAttachment, prepareAttachment, type ClientAttachment } from '@/lib/image'
 
 export default function ContractDetailModal({
   contract,
@@ -41,10 +41,14 @@ export default function ContractDetailModal({
     if (!file) return
 
     try {
-      const compressed = await compressImage(file, 200)
-      setAttachment(compressed)
+      const prepared = await prepareAttachment(file)
+      setAttachment(prepared)
     } catch {
-      alert(t('imageCompressionFailed'))
+      try {
+        setAttachment(await compressImage(file, 200))
+      } catch {
+        alert(t('imageCompressionFailed'))
+      }
     }
   }
 
@@ -275,7 +279,7 @@ export default function ContractDetailModal({
               )}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-[1fr,1fr,auto] gap-3 pt-3 border-t border-gray-100">
-              <input type="file" accept="image/*" onChange={handleAttachmentChange} className="w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:font-semibold file:bg-[#007AFF]/10 file:text-[#007AFF]" />
+              <input type="file" accept="image/*,application/pdf" onChange={handleAttachmentChange} className="w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:font-semibold file:bg-[#007AFF]/10 file:text-[#007AFF]" />
               <input value={attachmentNote} onChange={(e) => setAttachmentNote(e.target.value)} placeholder={t('attachmentNotePlaceholder')} className="w-full rounded-xl bg-[#F2F2F7] px-3 py-3 text-sm text-gray-900 outline-none" />
               <button onClick={handleAppendAttachment} disabled={loading || !attachment} className="px-5 py-3 bg-[#007AFF] text-white rounded-xl font-semibold disabled:opacity-50">
                 {t('appendAttachment')}

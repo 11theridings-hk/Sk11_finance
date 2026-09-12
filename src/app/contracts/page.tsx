@@ -5,6 +5,7 @@ import { getContracts } from '../actions/contract'
 import ContractsClient from './ContractsClient'
 import { getCurrentLocale } from '@/lib/locale'
 import { getDefaultHomePath } from '@/lib/access'
+import { getPluginFlags } from '../actions/settings'
 
 export const metadata = {
   title: 'Contracts',
@@ -17,6 +18,11 @@ export default async function ContractsPage() {
   }
   if (!session.isAdmin) {
     redirect(getDefaultHomePath(session))
+  }
+
+  const flags = await getPluginFlags()
+  if (!flags.contracts) {
+    redirect('/')
   }
 
   const locale = await getCurrentLocale()

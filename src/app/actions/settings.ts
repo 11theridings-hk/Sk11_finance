@@ -10,6 +10,12 @@ import {
   DEFAULT_OCR_USER_PROMPT,
   OCR_SETTING_KEYS,
 } from '@/lib/ocr'
+import {
+  DEFAULT_PLUGIN_FLAGS,
+  PLUGIN_SETTING_KEYS,
+  type PluginFlags,
+  type PluginId,
+} from '@/lib/plugins'
 
 export type AISettings = {
   enabled: boolean
@@ -82,6 +88,51 @@ export async function updateAISettings(input: AISettings) {
     )
 
     revalidatePath('/admin')
+    return { success: true }
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
+}
+
+export async function getPluginFlags(): Promise<PluginFlags> {
+  const settings = await prisma.systemSetting.findMany({
+    where: { key: { in: Object.values(PLUGIN_SETTING_KEYS) } },
+  })
+  const map = new Map(settings.map((item) => [item.key, item.value]))
+  const flags = { ...DEFAULT_PLUGIN_FLAGS }
+  ;(Object.keys(PLUGIN_SETTING_KEYS) as PluginId[]).forEach((id) => {
+    const key = PLUGIN_SETTING_KEYS[id]
+    if (map.has(key)) {
+      flags[id] = map.get(key) === 'true'
+    }
+  })
+  return flags
+}
+
+export async function updatePluginFlags(input: PluginFlags) {
+  try {
+    await assertAdmin()
+    const entries = (Object.keys(PLUGIN_SETTING_KEYS) as PluginId[]).map((id) => [
+      PLUGIN_SETTING_KEYS[id],
+      String(Boolean(input[id])),
+    ] as [string, string])
+
+    await prisma.$transaction(
+      entries.map(([key, value]) =>
+        prisma.systemSetting.upsert({
+          where: { key },
+          update: { value },
+          create: { key, value },
+        })
+      )
+    )
+
+    revalidatePath('/')
+    revalidatePath('/admin')
+    revalidatePath('/activities')
+    revalidatePath('/contracts')
+    revalidatePath('/admin/payroll')
+    revalidatePath('/recurring')
     return { success: true }
   } catch (error: any) {
     return { success: false, error: error.message }
