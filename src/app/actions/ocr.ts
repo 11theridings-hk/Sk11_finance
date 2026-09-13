@@ -122,8 +122,8 @@ export async function recognizeAttachmentNote(input: RecognizeAttachmentInput) {
       const text = extractAssistantText(payload)
       const parsed = normalizeOcrResult(parseJsonFromText(text))
       const noteLocale = locale === 'en' ? 'en' : 'zh-HK'
-      const noteText = formatOcrKeywordsForNote(parsed, 30)
-      const attachmentMemo = formatOcrAttachmentMemo(parsed, noteLocale, 40)
+      const noteText = formatOcrKeywordsForNote(parsed, 80)
+      const attachmentMemo = formatOcrAttachmentMemo(parsed, noteLocale, 12)
       const amount = parseOcrAmount(parsed.amount)
 
       return {

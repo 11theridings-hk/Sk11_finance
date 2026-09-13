@@ -7,9 +7,9 @@ import { createTranslator, type Locale } from '@/lib/i18n'
 import type { OcrContext, OcrParsedResult } from '@/lib/ocr'
 
 export type OcrResolvedPayload = {
-  /** Short keywords for record note (≤30 chars) */
+  /** Company / order / summary / keywords for record note (~80 chars) */
   noteText: string
-  /** Document type memo for attachment note */
+  /** Short document type only for attachment note (replace, never append) */
   attachmentMemo: string
   amount: number | null
   parsed: OcrParsedResult | null

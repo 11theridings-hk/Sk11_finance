@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { addContractAttachment, addContractMemo, deleteContract, updateContract } from './actions/contract'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
-import { compressImage, openAttachment, prepareAttachment, type ClientAttachment } from '@/lib/image'
+import { compressImage, MAX_PDF_PAGES, openAttachment, prepareAttachments, type ClientAttachment } from '@/lib/image'
 
 export default function ContractDetailModal({
   contract,
@@ -31,7 +31,8 @@ export default function ContractDetailModal({
   const [amount, setAmount] = useState(String(Math.abs(Number(contract.amount) || 0)))
   const [poolId, setPoolId] = useState(contract.poolId || '')
   const [note, setNote] = useState(contract.note || '')
-  const [attachment, setAttachment] = useState<ClientAttachment | null>(null)
+  const [attachments, setAttachments] = useState<ClientAttachment[]>([])
+  const [ocrAttachmentIndex, setOcrAttachmentIndex] = useState(0)
   const [attachmentNote, setAttachmentNote] = useState('')
   const [memoContent, setMemoContent] = useState('')
   const [loading, setLoading] = useState(false)
@@ -41,15 +42,38 @@ export default function ContractDetailModal({
     if (!file) return
 
     try {
-      const prepared = await prepareAttachment(file)
-      setAttachment(prepared)
+      const result = await prepareAttachments(file)
+      if (result.truncated) {
+        alert(
+          t('pdfPagesTruncated')
+            .replace('{{total}}', String(result.totalPages))
+            .replace('{{max}}', String(MAX_PDF_PAGES))
+        )
+      }
+      setAttachments(result.attachments)
+      setOcrAttachmentIndex(0)
+      setAttachmentNote(result.attachments[0]?.note || '')
     } catch {
       try {
-        setAttachment(await compressImage(file, 200))
+        const fallback = await compressImage(file, 200)
+        setAttachments([fallback])
+        setOcrAttachmentIndex(0)
+        setAttachmentNote(fallback.note || '')
       } catch {
         alert(t('imageCompressionFailed'))
       }
     }
+  }
+
+  const removeAttachmentAt = (index: number) => {
+    const next = attachments.filter((_, i) => i !== index)
+    let nextOcr = ocrAttachmentIndex
+    if (index < ocrAttachmentIndex) nextOcr = ocrAttachmentIndex - 1
+    else if (index === ocrAttachmentIndex) nextOcr = 0
+    nextOcr = Math.min(nextOcr, Math.max(0, next.length - 1))
+    setAttachments(next)
+    setOcrAttachmentIndex(nextOcr)
+    setAttachmentNote(next[nextOcr]?.note || '')
   }
 
   const handleSave = async () => {
@@ -82,18 +106,21 @@ export default function ContractDetailModal({
   }
 
   const handleAppendAttachment = async () => {
-    if (!attachment) return
+    if (attachments.length === 0) return
     setLoading(true)
-    const res = await addContractAttachment(contract.id, {
-      ...attachment,
-      note: attachmentNote || undefined,
-    })
-    if (res.success) {
-      window.location.reload()
-      return
+    for (const page of attachments) {
+      const res = await addContractAttachment(contract.id, {
+        url: page.url,
+        size: page.size,
+        note: page.note || attachmentNote || undefined,
+      })
+      if (!res.success) {
+        alert(res.error)
+        setLoading(false)
+        return
+      }
     }
-    alert(res.error)
-    setLoading(false)
+    window.location.reload()
   }
 
   const handleAddMemo = async () => {
@@ -278,12 +305,71 @@ export default function ContractDetailModal({
                 ))
               )}
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-[1fr,1fr,auto] gap-3 pt-3 border-t border-gray-100">
-              <input type="file" accept="image/*,application/pdf" onChange={handleAttachmentChange} className="w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:font-semibold file:bg-[#007AFF]/10 file:text-[#007AFF]" />
-              <input value={attachmentNote} onChange={(e) => setAttachmentNote(e.target.value)} placeholder={t('attachmentNotePlaceholder')} className="w-full rounded-xl bg-[#F2F2F7] px-3 py-3 text-sm text-gray-900 outline-none" />
-              <button onClick={handleAppendAttachment} disabled={loading || !attachment} className="px-5 py-3 bg-[#007AFF] text-white rounded-xl font-semibold disabled:opacity-50">
+            <div className="grid grid-cols-1 gap-3 border-t border-gray-100 pt-3 md:grid-cols-[1fr,1fr,auto]">
+              <input type="file" accept="image/*,application/pdf" onChange={handleAttachmentChange} className="w-full text-sm text-gray-600 file:mr-4 file:rounded-xl file:border-0 file:bg-[#007AFF]/10 file:px-4 file:py-2 file:font-semibold file:text-[#007AFF]" />
+              <input
+                value={attachmentNote}
+                onChange={(e) => {
+                  const value = e.target.value
+                  setAttachmentNote(value)
+                  setAttachments((prev) =>
+                    prev.map((item, index) =>
+                      index === (attachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0)
+                        ? { ...item, note: value }
+                        : item
+                    )
+                  )
+                }}
+                placeholder={t('attachmentTypePlaceholder')}
+                className="w-full rounded-xl bg-[#F2F2F7] px-3 py-3 text-sm text-gray-900 outline-none"
+              />
+              <button onClick={handleAppendAttachment} disabled={loading || attachments.length === 0} className="px-5 py-3 bg-[#007AFF] text-white rounded-xl font-semibold disabled:opacity-50">
                 {t('appendAttachment')}
               </button>
+              {attachments.length > 0 && (
+                <div className="md:col-span-3 space-y-2">
+                  {attachments.length > 1 && (
+                    <div className="text-xs font-medium text-[#007AFF]">
+                      {t('pdfPagesReady').replace('{{count}}', String(attachments.length))}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {attachments.map((item, index) => (
+                      <div
+                        key={`${item.size}-${index}-${item.pageIndex || 0}`}
+                        className={`relative rounded-lg border p-1 ${
+                          index === ocrAttachmentIndex ? 'border-[#007AFF] ring-2 ring-[#007AFF]/20' : 'border-gray-200'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOcrAttachmentIndex(index)
+                            setAttachmentNote(item.note || '')
+                          }}
+                          className="block"
+                        >
+                          <img src={item.url} alt="" className="h-16 w-16 rounded object-cover" />
+                          {(item.pageIndex || attachments.length > 1) && (
+                            <div className="mt-0.5 text-center text-[10px] text-gray-500">
+                              {item.pageIndex ?? index + 1}
+                            </div>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeAttachmentAt(index)}
+                          className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-gray-800 text-[10px] leading-none text-white"
+                          aria-label={t('delete')}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-400">({t('attachmentAcceptHint')})</p>
+                </div>
+              )}
             </div>
           </div>
 

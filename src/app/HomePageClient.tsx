@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { createRecord } from './actions/record'
 import { createCategory } from './actions/category'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
-import { compressImage, prepareAttachment, type ClientAttachment } from '@/lib/image'
+import { compressImage, MAX_PDF_PAGES, prepareAttachments, type ClientAttachment } from '@/lib/image'
 import OcrNoteButton, { type OcrResolvedPayload } from '@/components/OcrNoteButton'
 import RecordDetailModal from './RecordDetailModal'
 
@@ -86,7 +86,8 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
   const [thirdCategoryId, setThirdCategoryId] = useState('')
   const [amount, setAmount] = useState('')
   const [poolId, setPoolId] = useState('')
-  const [attachment, setAttachment] = useState<ClientAttachment | null>(null)
+  const [attachments, setAttachments] = useState<ClientAttachment[]>([])
+  const [ocrAttachmentIndex, setOcrAttachmentIndex] = useState(0)
   const [attachmentNote, setAttachmentNote] = useState('')
   const [note, setNote] = useState('')
 
@@ -125,18 +126,40 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
 
   const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (file) {
+    if (!file) return
+    try {
+      const result = await prepareAttachments(file)
+      if (result.truncated) {
+        alert(
+          t('pdfPagesTruncated')
+            .replace('{{total}}', String(result.totalPages))
+            .replace('{{max}}', String(MAX_PDF_PAGES))
+        )
+      }
+      setAttachments(result.attachments)
+      setOcrAttachmentIndex(0)
+      setAttachmentNote(result.attachments[0]?.note || '')
+    } catch {
       try {
-        const prepared = await prepareAttachment(file)
-        setAttachment(prepared)
+        const fallback = await compressImage(file, 200)
+        setAttachments([fallback])
+        setOcrAttachmentIndex(0)
+        setAttachmentNote(fallback.note || '')
       } catch {
-        try {
-          setAttachment(await compressImage(file, 200))
-        } catch {
-          alert(t('imageCompressionFailed'))
-        }
+        alert(t('imageCompressionFailed'))
       }
     }
+  }
+
+  const removeAttachmentAt = (index: number) => {
+    const next = attachments.filter((_, i) => i !== index)
+    let nextOcr = ocrAttachmentIndex
+    if (index < ocrAttachmentIndex) nextOcr = ocrAttachmentIndex - 1
+    else if (index === ocrAttachmentIndex) nextOcr = 0
+    nextOcr = Math.min(nextOcr, Math.max(0, next.length - 1))
+    setAttachments(next)
+    setOcrAttachmentIndex(nextOcr)
+    setAttachmentNote(next[nextOcr]?.note || '')
   }
 
   const appendRecognizedText = (payload: OcrResolvedPayload | string) => {
@@ -151,8 +174,10 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
       setNote((current) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
     }
     if (payload.attachmentMemo) {
-      setAttachmentNote((current) =>
-        current.trim() ? `${current.trim()}；${payload.attachmentMemo}` : payload.attachmentMemo
+      const ocrIndex = attachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0
+      setAttachmentNote(payload.attachmentMemo)
+      setAttachments((prev) =>
+        prev.map((item, index) => (index === ocrIndex ? { ...item, note: payload.attachmentMemo } : item))
       )
     }
   }
@@ -193,7 +218,14 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
       subCategoryId: subCategoryId || undefined,
       thirdCategoryId: thirdCategoryId || undefined,
       poolId,
-      attachment: attachment ? { ...attachment, note: attachmentNote || undefined } : undefined,
+      attachments:
+        attachments.length > 0
+          ? attachments.map((a) => ({
+              url: a.url,
+              size: a.size,
+              note: a.note || attachmentNote || undefined,
+            }))
+          : undefined,
     })
 
     if (res.success) {
@@ -203,7 +235,7 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
       alert(`${t('submitFailed')}: ${res.error}`)
       setIsSubmitting(false)
     }
-  }, [amount, attachment, attachmentNote, categoryId, date, note, poolId, subCategoryId, t, thirdCategoryId, type])
+  }, [amount, attachments, attachmentNote, categoryId, date, note, poolId, subCategoryId, t, thirdCategoryId, type])
 
   useEffect(() => {
     if (!showConfirmDialog || countdown <= 0) {
@@ -416,7 +448,7 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('attachment')} <span className="normal-case font-normal">({t('attachmentAcceptHint')})</span></label>
                 <OcrNoteButton
                   locale={locale}
-                  attachment={attachment}
+                  attachment={attachments[ocrAttachmentIndex] || attachments[0] || null}
                   context="public-record"
                   onResolved={appendRecognizedText}
                   disabled={isSubmitting || countdown > 0}
@@ -431,14 +463,68 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
               <input
                 type="text"
                 value={attachmentNote}
-                onChange={e => setAttachmentNote(e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value
+                  setAttachmentNote(value)
+                  setAttachments((prev) =>
+                    prev.map((item, index) =>
+                      index === (attachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0)
+                        ? { ...item, note: value }
+                        : item
+                    )
+                  )
+                }}
                 className={`${inputClass} mt-3`}
-                placeholder={t('attachmentNotePlaceholder')}
+                placeholder={t('attachmentTypePlaceholder')}
               />
-              {attachment && (
-                <div className="mt-3 flex items-center space-x-2 text-xs font-medium text-[#34C759] bg-[#34C759]/10 p-2 rounded-lg w-fit">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
-                  <span>{t('imageCompressed')}: {(attachment.size / 1024).toFixed(1)} KB</span>
+              {attachments.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  {attachments.length > 1 && (
+                    <div className="text-xs font-medium text-[#007AFF]">
+                      {t('pdfPagesReady').replace('{{count}}', String(attachments.length))}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {attachments.map((item, index) => (
+                      <div
+                        key={`${item.size}-${index}-${item.pageIndex || 0}`}
+                        className={`relative rounded-lg border p-1 ${
+                          index === ocrAttachmentIndex ? 'border-[#007AFF] ring-2 ring-[#007AFF]/20' : 'border-gray-200'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOcrAttachmentIndex(index)
+                            setAttachmentNote(item.note || '')
+                          }}
+                          className="block"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={item.url} alt="" className="h-16 w-16 rounded object-cover" />
+                          {(item.pageIndex || attachments.length > 1) && (
+                            <div className="mt-0.5 text-center text-[10px] text-gray-500">
+                              {item.pageIndex ?? index + 1}
+                            </div>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeAttachmentAt(index)}
+                          className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-gray-800 text-[10px] leading-none text-white"
+                          aria-label={t('delete')}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  {attachments.length === 1 && (
+                    <div className="flex w-fit items-center space-x-2 rounded-lg bg-[#34C759]/10 p-2 text-xs font-medium text-[#34C759]">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                      <span>{t('imageCompressed')}: {(attachments[0].size / 1024).toFixed(1)} KB</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

@@ -23,6 +23,7 @@ export type CreatePrivateRecordInput = {
   subCategoryId?: string
   thirdCategoryId?: string
   attachment?: AttachmentPayload
+  attachments?: AttachmentPayload[]
 }
 
 function getDeepestCategoryId(data: {
@@ -222,14 +223,21 @@ export async function createPrivateRecord(data: CreatePrivateRecordInput) {
       const resolvedSubCategoryId = data.categoryId ? data.subCategoryId : undefined
       const resolvedThirdCategoryId = data.categoryId ? data.thirdCategoryId : undefined
 
-            const created = await tx.privateRecord.create({
+      const attachmentList =
+        data.attachments && data.attachments.length > 0
+          ? data.attachments
+          : data.attachment
+            ? [data.attachment]
+            : []
+
+      const created = await tx.privateRecord.create({
         data: {
           type: data.type,
           date: data.date,
           note: data.note,
           customCategory: customCategory || null,
           amount: data.amount,
-          attachmentUrl: data.attachment?.url,
+          attachmentUrl: attachmentList[0]?.url,
           categoryId: resolvedCategoryId,
           subCategoryId: resolvedSubCategoryId,
           thirdCategoryId: resolvedThirdCategoryId,
@@ -237,12 +245,12 @@ export async function createPrivateRecord(data: CreatePrivateRecordInput) {
         },
       })
 
-      if (data.attachment) {
+      for (const item of attachmentList) {
         await tx.attachment.create({
           data: {
-            fileUrl: data.attachment.url,
-            size: data.attachment.size,
-            note: data.attachment.note,
+            fileUrl: item.url,
+            size: item.size,
+            note: item.note,
             uploaderId: session.userId,
             categoryId: getDeepestCategoryId({
               categoryId: resolvedCategoryId,

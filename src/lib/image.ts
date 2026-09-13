@@ -2,6 +2,16 @@ export type ClientAttachment = {
   url: string
   size: number
   note?: string
+  /** 1-based page index when split from a PDF */
+  pageIndex?: number
+}
+
+export const MAX_PDF_PAGES = 5
+
+export type PrepareAttachmentsResult = {
+  attachments: ClientAttachment[]
+  truncated: boolean
+  totalPages: number
 }
 
 /** Open attachment in a new tab. data: URLs cannot be top-level navigated in modern browsers. */
@@ -55,7 +65,10 @@ function canvasToWebp(canvas: HTMLCanvasElement, quality: number) {
   }
 }
 
-function drawImageToCanvas(img: CanvasImageSource & { width: number; height: number }, maxDim = WEBP_MAX_DIM) {
+function drawImageToCanvas(
+  img: CanvasImageSource & { width: number; height: number },
+  maxDim = WEBP_MAX_DIM
+) {
   let width = Number(img.width)
   let height = Number(img.height)
   if (width > maxDim || height > maxDim) {
@@ -113,13 +126,11 @@ export function compressImage(file: File, _maxSizeKB: number = 200): Promise<Cli
   })
 }
 
-async function renderPdfFirstPageToCanvas(file: File): Promise<HTMLCanvasElement> {
-  const pdfjs = await import('pdfjs-dist')
-  pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
-
-  const data = new Uint8Array(await file.arrayBuffer())
-  const pdf = await pdfjs.getDocument({ data }).promise
-  const page = await pdf.getPage(1)
+async function renderPdfPageToAttachment(
+  pdf: any,
+  pageNumber: number
+): Promise<ClientAttachment> {
+  const page = await pdf.getPage(pageNumber)
   const viewport = page.getViewport({ scale: 2 })
   const canvas = document.createElement('canvas')
   const ctx = canvas.getContext('2d')
@@ -130,24 +141,56 @@ async function renderPdfFirstPageToCanvas(file: File): Promise<HTMLCanvasElement
 
   const bitmap = await createImageBitmap(canvas)
   try {
-    return drawImageToCanvas(bitmap as any)
+    const scaled = drawImageToCanvas(bitmap as any)
+    return {
+      ...encodeCanvasToTargetSize(scaled),
+      pageIndex: pageNumber,
+      note: `p.${pageNumber}`,
+    }
   } finally {
     bitmap.close()
   }
 }
 
-/** Prepare image or PDF attachment: always store processed WebP data URL. */
-export async function prepareAttachment(file: File): Promise<ClientAttachment> {
+async function renderPdfToAttachments(file: File): Promise<PrepareAttachmentsResult> {
+  const pdfjs = await import('pdfjs-dist')
+  pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
+
+  const data = new Uint8Array(await file.arrayBuffer())
+  const pdf = await pdfjs.getDocument({ data }).promise
+  const totalPages = pdf.numPages || 1
+  const pageCount = Math.min(totalPages, MAX_PDF_PAGES)
+  const attachments: ClientAttachment[] = []
+
+  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+    attachments.push(await renderPdfPageToAttachment(pdf, pageNumber))
+  }
+
+  return {
+    attachments,
+    truncated: totalPages > MAX_PDF_PAGES,
+    totalPages,
+  }
+}
+
+/** Prepare image or multi-page PDF → one or more WebP attachments (PDF capped at MAX_PDF_PAGES). */
+export async function prepareAttachments(file: File): Promise<PrepareAttachmentsResult> {
   const isPdf =
     file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
   if (isPdf) {
-    const canvas = await renderPdfFirstPageToCanvas(file)
-    return encodeCanvasToTargetSize(canvas)
+    return renderPdfToAttachments(file)
   }
   if (!file.type.startsWith('image/')) {
     throw new Error('Unsupported attachment type')
   }
-  return compressImage(file)
+  const attachment = await compressImage(file)
+  return { attachments: [attachment], truncated: false, totalPages: 1 }
+}
+
+/** @deprecated prefer prepareAttachments for PDF multi-page support */
+export async function prepareAttachment(file: File): Promise<ClientAttachment> {
+  const result = await prepareAttachments(file)
+  return result.attachments[0]
 }
 
 export const compressImageOrPdf = prepareAttachment

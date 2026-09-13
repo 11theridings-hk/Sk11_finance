@@ -1,9 +1,9 @@
 'use client'
 
 import React, { useMemo, useState } from 'react'
-import { createContract } from '../actions/contract'
+import { createContract, addContractAttachment } from '../actions/contract'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
-import { compressImage, prepareAttachment, type ClientAttachment } from '@/lib/image'
+import { compressImage, MAX_PDF_PAGES, prepareAttachments, type ClientAttachment } from '@/lib/image'
 import ContractDetailModal from '../ContractDetailModal'
 import OcrNoteButton, { type OcrResolvedPayload } from '@/components/OcrNoteButton'
 
@@ -55,7 +55,8 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
   const [amount, setAmount] = useState('')
   const [poolId, setPoolId] = useState('')
   const [note, setNote] = useState('')
-  const [attachment, setAttachment] = useState<ClientAttachment | null>(null)
+  const [attachments, setAttachments] = useState<ClientAttachment[]>([])
+  const [ocrAttachmentIndex, setOcrAttachmentIndex] = useState(0)
   const [attachmentNote, setAttachmentNote] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -84,15 +85,38 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
     if (!file) return
 
     try {
-      const prepared = await prepareAttachment(file)
-      setAttachment(prepared)
+      const result = await prepareAttachments(file)
+      if (result.truncated) {
+        alert(
+          t('pdfPagesTruncated')
+            .replace('{{total}}', String(result.totalPages))
+            .replace('{{max}}', String(MAX_PDF_PAGES))
+        )
+      }
+      setAttachments(result.attachments)
+      setOcrAttachmentIndex(0)
+      setAttachmentNote(result.attachments[0]?.note || '')
     } catch {
       try {
-        setAttachment(await compressImage(file, 200))
+        const fallback = await compressImage(file, 200)
+        setAttachments([fallback])
+        setOcrAttachmentIndex(0)
+        setAttachmentNote(fallback.note || '')
       } catch {
         alert(t('imageCompressionFailed'))
       }
     }
+  }
+
+  const removeAttachmentAt = (index: number) => {
+    const next = attachments.filter((_, i) => i !== index)
+    let nextOcr = ocrAttachmentIndex
+    if (index < ocrAttachmentIndex) nextOcr = ocrAttachmentIndex - 1
+    else if (index === ocrAttachmentIndex) nextOcr = 0
+    nextOcr = Math.min(nextOcr, Math.max(0, next.length - 1))
+    setAttachments(next)
+    setOcrAttachmentIndex(nextOcr)
+    setAttachmentNote(next[nextOcr]?.note || '')
   }
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -104,6 +128,7 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
 
     setIsSubmitting(true)
     const numericAmount = type === 'EXPENSE' ? -Math.abs(Number(amount)) : Math.abs(Number(amount))
+    const [first, ...rest] = attachments
     const res = await createContract({
       title: title.trim(),
       type,
@@ -113,10 +138,21 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
       amount: numericAmount,
       note: note.trim() || undefined,
       poolId: poolId || undefined,
-      attachment: attachment ? { ...attachment, note: attachmentNote || undefined } : undefined,
+      attachment: first
+        ? { url: first.url, size: first.size, note: first.note || attachmentNote || undefined }
+        : undefined,
     })
 
     if (res.success) {
+      if (res.contract?.id && rest.length > 0) {
+        for (const page of rest) {
+          await addContractAttachment(res.contract.id, {
+            url: page.url,
+            size: page.size,
+            note: page.note || attachmentNote || undefined,
+          })
+        }
+      }
       window.location.reload()
       return
     }
@@ -137,8 +173,10 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
       setNote((current) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
     }
     if (payload.attachmentMemo) {
-      setAttachmentNote((current) =>
-        current.trim() ? `${current.trim()}；${payload.attachmentMemo}` : payload.attachmentMemo
+      const ocrIndex = attachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0
+      setAttachmentNote(payload.attachmentMemo)
+      setAttachments((prev) =>
+        prev.map((item, index) => (index === ocrIndex ? { ...item, note: payload.attachmentMemo } : item))
       )
     }
   }
@@ -267,9 +305,73 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
             <div className="space-y-3 rounded-2xl border border-dashed border-gray-300 bg-white/50 p-4 md:col-span-2">
               <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('attachment')} <span className="normal-case font-normal">({t('attachmentAcceptHint')})</span></label>
               <input type="file" accept="image/*,application/pdf" onChange={handleImageChange} className="w-full text-sm text-gray-600 file:mr-4 file:rounded-xl file:border-0 file:bg-[#007AFF]/10 file:px-5 file:py-2.5 file:text-sm file:font-semibold file:text-[#007AFF]" />
-              <input value={attachmentNote} onChange={(e) => setAttachmentNote(e.target.value)} placeholder={t('attachmentNotePlaceholder')} className={inputClass} />
+              <input
+                value={attachmentNote}
+                onChange={(e) => {
+                  const value = e.target.value
+                  setAttachmentNote(value)
+                  setAttachments((prev) =>
+                    prev.map((item, index) =>
+                      index === (attachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0)
+                        ? { ...item, note: value }
+                        : item
+                    )
+                  )
+                }}
+                placeholder={t('attachmentTypePlaceholder')}
+                className={inputClass}
+              />
+              {attachments.length > 0 && (
+                <div className="space-y-2">
+                  {attachments.length > 1 && (
+                    <div className="text-xs font-medium text-[#007AFF]">
+                      {t('pdfPagesReady').replace('{{count}}', String(attachments.length))}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {attachments.map((item, index) => (
+                      <div
+                        key={`${item.size}-${index}-${item.pageIndex || 0}`}
+                        className={`relative rounded-lg border p-1 ${
+                          index === ocrAttachmentIndex ? 'border-[#007AFF] ring-2 ring-[#007AFF]/20' : 'border-gray-200'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOcrAttachmentIndex(index)
+                            setAttachmentNote(item.note || '')
+                          }}
+                          className="block"
+                        >
+                          <img src={item.url} alt="" className="h-16 w-16 rounded object-cover" />
+                          {(item.pageIndex || attachments.length > 1) && (
+                            <div className="mt-0.5 text-center text-[10px] text-gray-500">
+                              {item.pageIndex ?? index + 1}
+                            </div>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeAttachmentAt(index)}
+                          className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-gray-800 text-[10px] leading-none text-white"
+                          aria-label={t('delete')}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="flex justify-end">
-                <OcrNoteButton locale={locale} attachment={attachment} context="contract" onResolved={appendRecognizedText} disabled={isSubmitting} />
+                <OcrNoteButton
+                  locale={locale}
+                  attachment={attachments[ocrAttachmentIndex] || attachments[0] || null}
+                  context="contract"
+                  onResolved={appendRecognizedText}
+                  disabled={isSubmitting}
+                />
               </div>
             </div>
           </div>

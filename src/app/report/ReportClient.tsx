@@ -8,7 +8,7 @@ import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import JSZip from 'jszip'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
-import { compressImage, prepareAttachment, type ClientAttachment } from '@/lib/image'
+import { compressImage, MAX_PDF_PAGES, prepareAttachments, type ClientAttachment } from '@/lib/image'
 import OcrNoteButton, { type OcrResolvedPayload } from '@/components/OcrNoteButton'
 import RecordDetailModal from '../RecordDetailModal'
 
@@ -130,7 +130,8 @@ export default function ReportClient({ categories, users, pools, locale }: Props
   const [editThirdCategoryId, setEditThirdCategoryId] = useState('')
   const [editAmount, setEditAmount] = useState('')
   const [editNote, setEditNote] = useState('')
-  const [editAttachment, setEditAttachment] = useState<ClientAttachment | null>(null)
+  const [editAttachments, setEditAttachments] = useState<ClientAttachment[]>([])
+  const [ocrAttachmentIndex, setOcrAttachmentIndex] = useState(0)
   const [editAttachmentNote, setEditAttachmentNote] = useState('')
   const [isSubmittingEdit, setIsSubmittingEdit] = useState(false)
 
@@ -151,7 +152,8 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     setEditThirdCategoryId(record.thirdCategoryId || '')
     setEditAmount(Math.abs(record.amount).toString())
     setEditNote(record.note || '')
-    setEditAttachment(null)
+    setEditAttachments([])
+    setOcrAttachmentIndex(0)
     setEditAttachmentNote('')
   }
 
@@ -172,7 +174,14 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       amount: finalAmount,
       note: editNote,
       poolId: editingRecord.poolId,
-      attachment: editAttachment ? { ...editAttachment, note: editAttachmentNote || undefined } : undefined
+      attachments:
+        editAttachments.length > 0
+          ? editAttachments.map((a) => ({
+              url: a.url,
+              size: a.size,
+              note: a.note || editAttachmentNote || undefined,
+            }))
+          : undefined,
     })
 
     if (res.success) {
@@ -185,15 +194,38 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     setIsSubmittingEdit(false)
   }
 
+  const removeEditAttachmentAt = (index: number) => {
+    const next = editAttachments.filter((_, i) => i !== index)
+    let nextOcr = ocrAttachmentIndex
+    if (index < ocrAttachmentIndex) nextOcr = ocrAttachmentIndex - 1
+    else if (index === ocrAttachmentIndex) nextOcr = 0
+    nextOcr = Math.min(nextOcr, Math.max(0, next.length - 1))
+    setEditAttachments(next)
+    setOcrAttachmentIndex(nextOcr)
+    setEditAttachmentNote(next[nextOcr]?.note || '')
+  }
+
   const handleEditAttachmentChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
     try {
-      const prepared = await prepareAttachment(file)
-      setEditAttachment(prepared)
+      const result = await prepareAttachments(file)
+      if (result.truncated) {
+        alert(
+          t('pdfPagesTruncated')
+            .replace('{{total}}', String(result.totalPages))
+            .replace('{{max}}', String(MAX_PDF_PAGES))
+        )
+      }
+      setEditAttachments(result.attachments)
+      setOcrAttachmentIndex(0)
+      setEditAttachmentNote(result.attachments[0]?.note || '')
     } catch {
       try {
-        setEditAttachment(await compressImage(file, 200))
+        const fallback = await compressImage(file, 200)
+        setEditAttachments([fallback])
+        setOcrAttachmentIndex(0)
+        setEditAttachmentNote(fallback.note || '')
       } catch {
         alert(t('imageCompressionFailed'))
       }
@@ -212,8 +244,10 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       setEditNote((current) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
     }
     if (payload.attachmentMemo) {
-      setEditAttachmentNote((current) =>
-        current.trim() ? `${current.trim()}；${payload.attachmentMemo}` : payload.attachmentMemo
+      const ocrIndex = editAttachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0
+      setEditAttachmentNote(payload.attachmentMemo)
+      setEditAttachments((prev) =>
+        prev.map((item, index) => (index === ocrIndex ? { ...item, note: payload.attachmentMemo } : item))
       )
     }
   }
@@ -1512,14 +1546,73 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                     <label className="block text-xs font-semibold text-gray-500 uppercase">{t('appendAttachment')} <span className="normal-case font-normal">({t('attachmentAcceptHint')})</span></label>
                     <OcrNoteButton
                       locale={locale}
-                      attachment={editAttachment}
+                      attachment={editAttachments[ocrAttachmentIndex] || editAttachments[0] || null}
                       context="record-edit"
                       onResolved={appendRecognizedText}
                       disabled={isSubmittingEdit}
                     />
                   </div>
                   <input type="file" accept="image/*,application/pdf" onChange={handleEditAttachmentChange} className="w-full text-sm text-gray-600 file:mr-4 file:py-2.5 file:px-5 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-[#007AFF]/10 file:text-[#007AFF]" />
-                  <input type="text" value={editAttachmentNote} onChange={e => setEditAttachmentNote(e.target.value)} placeholder={t('attachmentNotePlaceholder')} className={`${inputClass} mt-3`} />
+                  <input
+                    type="text"
+                    value={editAttachmentNote}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      setEditAttachmentNote(value)
+                      setEditAttachments((prev) =>
+                        prev.map((item, index) =>
+                          index === (editAttachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0)
+                            ? { ...item, note: value }
+                            : item
+                        )
+                      )
+                    }}
+                    placeholder={t('attachmentTypePlaceholder')}
+                    className={`${inputClass} mt-3`}
+                  />
+                  {editAttachments.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      {editAttachments.length > 1 && (
+                        <div className="text-xs font-medium text-[#007AFF]">
+                          {t('pdfPagesReady').replace('{{count}}', String(editAttachments.length))}
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        {editAttachments.map((item, index) => (
+                          <div
+                            key={`${item.size}-${index}-${item.pageIndex || 0}`}
+                            className={`relative rounded-lg border p-1 ${
+                              index === ocrAttachmentIndex ? 'border-[#007AFF] ring-2 ring-[#007AFF]/20' : 'border-gray-200'
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOcrAttachmentIndex(index)
+                                setEditAttachmentNote(item.note || '')
+                              }}
+                              className="block"
+                            >
+                              <img src={item.url} alt="" className="h-16 w-16 rounded object-cover" />
+                              {(item.pageIndex || editAttachments.length > 1) && (
+                                <div className="mt-0.5 text-center text-[10px] text-gray-500">
+                                  {item.pageIndex ?? index + 1}
+                                </div>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeEditAttachmentAt(index)}
+                              className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-gray-800 text-[10px] leading-none text-white"
+                              aria-label={t('delete')}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

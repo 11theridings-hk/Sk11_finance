@@ -23,6 +23,8 @@ export type CreateRecordInput = {
   thirdCategoryId?: string
   poolId?: string
   attachment?: AttachmentPayload
+  /** Multi-page PDF / multiple images. Takes precedence over single `attachment` when non-empty. */
+  attachments?: AttachmentPayload[]
 }
 
 function getDeepestCategoryId(data: {
@@ -60,6 +62,13 @@ export async function createRecord(data: CreateRecordInput) {
         }
       }
 
+      const attachmentList =
+        data.attachments && data.attachments.length > 0
+          ? data.attachments
+          : data.attachment
+            ? [data.attachment]
+            : []
+
       // 2. 创建记录
       const record = await tx.record.create({
         data: {
@@ -68,7 +77,7 @@ export async function createRecord(data: CreateRecordInput) {
           date: data.date,
           note: data.note,
           amount: data.amount, // 前端传过来的已处理好正负
-          attachmentUrl: data.attachment?.url,
+          attachmentUrl: attachmentList[0]?.url,
           categoryId: data.categoryId,
           subCategoryId: data.subCategoryId,
           thirdCategoryId: data.thirdCategoryId,
@@ -77,17 +86,17 @@ export async function createRecord(data: CreateRecordInput) {
         }
       })
 
-      // 3. 记录附件（如果有）
-      if (data.attachment) {
+      // 3. 记录附件（支持多页 PDF 拆成多张）
+      for (const item of attachmentList) {
         await tx.attachment.create({
           data: {
-            fileUrl: data.attachment.url,
-            size: data.attachment.size,
-            note: data.attachment.note,
+            fileUrl: item.url,
+            size: item.size,
+            note: item.note,
             uploaderId: session.userId,
             categoryId: getDeepestCategoryId(data),
-            recordId: record.id
-          }
+            recordId: record.id,
+          },
         })
       }
 

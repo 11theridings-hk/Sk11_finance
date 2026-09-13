@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { createTranslator, type Locale } from '@/lib/i18n'
-import { prepareAttachment } from '@/lib/image'
+import { MAX_PDF_PAGES, prepareAttachments } from '@/lib/image'
 import {
   createRecurringTemplate,
   deleteRecurringTemplate,
@@ -343,15 +343,44 @@ export default function RecurringClient({
                             if (!file) return
                             setBusy(true)
                             try {
-                              const prepared = await prepareAttachment(file)
-                              const res = await updateOpenInstance({
-                                instanceId: open.id,
-                                amount: Math.abs(Number(open.amount ?? template.amount)),
-                                note: open.note || undefined,
-                                attachment: { url: prepared.url, size: prepared.size },
-                              })
-                              if (!res.success) alert(res.error || t('submitFailed'))
-                              else refresh()
+                              const result = await prepareAttachments(file)
+                              if (result.truncated) {
+                                alert(
+                                  t('pdfPagesTruncated')
+                                    .replace('{{total}}', String(result.totalPages))
+                                    .replace('{{max}}', String(MAX_PDF_PAGES))
+                                )
+                              }
+                              const pages = result.attachments
+                              if (pages.length === 0) {
+                                alert(t('imageCompressionFailed'))
+                                setBusy(false)
+                                return
+                              }
+                              let lastError: string | undefined
+                              for (const page of pages) {
+                                const res = await updateOpenInstance({
+                                  instanceId: open.id,
+                                  amount: Math.abs(Number(open.amount ?? template.amount)),
+                                  note: open.note || undefined,
+                                  attachment: {
+                                    url: page.url,
+                                    size: page.size,
+                                    note: page.note || undefined,
+                                  },
+                                })
+                                if (!res.success) {
+                                  lastError = res.error || t('submitFailed')
+                                  break
+                                }
+                              }
+                              if (lastError) alert(lastError)
+                              else {
+                                if (pages.length > 1) {
+                                  alert(t('pdfPagesReady').replace('{{count}}', String(pages.length)))
+                                }
+                                refresh()
+                              }
                             } catch (err: any) {
                               alert(err.message || t('submitFailed'))
                             }

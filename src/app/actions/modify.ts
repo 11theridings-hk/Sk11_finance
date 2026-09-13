@@ -12,7 +12,10 @@ type ModifyAttachmentInput = {
   note?: string
 }
 
-export async function requestModifyRecord(originalId: string, data: any & { thirdCategoryId?: string, attachment?: ModifyAttachmentInput }) {
+export async function requestModifyRecord(
+  originalId: string,
+  data: any & { thirdCategoryId?: string; attachment?: ModifyAttachmentInput; attachments?: ModifyAttachmentInput[] }
+) {
   try {
     const locale = await getCurrentLocale()
     const t = createTranslator(locale)
@@ -28,6 +31,13 @@ export async function requestModifyRecord(originalId: string, data: any & { thir
     }
 
     if (originalRecord.isReviewing) return { success: false, error: t('reviewingInProgress') }
+
+    const attachmentList =
+      data.attachments && data.attachments.length > 0
+        ? data.attachments
+        : data.attachment
+          ? [data.attachment]
+          : []
 
     await prisma.$transaction(async (tx) => {
       // 标记原记录正在审核中
@@ -47,18 +57,18 @@ export async function requestModifyRecord(originalId: string, data: any & { thir
           categoryId: data.categoryId,
           subCategoryId: data.subCategoryId || undefined,
           thirdCategoryId: data.thirdCategoryId || undefined,
-          attachmentUrl: data.attachment?.url,
+          attachmentUrl: attachmentList[0]?.url,
           poolId: data.poolId || undefined,
           userId: originalRecord.userId, // 保持原作者
           originalRecordId: originalId,
         }
       }).then(async (pendingRecord) => {
-        if (data.attachment) {
+        for (const item of attachmentList) {
           await tx.attachment.create({
             data: {
-              fileUrl: data.attachment.url,
-              size: data.attachment.size,
-              note: data.attachment.note,
+              fileUrl: item.url,
+              size: item.size,
+              note: item.note,
               uploaderId: session.userId,
               categoryId: data.thirdCategoryId || data.subCategoryId || data.categoryId,
               recordId: pendingRecord.id,

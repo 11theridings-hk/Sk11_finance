@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { addActivityAttachment, deleteActivity, updateActivity } from './actions/activity'
 import { createTranslator, type Locale } from '@/lib/i18n'
-import { compressImage, openAttachment, prepareAttachment, type ClientAttachment } from '@/lib/image'
+import { compressImage, MAX_PDF_PAGES, openAttachment, prepareAttachments, type ClientAttachment } from '@/lib/image'
 import OcrNoteButton, { type OcrResolvedPayload } from '@/components/OcrNoteButton'
 
 export default function ActivityDetailModal({
@@ -23,7 +23,8 @@ export default function ActivityDetailModal({
   const [reminderDays, setReminderDays] = useState(String(activity.reminderDays))
   const [visibility, setVisibility] = useState<'PUBLIC' | 'PRIVATE'>(activity.visibility)
   const [note, setNote] = useState(activity.note || '')
-  const [attachment, setAttachment] = useState<ClientAttachment | null>(null)
+  const [attachments, setAttachments] = useState<ClientAttachment[]>([])
+  const [ocrAttachmentIndex, setOcrAttachmentIndex] = useState(0)
   const [attachmentNote, setAttachmentNote] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -32,15 +33,38 @@ export default function ActivityDetailModal({
     if (!file) return
 
     try {
-      const prepared = await prepareAttachment(file)
-      setAttachment(prepared)
+      const result = await prepareAttachments(file)
+      if (result.truncated) {
+        alert(
+          t('pdfPagesTruncated')
+            .replace('{{total}}', String(result.totalPages))
+            .replace('{{max}}', String(MAX_PDF_PAGES))
+        )
+      }
+      setAttachments(result.attachments)
+      setOcrAttachmentIndex(0)
+      setAttachmentNote(result.attachments[0]?.note || '')
     } catch {
       try {
-        setAttachment(await compressImage(file, 200))
+        const fallback = await compressImage(file, 200)
+        setAttachments([fallback])
+        setOcrAttachmentIndex(0)
+        setAttachmentNote(fallback.note || '')
       } catch {
         alert(t('imageCompressionFailed'))
       }
     }
+  }
+
+  const removeAttachmentAt = (index: number) => {
+    const next = attachments.filter((_, i) => i !== index)
+    let nextOcr = ocrAttachmentIndex
+    if (index < ocrAttachmentIndex) nextOcr = ocrAttachmentIndex - 1
+    else if (index === ocrAttachmentIndex) nextOcr = 0
+    nextOcr = Math.min(nextOcr, Math.max(0, next.length - 1))
+    setAttachments(next)
+    setOcrAttachmentIndex(nextOcr)
+    setAttachmentNote(next[nextOcr]?.note || '')
   }
 
   const handleSave = async () => {
@@ -66,18 +90,21 @@ export default function ActivityDetailModal({
   }
 
   const handleAppendAttachment = async () => {
-    if (!attachment) return
+    if (attachments.length === 0) return
     setLoading(true)
-    const res = await addActivityAttachment(activity.id, {
-      ...attachment,
-      note: attachmentNote || undefined,
-    })
-    if (res.success) {
-      window.location.reload()
-      return
+    for (const page of attachments) {
+      const res = await addActivityAttachment(activity.id, {
+        url: page.url,
+        size: page.size,
+        note: page.note || attachmentNote || undefined,
+      })
+      if (!res.success) {
+        alert(res.error)
+        setLoading(false)
+        return
+      }
     }
-    alert(res.error)
-    setLoading(false)
+    window.location.reload()
   }
 
   const handleDelete = async () => {
@@ -101,8 +128,10 @@ export default function ActivityDetailModal({
       setNote((current: string) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
     }
     if (payload.attachmentMemo) {
-      setAttachmentNote((current) =>
-        current.trim() ? `${current.trim()}；${payload.attachmentMemo}` : payload.attachmentMemo
+      const ocrIndex = attachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0
+      setAttachmentNote(payload.attachmentMemo)
+      setAttachments((prev) =>
+        prev.map((item, index) => (index === ocrIndex ? { ...item, note: payload.attachmentMemo } : item))
       )
     }
   }
@@ -201,13 +230,78 @@ export default function ActivityDetailModal({
             {canManage && (
               <div className="grid grid-cols-1 gap-3 border-t border-gray-100 pt-3 md:grid-cols-[1fr,1fr,auto]">
                 <input type="file" accept="image/*,application/pdf" onChange={handleAttachmentChange} className="w-full text-sm text-gray-600 file:mr-4 file:rounded-xl file:border-0 file:bg-[#007AFF]/10 file:px-4 file:py-2 file:font-semibold file:text-[#007AFF]" />
-                <input value={attachmentNote} onChange={(e) => setAttachmentNote(e.target.value)} placeholder={t('attachmentNotePlaceholder')} className={inputClass} />
+                <input
+                  value={attachmentNote}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    setAttachmentNote(value)
+                    setAttachments((prev) =>
+                      prev.map((item, index) =>
+                        index === (attachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0)
+                          ? { ...item, note: value }
+                          : item
+                      )
+                    )
+                  }}
+                  placeholder={t('attachmentTypePlaceholder')}
+                  className={inputClass}
+                />
                 <div className="flex flex-col gap-3 md:flex-row">
-                  <OcrNoteButton locale={locale} attachment={attachment} context="activity-edit" onResolved={appendRecognizedText} disabled={loading} />
-                  <button onClick={handleAppendAttachment} disabled={loading || !attachment} className="rounded-xl bg-[#007AFF] px-5 py-3 font-semibold text-white disabled:opacity-50">
+                  <OcrNoteButton
+                    locale={locale}
+                    attachment={attachments[ocrAttachmentIndex] || attachments[0] || null}
+                    context="activity-edit"
+                    onResolved={appendRecognizedText}
+                    disabled={loading}
+                  />
+                  <button onClick={handleAppendAttachment} disabled={loading || attachments.length === 0} className="rounded-xl bg-[#007AFF] px-5 py-3 font-semibold text-white disabled:opacity-50">
                     {t('appendAttachment')}
                   </button>
                 </div>
+                {attachments.length > 0 && (
+                  <div className="md:col-span-3 space-y-2">
+                    {attachments.length > 1 && (
+                      <div className="text-xs font-medium text-[#007AFF]">
+                        {t('pdfPagesReady').replace('{{count}}', String(attachments.length))}
+                      </div>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      {attachments.map((item, index) => (
+                        <div
+                          key={`${item.size}-${index}-${item.pageIndex || 0}`}
+                          className={`relative rounded-lg border p-1 ${
+                            index === ocrAttachmentIndex ? 'border-[#007AFF] ring-2 ring-[#007AFF]/20' : 'border-gray-200'
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOcrAttachmentIndex(index)
+                              setAttachmentNote(item.note || '')
+                            }}
+                            className="block"
+                          >
+                            <img src={item.url} alt="" className="h-16 w-16 rounded object-cover" />
+                            {(item.pageIndex || attachments.length > 1) && (
+                              <div className="mt-0.5 text-center text-[10px] text-gray-500">
+                                {item.pageIndex ?? index + 1}
+                              </div>
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeAttachmentAt(index)}
+                            className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-gray-800 text-[10px] leading-none text-white"
+                            aria-label={t('delete')}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-xs text-gray-400">({t('attachmentAcceptHint')})</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
