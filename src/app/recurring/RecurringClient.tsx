@@ -5,6 +5,7 @@ import { createTranslator, type Locale } from '@/lib/i18n'
 import { MAX_PDF_PAGES, prepareAttachments } from '@/lib/image'
 import {
   createRecurringTemplate,
+  updateRecurringTemplate,
   deleteRecurringTemplate,
   convertRecurringInstanceToRecord,
   skipRecurringInstance,
@@ -22,7 +23,6 @@ type Category = {
 type Pool = {
   id: string
   name: string
-  isReviewRequired?: boolean
 }
 
 type Template = {
@@ -39,7 +39,9 @@ type Template = {
   subCategoryId: string | null
   thirdCategoryId: string | null
   poolId: string | null
-  category?: Category
+  category?: Category | null
+  subCategory?: Category | null
+  thirdCategory?: Category | null
   pool?: Pool | null
   instances: Array<{
     id: string
@@ -71,13 +73,13 @@ export default function RecurringClient({
   pools: Pool[]
 }) {
   const t = createTranslator(locale)
-  const [templates, setTemplates] = useState(initialTemplates)
+  const [templates] = useState(initialTemplates)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [type, setType] = useState<'INCOME' | 'EXPENSE'>('EXPENSE')
   const [title, setTitle] = useState('')
   const [note, setNote] = useState('')
   const [amount, setAmount] = useState('')
   const [intervalMonths, setIntervalMonths] = useState(1)
-  const [customMonths, setCustomMonths] = useState('1')
   const [nextDueDate, setNextDueDate] = useState(toDateInput(new Date()))
   const [reminderDays, setReminderDays] = useState('15')
   const [categoryId, setCategoryId] = useState('')
@@ -101,23 +103,57 @@ export default function RecurringClient({
 
   const refresh = () => window.location.reload()
 
-  const handleCreate = async () => {
+  const resetForm = () => {
+    setEditingId(null)
+    setType('EXPENSE')
+    setTitle('')
+    setNote('')
+    setAmount('')
+    setIntervalMonths(1)
+    setNextDueDate(toDateInput(new Date()))
+    setReminderDays('15')
+    setCategoryId('')
+    setSubCategoryId('')
+    setThirdCategoryId('')
+    setPoolId('')
+  }
+
+  const startEdit = (template: Template) => {
+    setEditingId(template.id)
+    setType(template.type === 'INCOME' ? 'INCOME' : 'EXPENSE')
+    setTitle(template.title)
+    setNote(template.note || '')
+    setAmount(String(Math.abs(Number(template.amount) || 0)))
+    setIntervalMonths(template.intervalMonths || 1)
+    setNextDueDate(toDateInput(template.nextDueDate))
+    setReminderDays(String(template.reminderDays ?? 15))
+    setCategoryId(template.categoryId || '')
+    setSubCategoryId(template.subCategoryId || '')
+    setThirdCategoryId(template.thirdCategoryId || '')
+    setPoolId(template.poolId || '')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const handleSubmit = async () => {
     setBusy(true)
-    const months =
-      intervalMonths > 0 ? intervalMonths : Math.max(1, parseInt(customMonths || '1', 10) || 1)
-    const res = await createRecurringTemplate({
+    const payload = {
       type,
       title,
       note,
       amount: Math.abs(parseFloat(amount) || 0),
-      intervalMonths: months,
+      intervalMonths: Math.max(1, intervalMonths),
       nextDueDate,
       reminderDays: parseInt(reminderDays || '15', 10) || 15,
       categoryId,
       subCategoryId: subCategoryId || undefined,
       thirdCategoryId: thirdCategoryId || undefined,
       poolId,
-    })
+    }
+
+    const res = editingId
+      ? await updateRecurringTemplate({ templateId: editingId, ...payload })
+      : await createRecurringTemplate(payload)
+
     setBusy(false)
     if (!res.success) {
       alert(res.error || t('submitFailed'))
@@ -129,11 +165,10 @@ export default function RecurringClient({
   const handleConvert = async (instanceId: string, defaultAmount: number) => {
     const raw = window.prompt(t('amount'), String(Math.abs(defaultAmount)))
     if (raw === null) return
-    const value = Math.abs(parseFloat(raw) || 0)
     setBusy(true)
     const res = await convertRecurringInstanceToRecord({
       instanceId,
-      amount: value,
+      amount: Math.abs(parseFloat(raw) || 0),
     })
     setBusy(false)
     if (!res.success) {
@@ -145,7 +180,7 @@ export default function RecurringClient({
   }
 
   const handleSkip = async (instanceId: string) => {
-    if (!window.confirm(t('skipThisPeriod') + '?')) return
+    if (!window.confirm(`${t('skipThisPeriod')}?`)) return
     setBusy(true)
     const res = await skipRecurringInstance(instanceId)
     setBusy(false)
@@ -166,9 +201,9 @@ export default function RecurringClient({
       alert(res.error || t('submitFailed'))
       return
     }
+    if (editingId === templateId) resetForm()
     refresh()
   }
-
 
   const inputClass =
     'w-full rounded-xl border border-gray-200 bg-white px-3 py-3 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-[#007AFF]/30'
@@ -176,26 +211,67 @@ export default function RecurringClient({
   return (
     <div className="space-y-8">
       <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6">
-        <h2 className="mb-4 text-lg font-semibold text-gray-900">{t('createRecurring')}</h2>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold text-gray-900">
+            {editingId ? t('editRecurring') : t('createRecurring')}
+          </h2>
+          {editingId && (
+            <button
+              type="button"
+              onClick={resetForm}
+              className="text-sm font-semibold text-gray-500 hover:text-gray-800"
+            >
+              {t('cancelEdit')}
+            </button>
+          )}
+        </div>
+
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => setType('EXPENSE')}
-              className={`flex-1 rounded-xl py-3 text-sm font-semibold ${type === 'EXPENSE' ? 'bg-[#FF3B30] text-white' : 'bg-gray-100 text-gray-600'}`}
+              onClick={() => {
+                setType('EXPENSE')
+                setCategoryId('')
+                setSubCategoryId('')
+                setThirdCategoryId('')
+              }}
+              className={`flex-1 rounded-xl py-3 text-sm font-semibold ${
+                type === 'EXPENSE' ? 'bg-[#FF3B30] text-white' : 'bg-gray-100 text-gray-600'
+              }`}
             >
               {t('expense')}
             </button>
             <button
               type="button"
-              onClick={() => setType('INCOME')}
-              className={`flex-1 rounded-xl py-3 text-sm font-semibold ${type === 'INCOME' ? 'bg-[#34C759] text-white' : 'bg-gray-100 text-gray-600'}`}
+              onClick={() => {
+                setType('INCOME')
+                setCategoryId('')
+                setSubCategoryId('')
+                setThirdCategoryId('')
+              }}
+              className={`flex-1 rounded-xl py-3 text-sm font-semibold ${
+                type === 'INCOME' ? 'bg-[#34C759] text-white' : 'bg-gray-100 text-gray-600'
+              }`}
             >
               {t('income')}
             </button>
           </div>
-          <input className={inputClass} placeholder={t('activityTitle')} value={title} onChange={(e) => setTitle(e.target.value)} />
-          <input className={inputClass} type="number" step="0.01" placeholder={t('amount')} value={amount} onChange={(e) => setAmount(e.target.value)} />
+
+          <input
+            className={inputClass}
+            placeholder={t('activityTitle')}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <input
+            className={inputClass}
+            type="number"
+            step="0.01"
+            placeholder={t('amount')}
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
           <select className={inputClass} value={poolId} onChange={(e) => setPoolId(e.target.value)}>
             <option value="">{t('selectPool')}</option>
             {pools.map((p) => (
@@ -204,6 +280,7 @@ export default function RecurringClient({
               </option>
             ))}
           </select>
+
           <select
             className={inputClass}
             value={categoryId}
@@ -220,6 +297,7 @@ export default function RecurringClient({
               </option>
             ))}
           </select>
+
           <select
             className={inputClass}
             value={subCategoryId}
@@ -236,6 +314,27 @@ export default function RecurringClient({
               </option>
             ))}
           </select>
+
+          <select
+            className={inputClass}
+            value={thirdCategoryId}
+            onChange={(e) => setThirdCategoryId(e.target.value)}
+            disabled={!currentSub?.children?.length}
+          >
+            <option value="">
+              {!currentSub
+                ? t('selectSubCategory')
+                : currentSub.children && currentSub.children.length > 0
+                  ? t('selectGrandCategory')
+                  : t('noGrandCategory')}
+            </option>
+            {currentSub?.children?.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">
               {t('recurringInterval')}
@@ -246,25 +345,41 @@ export default function RecurringClient({
                   key={p.months}
                   type="button"
                   onClick={() => setIntervalMonths(p.months)}
-                  className={`rounded-full px-3 py-1.5 text-xs font-semibold ${intervalMonths === p.months ? 'bg-[#007AFF] text-white' : 'bg-gray-100 text-gray-600'}`}
+                  className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                    intervalMonths === p.months ? 'bg-[#007AFF] text-white' : 'bg-gray-100 text-gray-600'
+                  }`}
                 >
                   {t(p.key)}
                 </button>
               ))}
             </div>
           </div>
+
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">
               {t('nextDueDate')}
             </label>
-            <input className={inputClass} type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} />
+            <input
+              className={inputClass}
+              type="date"
+              value={nextDueDate}
+              onChange={(e) => setNextDueDate(e.target.value)}
+            />
           </div>
+
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">
               {t('reminderDays')}
             </label>
-            <input className={inputClass} type="number" min={0} value={reminderDays} onChange={(e) => setReminderDays(e.target.value)} />
+            <input
+              className={inputClass}
+              type="number"
+              min={0}
+              value={reminderDays}
+              onChange={(e) => setReminderDays(e.target.value)}
+            />
           </div>
+
           <div className="md:col-span-2">
             <textarea
               className={inputClass}
@@ -275,13 +390,14 @@ export default function RecurringClient({
             />
           </div>
         </div>
+
         <button
           type="button"
           disabled={busy}
-          onClick={handleCreate}
+          onClick={handleSubmit}
           className="mt-4 w-full rounded-xl bg-[#007AFF] py-3 text-sm font-semibold text-white disabled:opacity-50"
         >
-          {t('createRecurring')}
+          {editingId ? t('saveRecurring') : t('createRecurring')}
         </button>
       </section>
 
@@ -293,33 +409,63 @@ export default function RecurringClient({
           <div className="space-y-3">
             {templates.map((template) => {
               const open = template.instances?.[0]
+              const categoryPath = [
+                template.category?.name,
+                template.subCategory?.name,
+                template.thirdCategory?.name,
+              ]
+                .filter(Boolean)
+                .join(' / ')
+
               return (
-                <div key={template.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                <div
+                  key={template.id}
+                  className={`rounded-2xl border bg-white p-4 shadow-sm ${
+                    editingId === template.id ? 'border-[#007AFF]' : 'border-gray-200'
+                  }`}
+                >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <div className="text-base font-semibold text-gray-900">{template.title}</div>
                       <div className="mt-1 text-xs text-gray-500">
-                        {intervalLabel(template.intervalMonths)} · {t('nextDueDate')}: {toDateInput(template.nextDueDate)}
+                        {intervalLabel(template.intervalMonths)} · {t('nextDueDate')}:{' '}
+                        {toDateInput(template.nextDueDate)}
                       </div>
+                      {categoryPath ? (
+                        <div className="mt-1 text-xs text-gray-500">{categoryPath}</div>
+                      ) : null}
                       <div className="mt-1 text-sm font-medium text-gray-800">
                         HKD$ {Math.abs(Number(open?.amount ?? template.amount)).toFixed(2)}
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      className="text-xs font-semibold text-[#FF3B30]"
-                      onClick={() => handleDelete(template.id)}
-                      disabled={busy}
-                    >
-                      {t('deleteRecurring')}
-                    </button>
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        className="text-xs font-semibold text-[#007AFF]"
+                        onClick={() => startEdit(template)}
+                        disabled={busy}
+                      >
+                        {t('editRecurring')}
+                      </button>
+                      <button
+                        type="button"
+                        className="text-xs font-semibold text-[#FF3B30]"
+                        onClick={() => handleDelete(template.id)}
+                        disabled={busy}
+                      >
+                        {t('deleteRecurring')}
+                      </button>
+                    </div>
                   </div>
-                  {open && (
+
+                  {open ? (
                     <div className="mt-4 flex flex-wrap gap-2">
                       <button
                         type="button"
                         disabled={busy}
-                        onClick={() => handleConvert(open.id, Number(open.amount ?? template.amount))}
+                        onClick={() =>
+                          handleConvert(open.id, Number(open.amount ?? template.amount))
+                        }
                         className="rounded-xl bg-[#34C759] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                       >
                         {t('convertToPublicLedger')}
@@ -377,7 +523,9 @@ export default function RecurringClient({
                               if (lastError) alert(lastError)
                               else {
                                 if (pages.length > 1) {
-                                  alert(t('pdfPagesReady').replace('{{count}}', String(pages.length)))
+                                  alert(
+                                    t('pdfPagesReady').replace('{{count}}', String(pages.length))
+                                  )
                                 }
                                 refresh()
                               }
@@ -389,7 +537,7 @@ export default function RecurringClient({
                         />
                       </label>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               )
             })}

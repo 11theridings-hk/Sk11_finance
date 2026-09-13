@@ -182,6 +182,130 @@ export async function deleteRecurringTemplate(templateId: string) {
   }
 }
 
+export async function updateRecurringTemplate(input: {
+  templateId: string
+  type: 'INCOME' | 'EXPENSE'
+  title: string
+  note?: string
+  amount: number
+  intervalMonths: number
+  nextDueDate: string
+  reminderDays?: number
+  categoryId: string
+  subCategoryId?: string
+  thirdCategoryId?: string
+  poolId?: string
+}) {
+  try {
+    const { t } = await assertRecurringAccess()
+    if (!input.templateId) throw new Error(t('fillRequiredFields'))
+    if (!input.title.trim()) throw new Error(t('fillRequiredFields'))
+    if (!input.categoryId || !input.poolId) throw new Error(t('fillRequiredFields'))
+    if (!Number.isFinite(input.amount) || input.amount === 0) throw new Error(t('fillRequiredFields'))
+
+    const existing = await prisma.recurringTemplate.findUnique({
+      where: { id: input.templateId },
+      include: {
+        instances: { where: { status: 'OPEN' }, orderBy: { dueDate: 'asc' }, take: 1 },
+      },
+    })
+    if (!existing) throw new Error(t('recurringNotFound'))
+
+    const intervalMonths = Math.max(1, Math.floor(input.intervalMonths || 1))
+    const nextDue = normalizeDueDate(new Date(input.nextDueDate))
+    if (Number.isNaN(nextDue.getTime())) throw new Error(t('fillRequiredFields'))
+
+    const signedAmount =
+      input.type === 'EXPENSE' ? -Math.abs(input.amount) : Math.abs(input.amount)
+
+    const template = await prisma.recurringTemplate.update({
+      where: { id: input.templateId },
+      data: {
+        type: input.type,
+        title: input.title.trim(),
+        note: input.note?.trim() || null,
+        amount: signedAmount,
+        intervalMonths,
+        dayOfMonth: preferredDayOfMonth(nextDue),
+        nextDueDate: nextDue,
+        reminderDays: input.reminderDays ?? 15,
+        categoryId: input.categoryId,
+        subCategoryId: input.subCategoryId || null,
+        thirdCategoryId: input.thirdCategoryId || null,
+        poolId: input.poolId,
+      },
+    })
+
+    const open = existing.instances[0]
+    const oldDueKey = normalizeDueDate(existing.nextDueDate).getTime()
+    const newDueKey = nextDue.getTime()
+
+    if (open) {
+      if (oldDueKey !== newDueKey) {
+        // Move open instance to the new due date when possible
+        const clash = await prisma.recurringInstance.findUnique({
+          where: {
+            templateId_dueDate: {
+              templateId: template.id,
+              dueDate: nextDue,
+            },
+          },
+        })
+        if (clash && clash.id !== open.id) {
+          await prisma.recurringInstance.update({
+            where: { id: open.id },
+            data: {
+              status: 'SKIPPED',
+              processedAt: new Date(),
+            },
+          })
+          if (clash.status === 'OPEN') {
+            await prisma.recurringInstance.update({
+              where: { id: clash.id },
+              data: {
+                amount: signedAmount,
+                note: template.note,
+              },
+            })
+          }
+        } else {
+          await prisma.recurringInstance.update({
+            where: { id: open.id },
+            data: {
+              dueDate: nextDue,
+              amount: signedAmount,
+              note: template.note,
+            },
+          })
+        }
+      } else {
+        await prisma.recurringInstance.update({
+          where: { id: open.id },
+          data: {
+            amount: signedAmount,
+            note: template.note,
+          },
+        })
+      }
+    } else {
+      await ensureOpenInstance({
+        id: template.id,
+        nextDueDate: template.nextDueDate,
+        amount: template.amount,
+        note: template.note,
+        userId: template.userId,
+        reminderDays: template.reminderDays,
+      })
+    }
+
+    revalidatePath('/recurring')
+    revalidatePath('/')
+    return { success: true, template }
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
+}
+
 export async function updateOpenInstance(input: {
   instanceId: string
   amount: number
