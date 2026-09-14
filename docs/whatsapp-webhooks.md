@@ -94,3 +94,25 @@ npx ngrok http 3000
 ```
 
 `.env` 填好 token 後 `npm run dev`，在 Meta 按驗證。
+
+## 驗證失敗排查（Meta 紅字錯誤）
+
+若出現「無法驗證回呼網址或驗證權杖」：
+
+1. **端點必須已部署上線**  
+   瀏覽器或 curl 測：
+   ```bash
+   curl -i "https://你的網域/api/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=你的權杖&hub.challenge=abc"
+   ```
+   成功應為 **HTTP 200**，body 純文字 `abc`。若是 **404**，代表此功能尚未合併／部署到該網域（PR 未進 `main` 或 Railway 未重新部署）。
+
+2. **關掉「將用戶端憑證附加至 Webhook 要求」**  
+   一般 Railway／Next 部署不需要此選項；開著常會導致 Meta 驗證失敗。
+
+3. **Railway 環境變數**必須有：
+   ```env
+   WHATSAPP_VERIFY_TOKEN=與 Meta 驗證權杖完全相同的字串
+   ```
+   大小寫、空白都要一致。未設定時端點會回 503。
+
+4. 部署後再於 Meta 按「驗證並儲存」。
