@@ -11,6 +11,10 @@ import {
   type PluginId,
 } from '@/lib/plugins'
 import { normalizeDueDate } from '@/lib/recurring'
+import {
+  isWhatsAppReminderConfigured,
+  sendWhatsAppReminder,
+} from '@/lib/whatsapp/reminderNotify'
 
 export type ReminderEntityType = 'CONTRACT' | 'ACTIVITY' | 'RECURRING'
 export type ReminderKind =
@@ -371,10 +375,44 @@ async function sendOneCandidate(candidate: ReminderCandidate): Promise<ReminderS
   }
 
   const { subject, html, text } = buildEmailContent(candidate, pendingKinds)
-  const toEmails = recipients.join(',')
+  const emailConfigured = isReminderEmailConfigured() && recipients.length > 0
+  const waConfigured = isWhatsAppReminderConfigured()
+  const channelCount = (emailConfigured ? 1 : 0) + (waConfigured ? 1 : 0)
+  const toEmails = [
+    emailConfigured ? recipients.join(',') : '',
+    waConfigured ? 'whatsapp' : '',
+  ]
+    .filter(Boolean)
+    .join('+')
 
   try {
-    await sendReminderEmail({ to: recipients, subject, html, text })
+    if (channelCount === 0) {
+      throw new Error('No reminder channels configured')
+    }
+
+    const errors: string[] = []
+    let okCount = 0
+
+    if (emailConfigured) {
+      try {
+        await sendReminderEmail({ to: recipients, subject, html, text })
+        okCount += 1
+      } catch (e: unknown) {
+        errors.push(`email: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
+
+    if (waConfigured) {
+      const wa = await sendWhatsAppReminder({ subject, body: text })
+      if (wa.ok) okCount += 1
+      else errors.push(`whatsapp: ${wa.errors.join('; ') || 'send failed'}`)
+    }
+
+    if (okCount === 0) {
+      throw new Error(errors.join(' | ') || 'All reminder channels failed')
+    }
+
+    const partialError = errors.length > 0 ? errors.join(' | ').slice(0, 1000) : null
 
     for (const kind of pendingKinds) {
       await prisma.reminderEmailLog.upsert({
@@ -394,12 +432,13 @@ async function sendOneCandidate(candidate: ReminderCandidate): Promise<ReminderS
           toEmails,
           subject,
           status: 'SENT',
+          error: partialError,
         },
         update: {
           toEmails,
           subject,
           status: 'SENT',
-          error: null,
+          error: partialError,
           sentAt: new Date(),
         },
       })
@@ -411,6 +450,7 @@ async function sendOneCandidate(candidate: ReminderCandidate): Promise<ReminderS
       title: candidate.title,
       kinds: pendingKinds,
       status: 'SENT',
+      error: partialError || undefined,
     }
   } catch (e: any) {
     const message = e?.message || String(e)
@@ -473,7 +513,7 @@ export async function maybeSendReminderCatchUp(input: {
   eligible?: boolean
 }): Promise<ReminderSendDetail | null> {
   if (input.eligible === false) return null
-  if (!isReminderEmailConfigured()) return null
+  if (!isReminderEmailConfigured() && !isWhatsAppReminderConfigured()) return null
 
   const flags = await loadPluginFlags()
   if (input.entityType === 'CONTRACT' && !flags.contracts) return null
@@ -507,10 +547,11 @@ export async function runReminderEmailJob(): Promise<ReminderJobResult> {
   const today = hongKongYmd()
   const details: ReminderSendDetail[] = []
 
-  if (!isReminderEmailConfigured()) {
+  if (!isReminderEmailConfigured() && !isWhatsAppReminderConfigured()) {
     return {
       ok: true,
-      skippedReason: 'RESEND_API_KEY or REMINDER_EMAILS not configured',
+      skippedReason:
+        'No reminder channels: set RESEND_API_KEY+REMINDER_EMAILS and/or WhatsApp reminder env',
       today,
       sent: 0,
       skipped: 0,

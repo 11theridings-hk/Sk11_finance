@@ -21,6 +21,14 @@
    REMINDER_EMAILS="you@example.com"
    CRON_SECRET="long-random-string"
    APP_BASE_URL="https://sk11finance.up.railway.app"
+   # WhatsApp Cloud API（可選；見 docs/whatsapp-webhooks.md）
+   WHATSAPP_VERIFY_TOKEN="your-verify-token"
+   WHATSAPP_ACCESS_TOKEN="EAAB..."
+   WHATSAPP_PHONE_NUMBER_ID="1234567890"
+   WHATSAPP_APP_SECRET="your-app-secret"
+   WHATSAPP_ALLOWED_PHONES="85291234567"
+   # WHATSAPP_USER_MAP="85291234567:user-uuid"
+   # WHATSAPP_REMINDER_PHONES="85291234567"
    ```
 
 2. **安装依赖**
@@ -70,6 +78,7 @@
 - **薪金（Payroll）**：管理员结算、个人薪金查阅与 PDF 工资单
 - **合约**：管理员维护；仅建立者可编辑/删除核心内容，其他管理员可加附件与备注
 - **邮件提醒（Resend）**：按环境变量收件人发送合约/公开活动到期提醒
+- **WhatsApp（可选）**：Webhook `/api/webhooks/whatsapp`，文字指令完成提醒查询、公帐入数、本月摘要；配置见 [docs/whatsapp-webhooks.md](./docs/whatsapp-webhooks.md)
 
 ## 技术栈
 

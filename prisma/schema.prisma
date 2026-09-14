@@ -42,6 +42,7 @@ model User {
   salaryCyclesCreated SalaryCycle[] @relation("AdminCreatedCycles")
   recurringTemplates RecurringTemplate[] @relation("UserRecurringTemplates")
   recurringInstances RecurringInstance[] @relation("UserRecurringInstances")
+  whatsappBindings   WhatsAppBinding[]   @relation("UserWhatsAppBindings")
 }
 
 model Category {
@@ -262,6 +263,20 @@ model ReminderEmailLog {
 
   @@unique([entityType, entityId, kind, anchorDate])
   @@index([entityType, entityId])
+}
+
+/// WhatsApp 電話 ↔ 系統用戶綁定（E.164 純數字，如 85291234567）
+model WhatsAppBinding {
+  id        String   @id @default(uuid())
+  phoneE164 String   @unique
+  userId    String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation("UserWhatsAppBindings", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model UserProfile {

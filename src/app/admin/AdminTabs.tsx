@@ -15,6 +15,18 @@ import {
 } from "../actions/attachment";
 import type { UserProfileSnapshotInput } from "@/lib/payroll/calc";
 import { openAttachment } from "@/lib/image";
+import {
+  listWhatsAppBindings,
+  removeWhatsAppBinding,
+  upsertWhatsAppBinding,
+} from "../actions/whatsapp";
+
+type WhatsAppBindingRow = {
+  id: string
+  phoneE164: string
+  enabled: boolean
+  user: { id: string; roleName: string; email: string; isAdmin: boolean }
+}
 
 type AdminTabsProps = {
   initialCategories: any[]
@@ -23,10 +35,11 @@ type AdminTabsProps = {
   initialUsers: any[]
   initialAISettings: AISettings
   initialPluginFlags: PluginFlags
+  initialWhatsAppBindings: WhatsAppBindingRow[]
   locale: Locale
 }
 
-export default function AdminTabs({ initialCategories, initialAttachments, initialPools, initialUsers, initialAISettings, initialPluginFlags, locale }: AdminTabsProps) {
+export default function AdminTabs({ initialCategories, initialAttachments, initialPools, initialUsers, initialAISettings, initialPluginFlags, initialWhatsAppBindings, locale }: AdminTabsProps) {
   const t = createTranslator(locale as Locale);
   const [activeTab, setActiveTab] = useState("category");
   
@@ -37,6 +50,7 @@ export default function AdminTabs({ initialCategories, initialAttachments, initi
     { id: "user", label: t('userManagement') },
     { id: "ai-settings", label: t('aiSettings') },
     { id: "plugins", label: t('plugins') },
+    { id: "whatsapp", label: t('whatsapp') },
   ];
 
   return (
@@ -76,6 +90,13 @@ export default function AdminTabs({ initialCategories, initialAttachments, initi
         {activeTab === "user" && <UserTab initialUsers={initialUsers} locale={locale} />}
         {activeTab === "ai-settings" && <AISettingsTab initialSettings={initialAISettings} locale={locale} />}
         {activeTab === "plugins" && <PluginsTab initialFlags={initialPluginFlags} locale={locale} />}
+        {activeTab === "whatsapp" && (
+          <WhatsAppTab
+            initialBindings={initialWhatsAppBindings}
+            users={initialUsers}
+            locale={locale}
+          />
+        )}
       </div>
     </div>
   );
@@ -1339,6 +1360,126 @@ function PluginsTab({ initialFlags, locale }: { initialFlags: PluginFlags; local
         >
           {saving ? t('saving') : t('savePlugins')}
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------- WhatsApp 綁定 ----------------
+function WhatsAppTab({
+  initialBindings,
+  users,
+  locale,
+}: {
+  initialBindings: WhatsAppBindingRow[]
+  users: any[]
+  locale: Locale
+}) {
+  const t = createTranslator(locale);
+  const [bindings, setBindings] = useState(initialBindings);
+  const [userId, setUserId] = useState(users[0]?.id || '');
+  const [phone, setPhone] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const refresh = async () => {
+    const rows = await listWhatsAppBindings();
+    setBindings(rows as WhatsAppBindingRow[]);
+  };
+
+  const handleBind = async () => {
+    if (!userId || !phone.trim()) return;
+    setLoading(true);
+    setMessage('');
+    const res = await upsertWhatsAppBinding(userId, phone.trim(), true);
+    setLoading(false);
+    if (res.success) {
+      setPhone('');
+      setMessage(t('whatsappBindOk'));
+      await refresh();
+    } else {
+      setMessage(res.error || t('whatsappBindFail'));
+    }
+  };
+
+  const handleRemove = async (id: string) => {
+    if (!confirm(t('whatsappUnbind') + '?')) return;
+    setLoading(true);
+    await removeWhatsAppBinding(id);
+    setLoading(false);
+    await refresh();
+  };
+
+  return (
+    <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-5">
+      <div>
+        <h2 className="text-lg font-semibold text-gray-800">{t('whatsapp')}</h2>
+        <p className="mt-2 text-sm text-gray-500">{t('whatsappHint')}</p>
+      </div>
+
+      <div className="space-y-3 rounded-2xl bg-[#F2F2F7] p-4">
+        <label className="block text-sm font-medium text-gray-700">
+          {t('whatsappSelectUser')}
+          <select
+            value={userId}
+            onChange={(e) => setUserId(e.target.value)}
+            className="mt-1 w-full rounded-xl border-0 bg-white px-3 py-2 text-sm"
+          >
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.roleName} ({u.email})
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-sm font-medium text-gray-700">
+          {t('whatsappPhone')}
+          <input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder={t('whatsappPhonePlaceholder')}
+            className="mt-1 w-full rounded-xl border-0 bg-white px-3 py-2 text-sm"
+          />
+        </label>
+        <button
+          onClick={handleBind}
+          disabled={loading || !userId}
+          className="rounded-xl bg-[#25D366] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          {t('whatsappBind')}
+        </button>
+        {message ? <p className="text-sm text-gray-600">{message}</p> : null}
+      </div>
+
+      <div>
+        <h3 className="text-sm font-semibold text-gray-800 mb-2">{t('whatsappBound')}</h3>
+        {bindings.length === 0 ? (
+          <p className="text-sm text-gray-500">{t('whatsappEmpty')}</p>
+        ) : (
+          <ul className="space-y-2">
+            {bindings.map((b) => (
+              <li
+                key={b.id}
+                className="flex items-center justify-between gap-3 rounded-2xl border border-gray-100 px-4 py-3 text-sm"
+              >
+                <div>
+                  <div className="font-semibold text-gray-900">+{b.phoneE164}</div>
+                  <div className="text-gray-500">
+                    {b.user.roleName} · {b.user.email}
+                    {!b.enabled ? ' · OFF' : ''}
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleRemove(b.id)}
+                  disabled={loading}
+                  className="text-[#FF3B30] font-semibold disabled:opacity-50"
+                >
+                  {t('whatsappUnbind')}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

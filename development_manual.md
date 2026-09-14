@@ -37,6 +37,11 @@
 - **[2026-09-06] 常駐 cron-worker（node-cron）**:
   - 新增 [`cron-worker/`](./cron-worker/)：不依賴 cron-job.org；Railway 另開一台服務，Root=`cron-worker`。
   - 預設每天香港 09:00 `POST` 網站 `/api/cron/reminders`；**不要**在網站服務開 Railway Cron Schedule。
+- **[2026-09-14] WhatsApp Webhooks**:
+  - 端點 `GET/POST /api/webhooks/whatsapp`（Meta 驗證 + 入站訊息）。
+  - 文字指令：幫助／提醒／最近／分類／資金池／報表／公帳入數（需確認）。
+  - `WhatsAppBinding` 綁定表 + 管理後台「WhatsApp」分頁；可選到期 WhatsApp 推播。
+  - 說明：[`docs/whatsapp-webhooks.md`](./docs/whatsapp-webhooks.md)。
 
 ### 1.5 部署到 Railway 相關問題與修復
 *   **Next.js 靜態打包錯誤 (Prerender Error)**：Next.js 在 `npm run build` 時會嘗試預渲染頁面，導致存取資料庫失敗。
