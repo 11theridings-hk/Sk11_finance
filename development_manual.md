@@ -42,6 +42,10 @@
   - 文字指令：幫助／提醒／最近／分類／資金池／報表／公帳入數（需確認）。
   - `WhatsAppBinding` 綁定表 + 管理後台「WhatsApp」分頁；可選到期 WhatsApp 推播。
   - 說明：[`docs/whatsapp-webhooks.md`](./docs/whatsapp-webhooks.md)。
+- **[2026-09-14] WhatsApp 分步公帳＋OCR（已拍板，待 Meta 審核後開發）**:
+  - 流程：`公帳`／傳圖 → 類型按鈕 → 分類 List → 金額／備註／附件 → 是否 OCR → 確認入帳。
+  - 手填優先、OCR 補缺；確認前不寫庫。
+  - 規格與 checklist：[`docs/whatsapp-interaction-roadmap.md`](./docs/whatsapp-interaction-roadmap.md) §4.1。
 
 ### 1.5 部署到 Railway 相關問題與修復
 *   **Next.js 靜態打包錯誤 (Prerender Error)**：Next.js 在 `npm run build` 時會嘗試預渲染頁面，導致存取資料庫失敗。
