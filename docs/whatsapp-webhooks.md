@@ -58,6 +58,8 @@ Webhook 欄位請訂閱：`messages`。
 來電號碼會正規化成純數字 E.164（如 `85291234567`）。
 
 互動功能路線與可行性見 [`docs/whatsapp-interaction-roadmap.md`](./whatsapp-interaction-roadmap.md)。
+
+**已拍板、等 Meta 審核後開發：** 分步公帳上單＋OCR（roadmap §4.1）。審核通過後可直接開 Agent 任務：「實作 docs/whatsapp-interaction-roadmap.md §4.1」。
 ## 用戶可傳送的指令
 
 | 指令 | 說明 | 權限 |

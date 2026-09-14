@@ -70,11 +70,15 @@
 - [ ] Railway 補齊 `ACCESS_TOKEN` / `PHONE_NUMBER_ID` / `APP_SECRET`  
 - [ ] 到期提醒改走 Template + `WHATSAPP_REMINDER_PHONES`（或依綁定推播）
 
-### Phase B — 更好用的「上單」
+### Phase B — 分步上單＋OCR（**已拍板，等 Meta 審核後開發**）
 
-1. **List／Button**：選 收入/支出 → 常用分類 → 輸入金額 → 確認  
-2. **收圖 OCR**：下載 media → 既有 OCR → 回傳草稿 → 確認入帳  
-3. **管理員審核佇列**：`待審` 列表 + 一鍵通過
+> **狀態：PENDING — 等 Meta App／WhatsApp 商務審核通過後再實作。**  
+> **拍板日期：2026-09-14**（營運確認工作流程）  
+> 詳細規格見下方 **§4.1**。
+
+1. 分步對話：`公帳`／直接傳圖啟動 → 類型 → 分類 List → 金額 → 備註／附件 → 是否 OCR → 確認入帳  
+2. 下載 WhatsApp media → 既有 OCR → 手填優先、OCR 補缺／核對  
+3. （可選）管理員 `待審` 列表 + 一鍵通過
 
 ### Phase C — 報表與深度作業
 
@@ -84,13 +88,72 @@
 
 ### Phase D — 可選進階
 
-- WhatsApp Flows 完整上單表單  
+- WhatsApp Flows 完整上單表單（最接近網頁表單；工期較長）  
 - 多語言指令  
 - 會話狀態機（多步對話）存 DB，取代 `SystemSetting` pending
 
 ---
 
-## 5. 「在 WhatsApp 直接上單」建議產品規格
+## 4.1 【已拍板】公帳分步＋OCR 工作流程（Meta 審核後執行）
+
+### 產品目標
+
+用戶在 WhatsApp 說要入公帳（或傳 `公帳`／直接丟收據圖）時，系統用**選單＋分步輸入**收集分類／金額／備註／附件，並可選**圖像辨識**後完成入帳——**不要**做成單一網頁式表單（WhatsApp 不支援同則訊息內嵌完整表單；先做分步對話）。
+
+### 標準流程（實作時照此順序）
+
+```text
+觸發：用戶傳「公帳」／「上單」／「入帳」
+      或直接傳收據圖片（image/document）
+
+1) Bot：請選類型 → Reply buttons［支出］［收入］［取消］
+2) Bot：請選分類 → List message（常用分類；「其他」可自打名稱）
+3) Bot：請輸入金額（可回「OCR」交給辨識；可略過若已有圖）
+4) Bot：備註？（可「略過」）／可再傳附件圖
+5) 若有附件 → Bot：是否使用圖像辨識填補／核對？［是］［否］
+6) 若「是」→ 下載 media → 呼叫現有 OCR → 合併草稿
+   （手填優先；OCR 只補空白或提示差異）
+7) Bot：確認卡（類型／分類／金額／備註／附件數／OCR 與否）
+      ［確認］［改金額］［取消］
+8) 確認 → createRecord（審核戶 → PENDING；備註加 [WhatsApp]）
+```
+
+### UX 原則（已確認）
+
+| 原則 | 說明 |
+|------|------|
+| 先附件也可 | 直接傳圖應能開流程，不必先打「公帳」 |
+| 手填優先、OCR 補缺 | 避免用戶手打金額又強制再 OCR 造成衝突 |
+| 一定要確認卡 | 防誤入；確認前不寫 DB |
+| 分類過多 | List 放常用；其餘走「其他」+ 文字 |
+| OCR 失敗 | 保留手填，整單不作廢 |
+| 多圖 | 皆當附件；OCR 可先跑第一張或摘要多張 |
+
+### 技術實作清單（給後續 Agent）
+
+- [ ] `WhatsAppSession`（或等效）表：`phoneE164`、`step`、`draftJson`、`expiresAt`（TTL ~30 分鐘）  
+- [ ] 發送 Reply buttons / List messages（Cloud API interactive）  
+- [ ] 入站處理 image／document：Graph media download → 存附件儲存  
+- [ ] 串接現有 OCR action／lib，產出金額／備註建議  
+- [ ] 草稿合併策略：user fields win；OCR fills nulls；差異列在確認卡  
+- [ ] 重用網頁公帳建立邏輯與資金池審核規則  
+- [ ] 指令 `取消`／逾時自動清 session  
+- [ ] 保留現有一行指令 `公帳 支 120 餐飲 …` 作進階快捷（不刪）
+
+### 前置條件（開發前勾選）
+
+- [ ] Meta App 審核／WhatsApp 商務號碼可對正式用戶收發  
+- [ ] Railway 已設 `WHATSAPP_ACCESS_TOKEN`、`WHATSAPP_PHONE_NUMBER_ID`、`WHATSAPP_APP_SECRET`  
+- [ ] 操作者已綁定 `contactPhone`／WhatsAppBinding 且有公帳權限  
+- [ ] Webhook `messages` 訂閱正常；測試號已能跑現有文字指令
+
+### 觸發關鍵字（建議）
+
+`公帳`、`上單`、`入帳`、`入數`，以及**純媒體訊息**（已綁定用戶、無進行中其他 session 時）。
+
+---
+
+## 5. 「在 WhatsApp 直接上單」——現有快捷（已上線）
 
 最小可用（MVP，多數已具備）：
 
@@ -101,21 +164,7 @@
 → 寫入 Record（審核戶則 PENDING）
 ```
 
-下一版建議：
-
-```text
-用戶：上單
-Bot：請選［支出］［收入］
-用戶：支出
-Bot：請選分類（List：餐飲／交通／…）
-用戶：選「餐飲」
-Bot：請輸入金額
-用戶：120
-Bot：可傳收據照片或回「略過」
-→ 確認卡片 → 入帳
-```
-
-這樣比死記指令錯誤率低，也較適合非管理員同事。
+分步＋OCR 完整版見 **§4.1**（審核後開發）。
 
 ---
 
