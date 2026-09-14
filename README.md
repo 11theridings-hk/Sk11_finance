@@ -78,7 +78,7 @@
 - **薪金（Payroll）**：管理员结算、个人薪金查阅与 PDF 工资单
 - **合约**：管理员维护；仅建立者可编辑/删除核心内容，其他管理员可加附件与备注
 - **邮件提醒（Resend）**：按环境变量收件人发送合约/公开活动到期提醒
-- **WhatsApp（可选）**：Webhook `/api/webhooks/whatsapp`，文字指令完成提醒查询、公帐入数、本月摘要；配置见 [docs/whatsapp-webhooks.md](./docs/whatsapp-webhooks.md)
+- **WhatsApp（可选）**：Webhook `/api/webhooks/whatsapp`；用户资料「联络电话」保存后自动绑定身份。互动路线见 [docs/whatsapp-interaction-roadmap.md](./docs/whatsapp-interaction-roadmap.md)；配置见 [docs/whatsapp-webhooks.md](./docs/whatsapp-webhooks.md)
 
 ## 技术栈
 

@@ -812,34 +812,40 @@ function UserTab({ initialUsers, locale }: { initialUsers: any[], locale: Locale
     })
     let p: FullProfileForm = { ...EMPTY_PROFILE }
     try {
-      const resp = await getMyProfile(user.id)
-      if (resp && (resp as any).profile) {
-        const raw = (resp as any).profile
+      // getMyProfile 直接回傳 profile 物件（或 null），不是 { profile }
+      const raw = await getMyProfile(user.id)
+      if (raw) {
         p = {
-          legalNameEn: raw.legalNameEn || user.roleName || '',
-          legalNameZh: raw.legalNameZh || '',
-          hkid: raw.hkid || '',
-          passportNo: raw.passportNo || '',
-          dateOfBirth: raw.dateOfBirth ? new Date(raw.dateOfBirth).toISOString().slice(0, 10) : '',
-          jobTitle: raw.jobTitle || '',
-          department: raw.department || '',
-          dateJoined: raw.dateJoined ? new Date(raw.dateJoined).toISOString().slice(0, 10) : '',
-          defaultBaseSalaryHkd: Number(raw.defaultBaseSalaryHkd) || 0,
-          bankName: raw.bankName || '',
-          bankAccountNo: raw.bankAccountNo || '',
-          mpfAccountNo: raw.mpfAccountNo || '',
-          addressLine1: raw.addressLine1 || '',
-          addressLine2: raw.addressLine2 || '',
-          contactPhone: raw.contactPhone || '',
-          contactEmail: raw.contactEmail || '',
+          legalNameEn: (raw as any).legalNameEn || user.roleName || '',
+          legalNameZh: (raw as any).legalNameZh || '',
+          hkid: (raw as any).hkid || '',
+          passportNo: (raw as any).passportNo || '',
+          dateOfBirth: (raw as any).dateOfBirth
+            ? new Date((raw as any).dateOfBirth).toISOString().slice(0, 10)
+            : '',
+          jobTitle: (raw as any).jobTitle || '',
+          department: (raw as any).department || '',
+          dateJoined: (raw as any).dateJoined
+            ? new Date((raw as any).dateJoined).toISOString().slice(0, 10)
+            : '',
+          defaultBaseSalaryHkd: Number((raw as any).defaultBaseSalaryHkd) || 0,
+          bankName: (raw as any).bankName || '',
+          bankAccountNo: (raw as any).bankAccountNo || '',
+          mpfAccountNo: (raw as any).mpfAccountNo || '',
+          addressLine1: (raw as any).addressLine1 || '',
+          addressLine2: (raw as any).addressLine2 || '',
+          contactPhone: (raw as any).contactPhone || '',
+          contactEmail: (raw as any).contactEmail || '',
           emergencyName: (raw as any).emergencyName || '',
           emergencyPhone: (raw as any).emergencyPhone || '',
         }
       } else {
         p.legalNameEn = user.roleName || ''
+        p.contactPhone = user.profile?.contactPhone || user.whatsappBindings?.[0]?.phoneE164 || ''
       }
-    } catch (e) {
+    } catch (_e) {
       p.legalNameEn = user.roleName || ''
+      p.contactPhone = user.profile?.contactPhone || user.whatsappBindings?.[0]?.phoneE164 || ''
     }
     setEditProfile(p)
   }
@@ -881,7 +887,22 @@ function UserTab({ initialUsers, locale }: { initialUsers: any[], locale: Locale
 
     if (ok) {
       alert(t('savedSuccess'))
-      setUsers(prev => prev.map(u => u.id === editingUser.id ? { ...u, email, roleName } : u))
+      const phone = String(editProfile.contactPhone || '').replace(/\D/g, '')
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === editingUser.id
+            ? {
+                ...u,
+                email,
+                roleName,
+                profile: { ...(u.profile || {}), contactPhone: phone || null },
+                whatsappBindings: phone
+                  ? [{ phoneE164: phone.startsWith('852') || phone.length > 8 ? phone : `852${phone}` }]
+                  : [],
+              }
+            : u,
+        ),
+      )
       closeEditModal()
     } else {
       alert(msg)
@@ -1003,9 +1024,13 @@ function UserTab({ initialUsers, locale }: { initialUsers: any[], locale: Locale
                       ...p,
                       [f.key]: e.target.value || null,
                     }))}
+                    placeholder={f.key === 'contactPhone' ? t('whatsappPhonePlaceholder') : undefined}
                     className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900 placeholder-gray-400"
                   />
                 )}
+                {f.key === 'contactPhone' ? (
+                  <p className="mt-1 text-[11px] text-gray-500">{t('whatsappPhoneHint')}</p>
+                ) : null}
               </div>
             ))}
           </div>
@@ -1036,6 +1061,19 @@ function UserTab({ initialUsers, locale }: { initialUsers: any[], locale: Locale
                   ) : null}
                 </div>
                 <div className="mt-1 text-xs text-gray-500 break-all">{user.email || '—'}</div>
+                {(user.profile?.contactPhone || user.whatsappBindings?.[0]?.phoneE164) ? (
+                  <div className="mt-1 text-xs text-gray-600">
+                    {t('whatsappPhone')}: +
+                    {user.profile?.contactPhone || user.whatsappBindings?.[0]?.phoneE164}
+                    {user.whatsappBindings?.[0]?.phoneE164 ? (
+                      <span className="ml-2 inline-block px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-semibold">
+                        WhatsApp
+                      </span>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="mt-1 text-xs text-amber-600">{t('whatsappPhoneMissing')}</div>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -1180,9 +1218,13 @@ function UserTab({ initialUsers, locale }: { initialUsers: any[], locale: Locale
                           ...p,
                           [f.key]: e.target.value || null,
                         }))}
+                        placeholder={f.key === 'contactPhone' ? t('whatsappPhonePlaceholder') : undefined}
                         className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#007AFF]/30 focus:border-[#007AFF] text-sm text-gray-900"
                       />
                     )}
+                    {f.key === 'contactPhone' ? (
+                      <p className="mt-1 text-[11px] text-gray-500">{t('whatsappPhoneHint')}</p>
+                    ) : null}
                   </div>
                 ))}
               </div>

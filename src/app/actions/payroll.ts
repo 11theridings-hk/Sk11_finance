@@ -17,6 +17,10 @@ import {
 import JSZip from 'jszip';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  normalizeContactPhoneInput,
+  syncWhatsAppBindingForUser,
+} from '@/lib/whatsapp/phoneSync';
 
 export type PayrollStatus = 'DRAFT' | 'SUBMITTED' | 'CONFIRMED' | 'PAID' | 'REJECTED';
 export type SalaryCycleStatus = 'OPEN' | 'LOCKED' | 'SETTLED';
@@ -180,6 +184,11 @@ export async function saveMyProfile(userId: string, profile: UserProfileSnapshot
   if (!profile.legalNameEn || !profile.legalNameEn.trim()) {
     throw new Error('legalNameEn 為必填');
   }
+
+  const phoneNorm = normalizeContactPhoneInput(profile.contactPhone);
+  if (!phoneNorm.ok) throw new Error(phoneNorm.error);
+  const contactPhone = phoneNorm.phoneE164;
+
   const saved = await prisma.userProfile.upsert({
     where: { userId },
     create: {
@@ -198,7 +207,7 @@ export async function saveMyProfile(userId: string, profile: UserProfileSnapshot
       mpfAccountNo: profile.mpfAccountNo || null,
       addressLine1: profile.addressLine1 || null,
       addressLine2: profile.addressLine2 || null,
-      contactPhone: profile.contactPhone || null,
+      contactPhone,
       contactEmail: profile.contactEmail || null,
       emergencyName: profile.emergencyName || null,
       emergencyPhone: profile.emergencyPhone || null,
@@ -218,12 +227,16 @@ export async function saveMyProfile(userId: string, profile: UserProfileSnapshot
       mpfAccountNo: profile.mpfAccountNo || null,
       addressLine1: profile.addressLine1 || null,
       addressLine2: profile.addressLine2 || null,
-      contactPhone: profile.contactPhone || null,
+      contactPhone,
       contactEmail: profile.contactEmail || null,
       emergencyName: profile.emergencyName || null,
       emergencyPhone: profile.emergencyPhone || null,
     },
   });
+
+  // 聯絡電話即 WhatsApp 身份：同步綁定表
+  await syncWhatsAppBindingForUser(userId, contactPhone);
+
   return ser(saved);
 }
 
@@ -232,6 +245,11 @@ export async function adminUpdateUserProfile(userId: string, profile: UserProfil
   if (!profile.legalNameEn || !profile.legalNameEn.trim()) {
     throw new Error('legalNameEn 為必填');
   }
+
+  const phoneNorm = normalizeContactPhoneInput(profile.contactPhone);
+  if (!phoneNorm.ok) throw new Error(phoneNorm.error);
+  const contactPhone = phoneNorm.phoneE164;
+
   const saved = await prisma.userProfile.upsert({
     where: { userId },
     create: {
@@ -250,7 +268,7 @@ export async function adminUpdateUserProfile(userId: string, profile: UserProfil
       mpfAccountNo: profile.mpfAccountNo || null,
       addressLine1: profile.addressLine1 || null,
       addressLine2: profile.addressLine2 || null,
-      contactPhone: profile.contactPhone || null,
+      contactPhone,
       contactEmail: profile.contactEmail || null,
       emergencyName: profile.emergencyName || null,
       emergencyPhone: profile.emergencyPhone || null,
@@ -270,12 +288,15 @@ export async function adminUpdateUserProfile(userId: string, profile: UserProfil
       mpfAccountNo: profile.mpfAccountNo || null,
       addressLine1: profile.addressLine1 || null,
       addressLine2: profile.addressLine2 || null,
-      contactPhone: profile.contactPhone || null,
+      contactPhone,
       contactEmail: profile.contactEmail || null,
       emergencyName: profile.emergencyName || null,
       emergencyPhone: profile.emergencyPhone || null,
     },
   });
+
+  await syncWhatsAppBindingForUser(userId, contactPhone);
+
   return ser(saved);
 }
 

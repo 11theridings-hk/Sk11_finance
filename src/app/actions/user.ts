@@ -7,6 +7,10 @@ import { getCurrentLocale } from '@/lib/locale'
 import { createTranslator } from '@/lib/i18n'
 import type { PublicLedgerRole } from '@/lib/access'
 import type { UserProfileSnapshotInput } from '@/lib/payroll/calc'
+import {
+  normalizeContactPhoneInput,
+  syncWhatsAppBindingForUser,
+} from '@/lib/whatsapp/phoneSync'
 
 async function checkAdmin() {
   const session = await getSession()
@@ -23,11 +27,27 @@ export async function getUsers() {
   if (!session) return []
   if (session.isAdmin) {
     return await prisma.user.findMany({
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
+      include: {
+        profile: { select: { contactPhone: true } },
+        whatsappBindings: {
+          where: { enabled: true },
+          select: { phoneE164: true },
+          take: 1,
+        },
+      },
     })
   } else {
     return await prisma.user.findMany({
-      where: { id: session.userId }
+      where: { id: session.userId },
+      include: {
+        profile: { select: { contactPhone: true } },
+        whatsappBindings: {
+          where: { enabled: true },
+          select: { phoneE164: true },
+          take: 1,
+        },
+      },
     })
   }
 }
@@ -76,8 +96,18 @@ export async function createUser(data: CreateUserPayload) {
         },
       })
 
-      if (data.profile && (data.profile.legalNameEn || data.profile.jobTitle || data.profile.defaultBaseSalaryHkd)) {
+      if (
+        data.profile &&
+        (data.profile.legalNameEn ||
+          data.profile.jobTitle ||
+          data.profile.defaultBaseSalaryHkd ||
+          data.profile.contactPhone)
+      ) {
         const p = data.profile
+        const phoneNorm = normalizeContactPhoneInput(p.contactPhone)
+        if (!phoneNorm.ok) {
+          throw new Error(phoneNorm.error)
+        }
         await tx.userProfile.create({
           data: {
             userId: user.id,
@@ -95,20 +125,25 @@ export async function createUser(data: CreateUserPayload) {
             mpfAccountNo: p.mpfAccountNo || null,
             addressLine1: p.addressLine1 || null,
             addressLine2: p.addressLine2 || null,
-            contactPhone: p.contactPhone || null,
+            contactPhone: phoneNorm.phoneE164,
             contactEmail: p.contactEmail || null,
             emergencyName: (p as any).emergencyName || null,
             emergencyPhone: (p as any).emergencyPhone || null,
           },
         })
+        return { user, contactPhone: phoneNorm.phoneE164 }
       }
 
-      return user
+      return { user, contactPhone: null as string | null }
     })
+
+    if (saved.contactPhone) {
+      await syncWhatsAppBindingForUser(saved.user.id, saved.contactPhone)
+    }
 
     revalidatePath('/admin')
     revalidatePath('/admin/payroll')
-    return { success: true, user: saved }
+    return { success: true, user: saved.user }
   } catch (error: any) {
     return { success: false, error: error.message || '建立失敗' }
   }

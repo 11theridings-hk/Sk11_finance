@@ -248,8 +248,18 @@ export default function ProfileTab(props: Props) {
           <Field label="地址 Address Line 2">
             <input className="w-full border border-slate-300 rounded px-2 py-1.5 disabled:bg-slate-50" disabled={readonly} value={form.addressLine2 ?? ''} onChange={(e) => onChange('addressLine2', e.target.value)} />
           </Field>
-          <Field label="電話 Phone">
-            <input className="w-full border border-slate-300 rounded px-2 py-1.5 disabled:bg-slate-50" disabled={readonly} value={form.contactPhone ?? ''} onChange={(e) => onChange('contactPhone', e.target.value)} />
+          <Field label="電話 Phone（WhatsApp 身份）">
+            <input
+              type="tel"
+              className="w-full border border-slate-300 rounded px-2 py-1.5 disabled:bg-slate-50"
+              disabled={readonly}
+              value={form.contactPhone ?? ''}
+              onChange={(e) => onChange('contactPhone', e.target.value)}
+              placeholder="85291234567"
+            />
+            <p className="text-[11px] text-slate-500 mt-1">
+              請含國碼。儲存後會自動綁定 WhatsApp 身份（香港 8 位號碼可只填本地號）。
+            </p>
           </Field>
           <Field label="電郵 Email">
             <input type="email" className="w-full border border-slate-300 rounded px-2 py-1.5 disabled:bg-slate-50" disabled={readonly} value={form.contactEmail ?? ''} onChange={(e) => onChange('contactEmail', e.target.value)} />

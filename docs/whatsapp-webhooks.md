@@ -46,15 +46,18 @@ Webhook 欄位請訂閱：`messages`。
 
 部署後執行 migration：`WhatsAppBinding` 表。
 
-## 用戶綁定（三選一）
+## 用戶綁定（建議用用戶資料電話）
 
-1. **資料表 `WhatsAppBinding`**（建議）  
-   管理員可用 server action：`upsertWhatsAppBinding(userId, '85291234567')`（見 `src/app/actions/whatsapp.ts`）。
-2. **個人資料 `UserProfile.contactPhone`** 填含國碼電話。
-3. **環境變數 `WHATSAPP_USER_MAP`**。
+1. **個人資料／管理後台「聯絡電話」**（建議）  
+   儲存時會正規化成 E.164，並**自動同步 `WhatsAppBinding`**。香港 8 位本地號會補 `852`。
+2. **管理後台 → WhatsApp 分頁**  
+   手動綁定；會反寫 `contactPhone`。
+3. **環境變數 `WHATSAPP_USER_MAP`**（可選）  
+   `電話:userId` 對照。
 
-來電號碼會正規化成純數字 E.164（香港 8 位本地號會自動補 `852`）。
+來電號碼會正規化成純數字 E.164（如 `85291234567`）。
 
+互動功能路線與可行性見 [`docs/whatsapp-interaction-roadmap.md`](./whatsapp-interaction-roadmap.md)。
 ## 用戶可傳送的指令
 
 | 指令 | 說明 | 權限 |

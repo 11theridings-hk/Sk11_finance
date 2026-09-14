@@ -112,7 +112,7 @@ export async function resolveWhatsAppActor(fromPhone: string): Promise<{
   return {
     actor: null,
     reason:
-      '尚未綁定 WhatsApp。請管理員在資料庫 WhatsAppBinding 寫入電話，或於個人資料填寫聯絡電話，或設定 WHATSAPP_USER_MAP。',
+      '尚未綁定 WhatsApp。請在個人資料或管理後台填寫含國碼的聯絡電話並儲存，或於 WhatsApp 分頁手動綁定。',
   }
 }
 
