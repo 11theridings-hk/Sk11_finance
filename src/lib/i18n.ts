@@ -79,7 +79,7 @@ const messages = {
     enterPassword: '請輸入密碼',
     account: '帳號',
     accountPlaceholder: 'Email 或角色名稱',
-    accountHint: '使用 Email 登入；未建立 Email 前可用角色名稱登入。',
+    accountHint: '請填 Email 或角色名稱，再填密碼。舊版若只記密碼：帳號與密碼欄都填同一組密碼亦可嘗試。',
     confirmPassword: '確認密碼',
     passwordMismatch: '密碼與確認密碼不一致',
     email: '電子郵件（帳號）',

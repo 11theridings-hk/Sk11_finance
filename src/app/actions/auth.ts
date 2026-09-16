@@ -80,8 +80,9 @@ export async function login(account: string, password: string, isAdminLogin: boo
   }
 
   if (!user) {
+    // roleName：大小寫不敏感（舊帳常記不清大小寫）
     const allByRole = await prisma.user.findMany({
-      where: { roleName: normalizedAccount },
+      where: { roleName: { equals: normalizedAccount, mode: 'insensitive' } },
       select: { id: true, roleName: true, isAdmin: true, publicLedgerRole: true, password: true },
     })
     for (const u of allByRole) {
@@ -89,6 +90,44 @@ export async function login(account: string, password: string, isAdminLogin: boo
         user = u
         break
       }
+    }
+  }
+
+  // 相容舊版「只用密碼登入」：若雜湊密碼在庫中唯一命中一人，且帳號欄等於其 email / roleName / 密碼本身
+  if (!user) {
+    const byPassword = await prisma.user.findMany({
+      where: { password: hashedPassword },
+      select: { id: true, roleName: true, isAdmin: true, publicLedgerRole: true, email: true },
+    })
+    if (byPassword.length === 1) {
+      const only = byPassword[0]
+      const accountMatches =
+        only.email.toLowerCase() === normalizedAccount.toLowerCase() ||
+        only.roleName.toLowerCase() === normalizedAccount.toLowerCase() ||
+        normalizedAccount === plainPassword
+      if (accountMatches) {
+        user = only
+      }
+    }
+  }
+
+  // 極舊資料：明文密碼尚未升雜湊
+  if (!user) {
+    const legacy = await prisma.user.findFirst({
+      where: { password: plainPassword },
+      select: { id: true, roleName: true, isAdmin: true, publicLedgerRole: true, email: true },
+    })
+    if (
+      legacy &&
+      (legacy.email.toLowerCase() === normalizedAccount.toLowerCase() ||
+        legacy.roleName.toLowerCase() === normalizedAccount.toLowerCase() ||
+        normalizedAccount === plainPassword)
+    ) {
+      await prisma.user.update({
+        where: { id: legacy.id },
+        data: { password: hashedPassword },
+      })
+      user = legacy
     }
   }
 
