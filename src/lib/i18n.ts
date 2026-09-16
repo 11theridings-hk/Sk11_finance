@@ -717,7 +717,7 @@ const messages = {
     enterPassword: 'Enter password',
     account: 'Account',
     accountPlaceholder: 'Email or Role Name',
-    accountHint: 'Login with Email; if Email is not yet set, use your Role Name.',
+    accountHint: 'Enter Email or Role Name, then password. Legacy password-only users: try the same password in both fields.',
     confirmPassword: 'Confirm Password',
     passwordMismatch: 'Passwords do not match',
     email: 'Email (Login Account)',
