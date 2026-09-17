@@ -144,6 +144,7 @@ model PrivateRecord {
   subCategory   Category?  @relation("SubCategoryPrivateRecords", fields: [subCategoryId], references: [id])
   thirdCategory Category?  @relation("ThirdCategoryPrivateRecords", fields: [thirdCategoryId], references: [id])
   attachments   Attachment[] @relation("PrivateRecordAttachments")
+  memos         Memo[]       @relation("PrivateRecordMemos")
 }
 
 model Contract {
@@ -191,6 +192,7 @@ model Activity {
   // 关系
   user        User         @relation("UserActivities", fields: [userId], references: [id])
   attachments Attachment[] @relation("ActivityAttachments")
+  memos       Memo[]       @relation("ActivityMemos")
 }
 
 model Attachment {
@@ -231,14 +233,18 @@ model Memo {
   updatedAt DateTime @updatedAt
 
   // 外键
-  authorId   String
-  recordId   String?
-  contractId String?
+  authorId        String
+  recordId        String?
+  contractId      String?
+  privateRecordId String?
+  activityId      String?
 
   // 关系
-  author   User      @relation("UserMemos", fields: [authorId], references: [id])
-  record   Record?   @relation("RecordMemos", fields: [recordId], references: [id])
-  contract Contract? @relation("ContractMemos", fields: [contractId], references: [id])
+  author        User           @relation("UserMemos", fields: [authorId], references: [id])
+  record        Record?        @relation("RecordMemos", fields: [recordId], references: [id])
+  contract      Contract?      @relation("ContractMemos", fields: [contractId], references: [id])
+  privateRecord PrivateRecord? @relation("PrivateRecordMemos", fields: [privateRecordId], references: [id])
+  activity      Activity?      @relation("ActivityMemos", fields: [activityId], references: [id])
 }
 
 model SystemSetting {

@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useMemo, useState } from 'react'
-import { createActivity, addActivityAttachment } from '../actions/activity'
+import { createActivity } from '../actions/activity'
 import { createTranslator, type Locale } from '@/lib/i18n'
 import { compressImage, MAX_PDF_PAGES, prepareAttachments, type ClientAttachment } from '@/lib/image'
 import ActivityDetailModal from '../ActivityDetailModal'
@@ -40,6 +40,7 @@ export default function ActivitiesClient({ locale, currentUserId, isAdmin, initi
   const [reminderDays, setReminderDays] = useState('15')
   const [visibility, setVisibility] = useState<'PUBLIC' | 'PRIVATE'>('PUBLIC')
   const [note, setNote] = useState('')
+  const [ocrMemo, setOcrMemo] = useState('')
   const [attachments, setAttachments] = useState<ClientAttachment[]>([])
   const [ocrAttachmentIndex, setOcrAttachmentIndex] = useState(0)
   const [attachmentNote, setAttachmentNote] = useState('')
@@ -122,28 +123,24 @@ export default function ActivitiesClient({ locale, currentUserId, isAdmin, initi
     }
 
     setIsSubmitting(true)
-    const [first, ...rest] = attachments
     const res = await createActivity({
       title: title.trim(),
       note: note.trim() || undefined,
       eventDate: new Date(eventDate),
       reminderDays: Number(reminderDays),
       visibility,
-      attachment: first
-        ? { url: first.url, size: first.size, note: first.note || attachmentNote || undefined }
-        : undefined,
+      attachments:
+        attachments.length > 0
+          ? attachments.map((a) => ({
+              url: a.url,
+              size: a.size,
+              note: a.note || attachmentNote || undefined,
+            }))
+          : undefined,
+      initialMemo: ocrMemo.trim() || undefined,
     })
 
     if (res.success) {
-      if (res.activity?.id && rest.length > 0) {
-        for (const page of rest) {
-          await addActivityAttachment(res.activity.id, {
-            url: page.url,
-            size: page.size,
-            note: page.note || attachmentNote || undefined,
-          })
-        }
-      }
       window.location.reload()
       return
     }
@@ -155,10 +152,18 @@ export default function ActivitiesClient({ locale, currentUserId, isAdmin, initi
   const appendRecognizedText = (payload: OcrResolvedPayload | string) => {
     if (typeof payload === 'string') {
       setNote((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
+      setOcrMemo((current) => {
+        const line = `${locale === 'en' ? 'OCR' : '圖像辨識'}: ${payload}`
+        return current.trim() ? `${current.trim()}\n${line}` : line
+      })
       return
     }
     if (payload.noteText) {
       setNote((current) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
+      setOcrMemo((current) => {
+        const line = `${locale === 'en' ? 'OCR' : '圖像辨識'}: ${payload.noteText}`
+        return current.trim() ? `${current.trim()}\n${line}` : line
+      })
     }
     if (payload.attachmentMemo) {
       const ocrIndex = attachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0
@@ -329,7 +334,7 @@ export default function ActivitiesClient({ locale, currentUserId, isAdmin, initi
               <div className="flex justify-end">
                 <OcrNoteButton
                   locale={locale}
-                  attachment={attachments[ocrAttachmentIndex] || attachments[0] || null}
+                  attachments={attachments}
                   context="activity"
                   onResolved={appendRecognizedText}
                   disabled={isSubmitting}

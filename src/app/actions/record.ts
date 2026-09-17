@@ -25,6 +25,8 @@ export type CreateRecordInput = {
   attachment?: AttachmentPayload
   /** Multi-page PDF / multiple images. Takes precedence over single `attachment` when non-empty. */
   attachments?: AttachmentPayload[]
+  /** Timeline memo created together with the record (e.g. OCR keywords). */
+  initialMemo?: string
 }
 
 function getDeepestCategoryId(data: {
@@ -95,6 +97,16 @@ export async function createRecord(data: CreateRecordInput) {
             note: item.note,
             uploaderId: session.userId,
             categoryId: getDeepestCategoryId(data),
+            recordId: record.id,
+          },
+        })
+      }
+
+      if (data.initialMemo?.trim()) {
+        await tx.memo.create({
+          data: {
+            content: data.initialMemo.trim(),
+            authorId: session.userId,
             recordId: record.id,
           },
         })
@@ -289,6 +301,39 @@ export async function addRecordMemo(recordId: string, content: string) {
         authorId: session.userId,
         recordId
       }
+    })
+
+    revalidatePath('/')
+    revalidatePath('/report')
+    revalidatePath('/review')
+    return { success: true }
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
+}
+
+/** Append OCR/keywords text to Record.note and create a timeline memo. */
+export async function appendRecordNoteKeywords(recordId: string, noteText: string) {
+  try {
+    const { session, record } = await assertRecordPermission(recordId)
+    const addition = noteText.trim()
+    if (!addition) return { success: true }
+
+    const nextNote = record.note?.trim() ? `${record.note.trim()}\n${addition}` : addition
+    await prisma.$transaction(async (tx) => {
+      await tx.record.update({
+        where: { id: recordId },
+        data: { note: nextNote },
+      })
+      await tx.memo.create({
+        data: {
+          content: addition.startsWith('OCR') || addition.startsWith('圖像辨識')
+            ? addition
+            : `圖像辨識: ${addition}`,
+          authorId: session.userId,
+          recordId,
+        },
+      })
     })
 
     revalidatePath('/')

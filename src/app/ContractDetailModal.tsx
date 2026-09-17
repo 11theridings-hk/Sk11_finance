@@ -1,9 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import { addContractAttachment, addContractMemo, deleteContract, updateContract } from './actions/contract'
+import { addContractAttachment, addContractMemo, appendContractNoteKeywords, deleteContract, updateContract } from './actions/contract'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
 import { compressImage, MAX_PDF_PAGES, openAttachment, prepareAttachments, type ClientAttachment } from '@/lib/image'
+import OcrNoteButton, { type OcrResolvedPayload } from '@/components/OcrNoteButton'
+import OcrSavedAttachmentButton from '@/components/OcrSavedAttachmentButton'
+import NoteTimeline from '@/components/NoteTimeline'
 
 export default function ContractDetailModal({
   contract,
@@ -34,7 +37,7 @@ export default function ContractDetailModal({
   const [attachments, setAttachments] = useState<ClientAttachment[]>([])
   const [ocrAttachmentIndex, setOcrAttachmentIndex] = useState(0)
   const [attachmentNote, setAttachmentNote] = useState('')
-  const [memoContent, setMemoContent] = useState('')
+  const [pendingOcrKeywords, setPendingOcrKeywords] = useState('')
   const [loading, setLoading] = useState(false)
 
   const handleAttachmentChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -120,19 +123,26 @@ export default function ContractDetailModal({
         return
       }
     }
+    if (pendingOcrKeywords.trim()) {
+      await appendContractNoteKeywords(contract.id, pendingOcrKeywords.trim())
+    }
     window.location.reload()
   }
 
-  const handleAddMemo = async () => {
-    if (!memoContent.trim()) return
-    setLoading(true)
-    const res = await addContractMemo(contract.id, memoContent.trim())
-    if (res.success) {
-      window.location.reload()
-      return
+  const onOcrResolved = (payload: OcrResolvedPayload | string) => {
+    const noteText = typeof payload === 'string' ? payload : payload.noteText
+    const attachmentMemo = typeof payload === 'string' ? '' : payload.attachmentMemo
+    if (noteText) {
+      setNote((current: string) => (current.trim() ? `${current.trim()}\n${noteText}` : noteText))
+      setPendingOcrKeywords((current) => (current.trim() ? `${current.trim()}\n${noteText}` : noteText))
     }
-    alert(res.error)
-    setLoading(false)
+    if (attachmentMemo) {
+      const ocrIndex = attachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0
+      setAttachmentNote(attachmentMemo)
+      setAttachments((prev) =>
+        prev.map((item, index) => (index === ocrIndex ? { ...item, note: attachmentMemo } : item))
+      )
+    }
   }
 
   const handleDelete = async () => {
@@ -297,7 +307,15 @@ export default function ContractDetailModal({
                       >
                         {t('viewAttachment')}
                       </button>
-                      <span className="text-xs text-gray-400">{new Date(item.createdAt).toLocaleString(dateLocale)}</span>
+                      <div className="flex items-center gap-2">
+                        <OcrSavedAttachmentButton
+                          locale={locale}
+                          attachmentId={item.id}
+                          context="contract"
+                          disabled={loading}
+                        />
+                        <span className="text-xs text-gray-400">{new Date(item.createdAt).toLocaleString(dateLocale)}</span>
+                      </div>
                     </div>
                     <div className="text-gray-500 mt-1">{item.note || '-'}</div>
                     <div className="text-xs text-gray-400 mt-1">{item.uploader?.roleName || '-'}</div>
@@ -323,9 +341,18 @@ export default function ContractDetailModal({
                 placeholder={t('attachmentTypePlaceholder')}
                 className="w-full rounded-xl bg-[#F2F2F7] px-3 py-3 text-sm text-gray-900 outline-none"
               />
-              <button onClick={handleAppendAttachment} disabled={loading || attachments.length === 0} className="px-5 py-3 bg-[#007AFF] text-white rounded-xl font-semibold disabled:opacity-50">
-                {t('appendAttachment')}
-              </button>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <OcrNoteButton
+                  locale={locale}
+                  attachments={attachments}
+                  context="contract"
+                  onResolved={onOcrResolved}
+                  disabled={loading}
+                />
+                <button onClick={handleAppendAttachment} disabled={loading || attachments.length === 0} className="px-5 py-3 bg-[#007AFF] text-white rounded-xl font-semibold disabled:opacity-50">
+                  {t('appendAttachment')}
+                </button>
+              </div>
               {attachments.length > 0 && (
                 <div className="md:col-span-3 space-y-2">
                   {attachments.length > 1 && (
@@ -373,33 +400,12 @@ export default function ContractDetailModal({
             </div>
           </div>
 
-          <div className="rounded-2xl border border-gray-100 p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="font-semibold text-gray-900">{t('memoHistory')}</h4>
-              <span className="text-xs text-gray-400">{contract.memos?.length || 0}</span>
-            </div>
-            <div className="space-y-3">
-              {(contract.memos || []).length === 0 ? (
-                <div className="text-sm text-gray-400">{t('noMemoData')}</div>
-              ) : (
-                contract.memos.map((item: any) => (
-                  <div key={item.id} className="rounded-xl border border-gray-100 p-3 text-sm">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="font-medium text-gray-900">{item.author?.roleName || '-'}</div>
-                      <span className="text-xs text-gray-400">{new Date(item.createdAt).toLocaleString(dateLocale)}</span>
-                    </div>
-                    <div className="text-gray-600 mt-1 whitespace-pre-wrap">{item.content}</div>
-                  </div>
-                ))
-              )}
-            </div>
-            <div className="flex gap-3 pt-3 border-t border-gray-100">
-              <input value={memoContent} onChange={(e) => setMemoContent(e.target.value)} placeholder={t('memoPlaceholder')} className="flex-1 rounded-xl bg-[#F2F2F7] px-3 py-3 text-sm text-gray-900 outline-none" />
-              <button onClick={handleAddMemo} disabled={loading || !memoContent.trim()} className="px-5 py-3 bg-[#34C759] text-white rounded-xl font-semibold disabled:opacity-50">
-                {t('addMemo')}
-              </button>
-            </div>
-          </div>
+          <NoteTimeline
+            locale={locale}
+            items={contract.memos || []}
+            disabled={loading}
+            onAdd={(content) => addContractMemo(contract.id, content)}
+          />
         </div>
 
         <div className="p-5 border-t border-gray-100 bg-white flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">

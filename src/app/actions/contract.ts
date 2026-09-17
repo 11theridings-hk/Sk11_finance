@@ -26,6 +26,8 @@ export type CreateContractInput = {
   thirdCategoryId?: string
   poolId?: string
   attachment?: AttachmentPayload
+  attachments?: AttachmentPayload[]
+  initialMemo?: string
 }
 
 function getDeepestCategoryId(data: {
@@ -162,6 +164,30 @@ export async function createContract(data: CreateContractInput) {
         })
       }
 
+      const extraAttachments = data.attachments || []
+      for (const item of extraAttachments) {
+        await tx.attachment.create({
+          data: {
+            fileUrl: item.url,
+            size: item.size,
+            note: item.note,
+            uploaderId: session.userId,
+            categoryId: data.categoryId ? getDeepestCategoryId(data) : undefined,
+            contractId: contract.id,
+          },
+        })
+      }
+
+      if (data.initialMemo?.trim()) {
+        await tx.memo.create({
+          data: {
+            content: data.initialMemo.trim(),
+            authorId: session.userId,
+            contractId: contract.id,
+          },
+        })
+      }
+
       return contract
     })
 
@@ -262,6 +288,36 @@ export async function addContractMemo(contractId: string, content: string) {
         authorId: session.userId,
         contractId
       }
+    })
+
+    revalidatePath('/contracts')
+    return { success: true }
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
+}
+
+export async function appendContractNoteKeywords(contractId: string, noteText: string) {
+  try {
+    const { session, contract } = await assertContractAdminAccess(contractId)
+    const addition = noteText.trim()
+    if (!addition) return { success: true }
+
+    const nextNote = contract.note?.trim() ? `${contract.note.trim()}\n${addition}` : addition
+    await prisma.$transaction(async (tx) => {
+      await tx.contract.update({
+        where: { id: contractId },
+        data: { note: nextNote },
+      })
+      await tx.memo.create({
+        data: {
+          content: addition.startsWith('OCR') || addition.startsWith('圖像辨識')
+            ? addition
+            : `圖像辨識: ${addition}`,
+          authorId: session.userId,
+          contractId,
+        },
+      })
     })
 
     revalidatePath('/contracts')

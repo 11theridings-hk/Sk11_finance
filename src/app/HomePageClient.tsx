@@ -90,6 +90,7 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
   const [ocrAttachmentIndex, setOcrAttachmentIndex] = useState(0)
   const [attachmentNote, setAttachmentNote] = useState('')
   const [note, setNote] = useState('')
+  const [ocrMemo, setOcrMemo] = useState('')
 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [countdown, setCountdown] = useState(0)
@@ -165,6 +166,10 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
   const appendRecognizedText = (payload: OcrResolvedPayload | string) => {
     if (typeof payload === 'string') {
       setNote((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
+      setOcrMemo((current) => {
+        const line = `${locale === 'en' ? 'OCR' : '圖像辨識'}: ${payload}`
+        return current.trim() ? `${current.trim()}\n${line}` : line
+      })
       return
     }
     if (payload.amount != null) {
@@ -172,6 +177,10 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
     }
     if (payload.noteText) {
       setNote((current) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
+      setOcrMemo((current) => {
+        const line = `${locale === 'en' ? 'OCR' : '圖像辨識'}: ${payload.noteText}`
+        return current.trim() ? `${current.trim()}\n${line}` : line
+      })
     }
     if (payload.attachmentMemo) {
       const ocrIndex = attachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0
@@ -226,6 +235,7 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
               note: a.note || attachmentNote || undefined,
             }))
           : undefined,
+      initialMemo: ocrMemo.trim() || undefined,
     })
 
     if (res.success) {
@@ -235,7 +245,7 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
       alert(`${t('submitFailed')}: ${res.error}`)
       setIsSubmitting(false)
     }
-  }, [amount, attachments, attachmentNote, categoryId, date, note, poolId, subCategoryId, t, thirdCategoryId, type])
+  }, [amount, attachments, attachmentNote, categoryId, date, note, ocrMemo, poolId, subCategoryId, t, thirdCategoryId, type])
 
   useEffect(() => {
     if (!showConfirmDialog || countdown <= 0) {
@@ -448,7 +458,7 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('attachment')} <span className="normal-case font-normal">({t('attachmentAcceptHint')})</span></label>
                 <OcrNoteButton
                   locale={locale}
-                  attachment={attachments[ocrAttachmentIndex] || attachments[0] || null}
+                  attachments={attachments}
                   context="public-record"
                   onResolved={appendRecognizedText}
                   disabled={isSubmitting || countdown > 0}

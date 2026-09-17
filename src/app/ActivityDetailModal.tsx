@@ -1,10 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import { addActivityAttachment, deleteActivity, updateActivity } from './actions/activity'
+import { addActivityAttachment, addActivityMemo, appendActivityNoteKeywords, deleteActivity, updateActivity } from './actions/activity'
 import { createTranslator, type Locale } from '@/lib/i18n'
 import { compressImage, MAX_PDF_PAGES, openAttachment, prepareAttachments, type ClientAttachment } from '@/lib/image'
 import OcrNoteButton, { type OcrResolvedPayload } from '@/components/OcrNoteButton'
+import OcrSavedAttachmentButton from '@/components/OcrSavedAttachmentButton'
+import NoteTimeline from '@/components/NoteTimeline'
 
 export default function ActivityDetailModal({
   activity,
@@ -26,6 +28,7 @@ export default function ActivityDetailModal({
   const [attachments, setAttachments] = useState<ClientAttachment[]>([])
   const [ocrAttachmentIndex, setOcrAttachmentIndex] = useState(0)
   const [attachmentNote, setAttachmentNote] = useState('')
+  const [pendingOcrKeywords, setPendingOcrKeywords] = useState('')
   const [loading, setLoading] = useState(false)
 
   const handleAttachmentChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -104,6 +107,9 @@ export default function ActivityDetailModal({
         return
       }
     }
+    if (pendingOcrKeywords.trim()) {
+      await appendActivityNoteKeywords(activity.id, pendingOcrKeywords.trim())
+    }
     window.location.reload()
   }
 
@@ -122,10 +128,14 @@ export default function ActivityDetailModal({
   const appendRecognizedText = (payload: OcrResolvedPayload | string) => {
     if (typeof payload === 'string') {
       setNote((current: string) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
+      setPendingOcrKeywords((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
       return
     }
     if (payload.noteText) {
       setNote((current: string) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
+      setPendingOcrKeywords((current) =>
+        current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText
+      )
     }
     if (payload.attachmentMemo) {
       const ocrIndex = attachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0
@@ -222,7 +232,17 @@ export default function ActivityDetailModal({
                       <span className="text-xs text-gray-400">{new Date(item.createdAt).toLocaleString(locale === 'en' ? 'en-HK' : 'zh-HK')}</span>
                     </div>
                     <div className="mt-1 text-gray-500">{item.note || '-'}</div>
-                    <div className="mt-1 text-xs text-gray-400">{item.uploader?.roleName || '-'}</div>
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                      <div className="text-xs text-gray-400">{item.uploader?.roleName || '-'}</div>
+                      {canManage && (
+                        <OcrSavedAttachmentButton
+                          locale={locale}
+                          attachmentId={item.id}
+                          context="activity-edit"
+                          disabled={loading}
+                        />
+                      )}
+                    </div>
                   </div>
                 ))
               )}
@@ -249,7 +269,7 @@ export default function ActivityDetailModal({
                 <div className="flex flex-col gap-3 md:flex-row">
                   <OcrNoteButton
                     locale={locale}
-                    attachment={attachments[ocrAttachmentIndex] || attachments[0] || null}
+                    attachments={attachments}
                     context="activity-edit"
                     onResolved={appendRecognizedText}
                     disabled={loading}
@@ -305,6 +325,14 @@ export default function ActivityDetailModal({
               </div>
             )}
           </div>
+
+          <NoteTimeline
+            locale={locale}
+            items={activity.memos || []}
+            canAdd={canManage}
+            disabled={loading}
+            onAdd={(content) => addActivityMemo(activity.id, content)}
+          />
         </div>
 
         <div className="mobile-safe-sheet flex flex-col-reverse gap-3 border-t border-gray-100 bg-white p-4 sm:flex-row sm:justify-between sm:p-5">

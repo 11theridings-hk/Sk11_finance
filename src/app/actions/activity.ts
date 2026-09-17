@@ -20,6 +20,8 @@ export type CreateActivityInput = {
   reminderDays: number
   visibility: 'PUBLIC' | 'PRIVATE'
   attachment?: AttachmentPayload
+  attachments?: AttachmentPayload[]
+  initialMemo?: string
 }
 
 export type UpdateActivityInput = {
@@ -77,6 +79,12 @@ export async function getActivities() {
           uploader: { select: { roleName: true } },
         },
       },
+      memos: {
+        orderBy: { createdAt: 'desc' },
+        include: {
+          author: { select: { roleName: true } },
+        },
+      },
     },
   })
 }
@@ -102,13 +110,30 @@ export async function createActivity(data: CreateActivityInput) {
         },
       })
 
-      if (data.attachment) {
+      const attachmentList =
+        data.attachments && data.attachments.length > 0
+          ? data.attachments
+          : data.attachment
+            ? [data.attachment]
+            : []
+
+      for (const item of attachmentList) {
         await tx.attachment.create({
           data: {
-            fileUrl: data.attachment.url,
-            size: data.attachment.size,
-            note: data.attachment.note,
+            fileUrl: item.url,
+            size: item.size,
+            note: item.note,
             uploaderId: session.userId,
+            activityId: created.id,
+          },
+        })
+      }
+
+      if (data.initialMemo?.trim()) {
+        await tx.memo.create({
+          data: {
+            content: data.initialMemo.trim(),
+            authorId: session.userId,
             activityId: created.id,
           },
         })
@@ -198,11 +223,61 @@ export async function addActivityAttachment(activityId: string, attachment: Atta
   }
 }
 
+export async function addActivityMemo(activityId: string, content: string) {
+  try {
+    const { session } = await assertActivityPermission(activityId)
+
+    await prisma.memo.create({
+      data: {
+        content,
+        authorId: session.userId,
+        activityId,
+      },
+    })
+
+    revalidatePath('/activities')
+    return { success: true }
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
+}
+
+export async function appendActivityNoteKeywords(activityId: string, noteText: string) {
+  try {
+    const { session, activity } = await assertActivityPermission(activityId)
+    const addition = noteText.trim()
+    if (!addition) return { success: true }
+
+    const nextNote = activity.note?.trim() ? `${activity.note.trim()}\n${addition}` : addition
+    await prisma.$transaction(async (tx) => {
+      await tx.activity.update({
+        where: { id: activityId },
+        data: { note: nextNote },
+      })
+      await tx.memo.create({
+        data: {
+          content: addition.startsWith('OCR') || addition.startsWith('圖像辨識')
+            ? addition
+            : `圖像辨識: ${addition}`,
+          authorId: session.userId,
+          activityId,
+        },
+      })
+    })
+
+    revalidatePath('/activities')
+    return { success: true }
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
+}
+
 export async function deleteActivity(activityId: string) {
   try {
     await assertActivityPermission(activityId)
 
     await prisma.$transaction(async (tx) => {
+      await tx.memo.deleteMany({ where: { activityId } })
       await tx.attachment.deleteMany({ where: { activityId } })
       await tx.activity.delete({ where: { id: activityId } })
     })

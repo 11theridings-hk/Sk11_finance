@@ -79,10 +79,16 @@ export async function getReportRecords(filter: ReportFilter) {
   }
 
   if (filter.noteKeyword?.trim()) {
-    where.note = {
-      contains: filter.noteKeyword.trim(),
-      mode: 'insensitive',
-    }
+    const kw = filter.noteKeyword.trim()
+    where.AND = [
+      ...(where.AND || []),
+      {
+        OR: [
+          { note: { contains: kw, mode: 'insensitive' } },
+          { memos: { some: { content: { contains: kw, mode: 'insensitive' } } } },
+        ],
+      },
+    ]
   }
 
   return await prisma.record.findMany({
@@ -140,6 +146,7 @@ export async function getReportActivities(filter: ActivityReportFilter) {
     where.OR = [
       { title: { contains: kw, mode: 'insensitive' } },
       { note: { contains: kw, mode: 'insensitive' } },
+      { memos: { some: { content: { contains: kw, mode: 'insensitive' } } } },
     ]
   }
 
@@ -201,6 +208,7 @@ export async function getReportContracts(filter: ContractReportFilter) {
         OR: [
           { title: { contains: kw, mode: 'insensitive' } },
           { note: { contains: kw, mode: 'insensitive' } },
+          { memos: { some: { content: { contains: kw, mode: 'insensitive' } } } },
         ],
       },
     ]

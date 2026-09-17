@@ -57,6 +57,7 @@ export default function PrivateLedgerClient({
   const [customCategory, setCustomCategory] = useState('')
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
+  const [ocrMemo, setOcrMemo] = useState('')
   const [attachments, setAttachments] = useState<ClientAttachment[]>([])
   const [ocrAttachmentIndex, setOcrAttachmentIndex] = useState(0)
   const [attachmentNote, setAttachmentNote] = useState('')
@@ -125,6 +126,10 @@ export default function PrivateLedgerClient({
   const appendRecognizedText = (payload: OcrResolvedPayload | string) => {
     if (typeof payload === 'string') {
       setNote((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
+      setOcrMemo((current) => {
+        const line = `${locale === 'en' ? 'OCR' : '圖像辨識'}: ${payload}`
+        return current.trim() ? `${current.trim()}\n${line}` : line
+      })
       return
     }
     if (payload.amount != null) {
@@ -132,6 +137,10 @@ export default function PrivateLedgerClient({
     }
     if (payload.noteText) {
       setNote((current) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
+      setOcrMemo((current) => {
+        const line = `${locale === 'en' ? 'OCR' : '圖像辨識'}: ${payload.noteText}`
+        return current.trim() ? `${current.trim()}\n${line}` : line
+      })
     }
     if (payload.attachmentMemo) {
       const ocrIndex = attachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0
@@ -162,6 +171,7 @@ export default function PrivateLedgerClient({
               note: a.note || attachmentNote || undefined,
             }))
           : undefined,
+      initialMemo: ocrMemo.trim() || undefined,
     })
 
     if (res.success) {
@@ -331,7 +341,7 @@ export default function PrivateLedgerClient({
                     <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('attachment')} <span className="normal-case font-normal">({t('attachmentAcceptHint')})</span></label>
                     <OcrNoteButton
                       locale={locale}
-                      attachment={attachments[ocrAttachmentIndex] || attachments[0] || null}
+                      attachments={attachments}
                       context="private-record"
                       onResolved={appendRecognizedText}
                       disabled={isSubmitting}

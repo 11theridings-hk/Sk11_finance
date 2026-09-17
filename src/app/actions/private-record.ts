@@ -24,6 +24,7 @@ export type CreatePrivateRecordInput = {
   thirdCategoryId?: string
   attachment?: AttachmentPayload
   attachments?: AttachmentPayload[]
+  initialMemo?: string
 }
 
 function getDeepestCategoryId(data: {
@@ -150,6 +151,12 @@ export async function getPrivateRecords(ownerId?: string) {
           uploader: { select: { roleName: true } },
         },
       },
+      memos: {
+        orderBy: { createdAt: 'desc' },
+        include: {
+          author: { select: { roleName: true } },
+        },
+      },
     },
   })
 }
@@ -262,6 +269,16 @@ export async function createPrivateRecord(data: CreatePrivateRecordInput) {
         })
       }
 
+      if (data.initialMemo?.trim()) {
+        await tx.memo.create({
+          data: {
+            content: data.initialMemo.trim(),
+            authorId: session.userId,
+            privateRecordId: created.id,
+          },
+        })
+      }
+
       return created
     })
 
@@ -305,11 +322,63 @@ export async function addPrivateRecordAttachment(recordId: string, attachment: A
   }
 }
 
+export async function addPrivateRecordMemo(recordId: string, content: string) {
+  try {
+    const { session } = await assertPrivateRecordPermission(recordId)
+
+    await prisma.memo.create({
+      data: {
+        content,
+        authorId: session.userId,
+        privateRecordId: recordId,
+      },
+    })
+
+    revalidatePath('/private-ledger')
+    revalidatePath(`/private-ledger/${session.userId}`)
+    return { success: true }
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
+}
+
+export async function appendPrivateRecordNoteKeywords(recordId: string, noteText: string) {
+  try {
+    const { session, record } = await assertPrivateRecordPermission(recordId)
+    const addition = noteText.trim()
+    if (!addition) return { success: true }
+
+    const nextNote = record.note?.trim() ? `${record.note.trim()}\n${addition}` : addition
+    await prisma.$transaction(async (tx) => {
+      await tx.privateRecord.update({
+        where: { id: recordId },
+        data: { note: nextNote },
+      })
+      await tx.memo.create({
+        data: {
+          content: addition.startsWith('OCR') || addition.startsWith('圖像辨識')
+            ? addition
+            : `圖像辨識: ${addition}`,
+          authorId: session.userId,
+          privateRecordId: recordId,
+        },
+      })
+    })
+
+    revalidatePath('/private-ledger')
+    revalidatePath(`/private-ledger/${session.userId}`)
+    return { success: true }
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
+}
+
 export async function deletePrivateRecord(recordId: string) {
   try {
     const { record } = await assertPrivateRecordPermission(recordId)
 
     await prisma.$transaction(async (tx) => {
+      await tx.memo.deleteMany({ where: { privateRecordId: recordId } })
       await tx.attachment.deleteMany({ where: { privateRecordId: recordId } })
       await tx.privateRecord.delete({ where: { id: recordId } })
     })

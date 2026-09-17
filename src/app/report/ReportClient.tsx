@@ -1546,7 +1546,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                     <label className="block text-xs font-semibold text-gray-500 uppercase">{t('appendAttachment')} <span className="normal-case font-normal">({t('attachmentAcceptHint')})</span></label>
                     <OcrNoteButton
                       locale={locale}
-                      attachment={editAttachments[ocrAttachmentIndex] || editAttachments[0] || null}
+                      attachments={editAttachments}
                       context="record-edit"
                       onResolved={appendRecognizedText}
                       disabled={isSubmittingEdit}

@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useMemo, useState } from 'react'
-import { createContract, addContractAttachment } from '../actions/contract'
+import { createContract } from '../actions/contract'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
 import { compressImage, MAX_PDF_PAGES, prepareAttachments, type ClientAttachment } from '@/lib/image'
 import ContractDetailModal from '../ContractDetailModal'
@@ -55,6 +55,7 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
   const [amount, setAmount] = useState('')
   const [poolId, setPoolId] = useState('')
   const [note, setNote] = useState('')
+  const [ocrMemo, setOcrMemo] = useState('')
   const [attachments, setAttachments] = useState<ClientAttachment[]>([])
   const [ocrAttachmentIndex, setOcrAttachmentIndex] = useState(0)
   const [attachmentNote, setAttachmentNote] = useState('')
@@ -141,18 +142,17 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
       attachment: first
         ? { url: first.url, size: first.size, note: first.note || attachmentNote || undefined }
         : undefined,
-    })
-
-    if (res.success) {
-      if (res.contract?.id && rest.length > 0) {
-        for (const page of rest) {
-          await addContractAttachment(res.contract.id, {
+      attachments: rest.length
+        ? rest.map((page) => ({
             url: page.url,
             size: page.size,
             note: page.note || attachmentNote || undefined,
-          })
-        }
-      }
+          }))
+        : undefined,
+      initialMemo: ocrMemo.trim() || undefined,
+    })
+
+    if (res.success) {
       window.location.reload()
       return
     }
@@ -164,6 +164,10 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
   const appendRecognizedText = (payload: OcrResolvedPayload | string) => {
     if (typeof payload === 'string') {
       setNote((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
+      setOcrMemo((current) => {
+        const line = `${locale === 'en' ? 'OCR' : '圖像辨識'}: ${payload}`
+        return current.trim() ? `${current.trim()}\n${line}` : line
+      })
       return
     }
     if (payload.amount != null) {
@@ -171,6 +175,10 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
     }
     if (payload.noteText) {
       setNote((current) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
+      setOcrMemo((current) => {
+        const line = `${locale === 'en' ? 'OCR' : '圖像辨識'}: ${payload.noteText}`
+        return current.trim() ? `${current.trim()}\n${line}` : line
+      })
     }
     if (payload.attachmentMemo) {
       const ocrIndex = attachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0
@@ -367,7 +375,7 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
               <div className="flex justify-end">
                 <OcrNoteButton
                   locale={locale}
-                  attachment={attachments[ocrAttachmentIndex] || attachments[0] || null}
+                  attachments={attachments}
                   context="contract"
                   onResolved={appendRecognizedText}
                   disabled={isSubmitting}
