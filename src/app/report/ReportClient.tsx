@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { getReportRecords, getReportActivities, getReportContracts, ReportFilter } from '../actions/report'
 import { requestModifyRecord } from '../actions/modify'
 import { deleteRecord } from '../actions/record'
@@ -11,15 +11,14 @@ import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
 import { compressImage, MAX_PDF_PAGES, prepareAttachments, type ClientAttachment } from '@/lib/image'
 import OcrNoteButton, { type OcrResolvedPayload } from '@/components/OcrNoteButton'
 import RecordDetailModal from '../RecordDetailModal'
-
-type Props = {
-  categories: any[]
-  users: any[]
-  pools: any[]
-  locale: Locale
-}
-
-type ReportTab = 'records' | 'activities' | 'contracts'
+import {
+  type ReportTab,
+  REPORT_COLUMNS_BY_TAB,
+  defaultVisibleIds,
+  loadVisibleColumnIds,
+  saveVisibleColumnIds,
+  isColumnVisible,
+} from '@/lib/reportColumns'
 
 function categoryPath(item: any) {
   return [item?.category?.name, item?.subCategory?.name, item?.thirdCategory?.name].filter(Boolean).join(' / ') || '-'
@@ -92,15 +91,56 @@ function csvEscape(value: string) {
   return s
 }
 
+type Props = {
+  categories: any[]
+  users: any[]
+  pools: any[]
+  locale: Locale
+}
+
 export default function ReportClient({ categories, users, pools, locale }: Props) {
   const t = createTranslator(locale)
   const dateLocale = locale === 'en' ? 'en-HK' : 'zh-HK'
   const [reportTab, setReportTab] = useState<ReportTab>('records')
   const [exportLocale, setExportLocale] = useState<Locale>(locale)
+  const [visibleColumnIds, setVisibleColumnIds] = useState<string[]>(() =>
+    defaultVisibleIds(REPORT_COLUMNS_BY_TAB.records)
+  )
+  const [columnsPanelOpen, setColumnsPanelOpen] = useState(false)
 
   useEffect(() => {
     setExportLocale(locale)
   }, [locale])
+
+  useEffect(() => {
+    setVisibleColumnIds(loadVisibleColumnIds(reportTab))
+  }, [reportTab])
+
+  const columnDefs = REPORT_COLUMNS_BY_TAB[reportTab]
+  const visibleSet = useMemo(() => new Set(visibleColumnIds), [visibleColumnIds])
+  const showCol = (id: string) => isColumnVisible(visibleSet, id)
+
+  const toggleColumn = (id: string) => {
+    setVisibleColumnIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      // Keep at least one data column
+      if (next.length === 0) return prev
+      saveVisibleColumnIds(reportTab, next)
+      return next
+    })
+  }
+
+  const selectAllColumns = () => {
+    const next = defaultVisibleIds(columnDefs)
+    saveVisibleColumnIds(reportTab, next)
+    setVisibleColumnIds(next)
+  }
+
+  const resetColumns = () => {
+    const next = defaultVisibleIds(columnDefs)
+    saveVisibleColumnIds(reportTab, next)
+    setVisibleColumnIds(next)
+  }
 
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
@@ -460,37 +500,55 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       19
     )
 
-    const tableData = records.map(r => [
-      r.id.slice(-8),
-      new Date(r.date).toLocaleDateString(dateLocale),
-      r.type === 'INCOME' ? t('income') : t('expense'),
-      r.category?.name || '-',
-      r.subCategory?.name || '-',
-      r.thirdCategory?.name || '-',
-      r.pool?.name || '-',
-      r.user?.roleName || '-',
-      formatCurrency(locale, r.amount),
-      String(attachmentCountOf(r)),
-      r.note || '-',
-      r.status === 'PENDING' ? t('pendingApproval') : t('approvedStored'),
-    ])
+    const rowCells = (r: any) => {
+      const cells: { id: string; value: string }[] = [
+        { id: 'recordIdShort', value: r.id.slice(-8) },
+        { id: 'date', value: new Date(r.date).toLocaleDateString(dateLocale) },
+        { id: 'type', value: r.type === 'INCOME' ? t('income') : t('expense') },
+        { id: 'category', value: r.category?.name || '-' },
+        { id: 'category:sub', value: r.subCategory?.name || '-' },
+        { id: 'category:grand', value: r.thirdCategory?.name || '-' },
+        { id: 'pool', value: r.pool?.name || '-' },
+        { id: 'role', value: r.user?.roleName || '-' },
+        { id: 'amount', value: formatCurrency(locale, r.amount) },
+        { id: 'attachmentCount', value: String(attachmentCountOf(r)) },
+        { id: 'note', value: r.note || '-' },
+        { id: 'status', value: r.status === 'PENDING' ? t('pendingApproval') : t('approvedStored') },
+      ]
+      return cells
+        .filter((c) => {
+          if (c.id.startsWith('category')) return showCol('category')
+          return showCol(c.id)
+        })
+        .map((c) => c.value)
+    }
+
+    const tableData = records.map(rowCells)
+
+    const headCells: { id: string; label: string }[] = [
+      { id: 'recordIdShort', label: t('recordIdShort') },
+      { id: 'date', label: t('date') },
+      { id: 'type', label: t('type') },
+      { id: 'category', label: t('mainCategory') },
+      { id: 'category:sub', label: t('subCategory') },
+      { id: 'category:grand', label: t('grandCategory') },
+      { id: 'pool', label: t('pool') },
+      { id: 'role', label: t('role') },
+      { id: 'amount', label: t('amount') },
+      { id: 'attachmentCount', label: t('attachmentCount') },
+      { id: 'note', label: t('note') },
+      { id: 'status', label: t('status') },
+    ]
+    const head = headCells
+      .filter((c) => {
+        if (c.id.startsWith('category')) return showCol('category')
+        return showCol(c.id)
+      })
+      .map((c) => c.label)
 
     autoTable(doc, {
       startY: 24,
-      head: [[
-        t('recordIdShort'),
-        t('date'),
-        t('type'),
-        t('mainCategory'),
-        t('subCategory'),
-        t('grandCategory'),
-        t('pool'),
-        t('role'),
-        t('amount'),
-        t('attachmentCount'),
-        t('note'),
-        t('status'),
-      ]],
+      head: [head],
       body: tableData,
       styles: {
         font: pdfFont(),
@@ -508,20 +566,6 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       },
       alternateRowStyles: { fillColor: [248, 250, 252] },
       margin: { left: marginX, right: marginX },
-      columnStyles: {
-        0: { cellWidth: 16 },
-        1: { cellWidth: 20 },
-        2: { cellWidth: 14 },
-        3: { cellWidth: 24 },
-        4: { cellWidth: 24 },
-        5: { cellWidth: 24 },
-        6: { cellWidth: 22 },
-        7: { cellWidth: 18 },
-        8: { cellWidth: 22 },
-        9: { cellWidth: 12, halign: 'center' },
-        10: { cellWidth: 'auto' },
-        11: { cellWidth: 18 },
-      },
     })
 
     doc.save(locale === 'en' ? 'financial-report-landscape.pdf' : '財務報表_明細列表.pdf')
@@ -552,29 +596,35 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     doc.setTextColor(90, 90, 100)
     doc.text(`${t('statisticsPeriod')}: ${timeRangeLabel()}  ·  ${activities.length} ${t('resultCount')}`, pageW / 2, 18, { align: 'center' })
 
-    const tableData = activities.map(a => [
-      a.id.slice(-8),
-      a.title || '-',
-      new Date(a.eventDate).toLocaleDateString(dateLocale),
-      String(a.reminderDays ?? '-'),
-      a.visibility === 'PRIVATE' ? t('privateActivity') : t('publicActivity'),
-      a.user?.roleName || '-',
-      String(attachmentCountOf(a)),
-      a.note || '-',
-    ])
+    const activityHeadMeta = [
+      { id: 'recordIdShort', label: t('recordIdShort') },
+      { id: 'activityTitle', label: t('activityTitle') },
+      { id: 'activityDate', label: t('activityDate') },
+      { id: 'reminderDays', label: t('reminderDays') },
+      { id: 'activityVisibility', label: t('activityVisibility') },
+      { id: 'role', label: t('role') },
+      { id: 'attachmentCount', label: t('attachmentCount') },
+      { id: 'note', label: t('note') },
+    ]
+    const activityHead = activityHeadMeta.filter((c) => showCol(c.id)).map((c) => c.label)
+
+    const tableData = activities.map((a) => {
+      const map: Record<string, string> = {
+        recordIdShort: a.id.slice(-8),
+        activityTitle: a.title || '-',
+        activityDate: new Date(a.eventDate).toLocaleDateString(dateLocale),
+        reminderDays: String(a.reminderDays ?? '-'),
+        activityVisibility: a.visibility === 'PRIVATE' ? t('privateActivity') : t('publicActivity'),
+        role: a.user?.roleName || '-',
+        attachmentCount: String(attachmentCountOf(a)),
+        note: a.note || '-',
+      }
+      return activityHeadMeta.filter((c) => showCol(c.id)).map((c) => map[c.id])
+    })
 
     autoTable(doc, {
       startY: 28,
-      head: [[
-        t('recordIdShort'),
-        t('activityTitle'),
-        t('activityDate'),
-        t('reminderDays'),
-        t('activityVisibility'),
-        t('role'),
-        t('attachmentCount'),
-        t('note'),
-      ]],
+      head: [activityHead],
       body: tableData,
       styles: { font: pdfFont(), fontSize: 8, cellPadding: 1.6, overflow: 'linebreak' },
       headStyles: { fillColor: [0, 122, 255], textColor: 255, font: pdfFont(), fontSize: 8, fontStyle: 'bold' },
@@ -610,39 +660,48 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     doc.setTextColor(90, 90, 100)
     doc.text(`${t('statisticsPeriod')}: ${timeRangeLabel()}  ·  ${contracts.length} ${t('resultCount')}`, pageW / 2, 18, { align: 'center' })
 
-    const tableData = contracts.map(c => [
-      c.id.slice(-8),
-      c.title || '-',
-      c.type === 'INCOME' ? t('income') : t('expense'),
-      new Date(c.effectiveDate).toLocaleDateString(dateLocale),
-      new Date(c.expiryDate).toLocaleDateString(dateLocale),
-      c.category?.name || '-',
-      c.subCategory?.name || '-',
-      c.thirdCategory?.name || '-',
-      c.pool?.name || '-',
-      formatCurrency(locale, c.amount),
-      c.user?.roleName || '-',
-      String(attachmentCountOf(c)),
-      c.note || '-',
-    ])
+    const contractHeadMeta = [
+      { id: 'recordIdShort', label: t('recordIdShort') },
+      { id: 'contractTitle', label: t('contractTitle') },
+      { id: 'type', label: t('type') },
+      { id: 'effectiveDate', label: t('effectiveDate') },
+      { id: 'expiryDate', label: t('expiryDate') },
+      { id: 'category', label: t('mainCategory') },
+      { id: 'category:sub', label: t('subCategory') },
+      { id: 'category:grand', label: t('grandCategory') },
+      { id: 'pool', label: t('pool') },
+      { id: 'amount', label: t('amount') },
+      { id: 'role', label: t('role') },
+      { id: 'attachmentCount', label: t('attachmentCount') },
+      { id: 'note', label: t('note') },
+    ]
+    const visibleContractHead = contractHeadMeta.filter((c) => {
+      if (c.id.startsWith('category')) return showCol('category')
+      return showCol(c.id)
+    })
+
+    const tableData = contracts.map((c) => {
+      const map: Record<string, string> = {
+        recordIdShort: c.id.slice(-8),
+        contractTitle: c.title || '-',
+        type: c.type === 'INCOME' ? t('income') : t('expense'),
+        effectiveDate: new Date(c.effectiveDate).toLocaleDateString(dateLocale),
+        expiryDate: new Date(c.expiryDate).toLocaleDateString(dateLocale),
+        category: c.category?.name || '-',
+        'category:sub': c.subCategory?.name || '-',
+        'category:grand': c.thirdCategory?.name || '-',
+        pool: c.pool?.name || '-',
+        amount: formatCurrency(locale, c.amount),
+        role: c.user?.roleName || '-',
+        attachmentCount: String(attachmentCountOf(c)),
+        note: c.note || '-',
+      }
+      return visibleContractHead.map((col) => map[col.id])
+    })
 
     autoTable(doc, {
       startY: 28,
-      head: [[
-        t('recordIdShort'),
-        t('contractTitle'),
-        t('type'),
-        t('effectiveDate'),
-        t('expiryDate'),
-        t('mainCategory'),
-        t('subCategory'),
-        t('grandCategory'),
-        t('pool'),
-        t('amount'),
-        t('role'),
-        t('attachmentCount'),
-        t('note'),
-      ]],
+      head: [visibleContractHead.map((c) => c.label)],
       body: tableData,
       styles: { font: pdfFont(), fontSize: 7, cellPadding: 1.4, overflow: 'linebreak' },
       headStyles: { fillColor: [0, 122, 255], textColor: 255, font: pdfFont(), fontSize: 7, fontStyle: 'bold' },
@@ -699,21 +758,31 @@ export default function ReportClient({ categories, users, pools, locale }: Props
 
       const prepared: PreparedRow[] = []
       const csvRows: string[] = []
-      csvRows.push([
-        t('voucherNo'),
-        t('date'),
-        t('type'),
-        t('mainCategory'),
-        t('subCategory'),
-        t('grandCategory'),
-        t('pool'),
-        t('role'),
-        t('amount'),
-        t('note'),
-        t('status'),
-        t('recordId'),
-        t('voucherFile'),
-      ].map(csvEscape).join(','))
+
+      const csvHeadMeta = [
+        { id: '_voucherNo', label: t('voucherNo'), locked: true },
+        { id: 'date', label: t('date') },
+        { id: 'type', label: t('type') },
+        { id: 'category', label: t('mainCategory') },
+        { id: 'category:sub', label: t('subCategory') },
+        { id: 'category:grand', label: t('grandCategory') },
+        { id: 'pool', label: t('pool') },
+        { id: 'role', label: t('role') },
+        { id: 'amount', label: t('amount') },
+        { id: 'note', label: t('note') },
+        { id: 'status', label: t('status') },
+        { id: 'recordIdShort', label: t('recordId') },
+        { id: '_voucherFile', label: t('voucherFile'), locked: true },
+      ]
+      const csvVisible = csvHeadMeta.filter((c) => {
+        if (c.locked) return true
+        if (c.id.startsWith('category')) return showCol('category')
+        return showCol(c.id)
+      })
+      csvRows.push(csvVisible.map((c) => csvEscape(c.label)).join(','))
+
+      const buildCsvRow = (values: Record<string, string>) =>
+        csvVisible.map((c) => csvEscape(values[c.id] ?? '-')).join(',')
 
       for (let i = 0; i < totalCount; i++) {
         const r = records[i]
@@ -728,15 +797,23 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         const urls = collectAttachmentUrls(r)
         const fileNames: string[] = []
 
+        const baseValues: Record<string, string> = {
+          _voucherNo: voucherNo,
+          date: dateStr,
+          type: typeLabel,
+          category: r.category?.name || '-',
+          'category:sub': r.subCategory?.name || '-',
+          'category:grand': r.thirdCategory?.name || '-',
+          pool: r.pool?.name || '-',
+          role: r.user?.roleName || '-',
+          amount: amountAbs.toFixed(2),
+          note: r.note || '-',
+          status: r.status === 'PENDING' ? t('pendingApproval') : t('approvedStored'),
+          recordIdShort: r.id,
+        }
+
         if (urls.length === 0) {
-          csvRows.push([
-            voucherNo, dateStr, typeLabel,
-            r.category?.name || '-', r.subCategory?.name || '-', r.thirdCategory?.name || '-',
-            r.pool?.name || '-', r.user?.roleName || '-',
-            amountAbs.toFixed(2), r.note || '-',
-            r.status === 'PENDING' ? t('pendingApproval') : t('approvedStored'),
-            r.id, t('noVoucher'),
-          ].map(csvEscape).join(','))
+          csvRows.push(buildCsvRow({ ...baseValues, _voucherFile: t('noVoucher') }))
         } else {
           urls.forEach((dataUrl, k) => {
             const ext = extFromDataUrl(dataUrl)
@@ -755,14 +832,9 @@ export default function ReportClient({ categories, users, pools, locale }: Props
               if (bytes) attFolder.file(fileName, bytes)
             }
 
-            csvRows.push([
-              voucherNo, dateStr, typeLabel,
-              r.category?.name || '-', r.subCategory?.name || '-', r.thirdCategory?.name || '-',
-              r.pool?.name || '-', r.user?.roleName || '-',
-              amountAbs.toFixed(2), r.note || '-',
-              r.status === 'PENDING' ? t('pendingApproval') : t('approvedStored'),
-              r.id, `${voucherFolderName}/${fileName}`,
-            ].map(csvEscape).join(','))
+            csvRows.push(
+              buildCsvRow({ ...baseValues, _voucherFile: `${voucherFolderName}/${fileName}` })
+            )
           })
         }
 
@@ -913,38 +985,46 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       doc.setFontSize(8)
       doc.text(`${t('statisticsPeriod')}: ${timeRangeLabel()}  ·  ${totalCount} ${t('resultCount')}`, landW - 12, 12, { align: 'right' })
 
+      const ledgerHeadMeta = [
+        { id: '_voucherNo', label: t('voucherNo'), locked: true },
+        { id: 'date', label: t('date') },
+        { id: 'type', label: t('type') },
+        { id: 'category', label: t('mainCategory') },
+        { id: 'category:sub', label: t('subCategory') },
+        { id: 'category:grand', label: t('grandCategory') },
+        { id: 'pool', label: t('pool') },
+        { id: 'role', label: t('role') },
+        { id: 'amount', label: t('amount') },
+        { id: 'note', label: t('note') },
+        { id: '_voucherFile', label: t('voucherFile'), locked: true },
+      ]
+      const ledgerVisible = ledgerHeadMeta.filter((c) => {
+        if (c.locked) return true
+        if (c.id.startsWith('category')) return showCol('category')
+        return showCol(c.id)
+      })
+
       const ledgerBody = prepared.map((row) => {
         const r = row.record
-        return [
-          row.voucherNo,
-          row.dateStr,
-          row.typeLabel,
-          r.category?.name || '-',
-          r.subCategory?.name || '-',
-          r.thirdCategory?.name || '-',
-          r.pool?.name || '-',
-          r.user?.roleName || '-',
-          formatCurrency(locale, r.amount),
-          r.note || '-',
-          row.fileNames.length > 0 ? row.fileNames.join('; ') : t('noVoucher'),
-        ]
+        const map: Record<string, string> = {
+          _voucherNo: row.voucherNo,
+          date: row.dateStr,
+          type: row.typeLabel,
+          category: r.category?.name || '-',
+          'category:sub': r.subCategory?.name || '-',
+          'category:grand': r.thirdCategory?.name || '-',
+          pool: r.pool?.name || '-',
+          role: r.user?.roleName || '-',
+          amount: formatCurrency(locale, r.amount),
+          note: r.note || '-',
+          _voucherFile: row.fileNames.length > 0 ? row.fileNames.join('; ') : t('noVoucher'),
+        }
+        return ledgerVisible.map((c) => map[c.id])
       })
 
       autoTable(doc, {
         startY: 24,
-        head: [[
-          t('voucherNo'),
-          t('date'),
-          t('type'),
-          t('mainCategory'),
-          t('subCategory'),
-          t('grandCategory'),
-          t('pool'),
-          t('role'),
-          t('amount'),
-          t('note'),
-          t('voucherFile'),
-        ]],
+        head: [ledgerVisible.map((c) => c.label)],
         body: ledgerBody,
         styles: {
           font: pdfFont(),
@@ -963,19 +1043,6 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         },
         alternateRowStyles: { fillColor: [248, 249, 251] },
         margin: { left: 10, right: 10 },
-        columnStyles: {
-          0: { cellWidth: 14 },
-          1: { cellWidth: 20 },
-          2: { cellWidth: 14 },
-          3: { cellWidth: 24 },
-          4: { cellWidth: 24 },
-          5: { cellWidth: 24 },
-          6: { cellWidth: 22 },
-          7: { cellWidth: 18 },
-          8: { cellWidth: 22, halign: 'right' },
-          9: { cellWidth: 36 },
-          10: { cellWidth: 'auto' },
-        },
       })
 
       // Page footers
@@ -1217,6 +1284,69 @@ export default function ReportClient({ categories, users, pools, locale }: Props
           </div>
         </div>
 
+        <div className="mb-4 rounded-2xl border border-gray-200 bg-white px-4 py-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider">{t('reportDisplayColumns')}</label>
+              <p className="mt-0.5 text-xs text-gray-500">{t('reportDisplayColumnsHint')}</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setColumnsPanelOpen((open) => !open)}
+                className="rounded-xl bg-[#F2F2F7] px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-200"
+              >
+                {columnsPanelOpen ? t('close') : t('reportDisplayColumns')}
+                <span className="ml-2 text-xs font-medium text-gray-400">
+                  ({visibleColumnIds.length}/{columnDefs.length})
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={selectAllColumns}
+                className="rounded-xl px-3 py-2 text-sm font-semibold text-[#007AFF] hover:bg-[#007AFF]/10"
+              >
+                {t('reportSelectAllColumns')}
+              </button>
+              <button
+                type="button"
+                onClick={resetColumns}
+                className="rounded-xl px-3 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-100"
+              >
+                {t('reportResetColumns')}
+              </button>
+            </div>
+          </div>
+          {columnsPanelOpen && (
+            <div className="mt-3 border-t border-gray-100 pt-3">
+              <p className="mb-2 text-xs text-gray-400">{t('reportColumnsApplyHint')}</p>
+              <div className="flex flex-wrap gap-2">
+                {columnDefs.map((col) => {
+                  const checked = showCol(col.id)
+                  return (
+                    <label
+                      key={col.id}
+                      className={`inline-flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium ${
+                        checked
+                          ? 'border-[#007AFF] bg-[#007AFF]/10 text-[#007AFF]'
+                          : 'border-gray-200 bg-gray-50 text-gray-500'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="accent-[#007AFF]"
+                        checked={checked}
+                        onChange={() => toggleColumn(col.id)}
+                      />
+                      {t(col.labelKey as any)}
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
         <div className="flex flex-wrap gap-2.5 mb-6">
           <button
             onClick={handleSearch}
@@ -1272,15 +1402,16 @@ export default function ReportClient({ categories, users, pools, locale }: Props
               <table className="w-full text-left text-sm text-gray-700">
                 <thead className="bg-white text-[11px] text-gray-500 uppercase tracking-wider border-b border-gray-100">
                   <tr>
-                    <th className="px-4 py-3 font-semibold">{t('date')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('type')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('categoryPath')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('role')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('pool')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('amount')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('attachmentCount')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('note')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('status')}</th>
+                    {showCol('recordIdShort') && <th className="px-4 py-3 font-semibold">{t('recordIdShort')}</th>}
+                    {showCol('date') && <th className="px-4 py-3 font-semibold">{t('date')}</th>}
+                    {showCol('type') && <th className="px-4 py-3 font-semibold">{t('type')}</th>}
+                    {showCol('category') && <th className="px-4 py-3 font-semibold">{t('categoryPath')}</th>}
+                    {showCol('role') && <th className="px-4 py-3 font-semibold">{t('role')}</th>}
+                    {showCol('pool') && <th className="px-4 py-3 font-semibold">{t('pool')}</th>}
+                    {showCol('amount') && <th className="px-4 py-3 font-semibold">{t('amount')}</th>}
+                    {showCol('attachmentCount') && <th className="px-4 py-3 font-semibold">{t('attachmentCount')}</th>}
+                    {showCol('note') && <th className="px-4 py-3 font-semibold">{t('note')}</th>}
+                    {showCol('status') && <th className="px-4 py-3 font-semibold">{t('status')}</th>}
                     <th className="px-4 py-3 font-semibold">{t('modify')}</th>
                     <th className="px-4 py-3 font-semibold">{t('detail')}</th>
                     <th className="px-4 py-3 font-semibold">{t('delete')}</th>
@@ -1289,32 +1420,53 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                 <tbody className="divide-y divide-gray-100 bg-white">
                   {records.length === 0 ? (
                     <tr>
-                      <td colSpan={12} className="p-8 text-center text-gray-400 font-medium">{t('noDataTrySearch')}</td>
+                      <td colSpan={visibleColumnIds.length + 3} className="p-8 text-center text-gray-400 font-medium">{t('noDataTrySearch')}</td>
                     </tr>
                   ) : (
                     records.map(record => (
                       <tr key={record.id} className="hover:bg-[#F8FAFF] transition-colors">
-                        <td className="px-4 py-3 font-medium whitespace-nowrap">{new Date(record.date).toLocaleDateString(dateLocale)}</td>
-                        <td className="px-4 py-3">
-                          <span className={`px-2 py-1 rounded-md text-xs font-semibold ${
-                            record.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 'bg-[#FF3B30]/10 text-[#FF3B30]'
-                          }`}>
-                            {record.type === 'INCOME' ? t('income') : t('expense')}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 max-w-[220px]">{categoryPath(record)}</td>
-                        <td className="px-4 py-3">{record.user?.roleName || '-'}</td>
-                        <td className="px-4 py-3">{record.pool?.name || '-'}</td>
-                        <td className={`px-4 py-3 font-bold whitespace-nowrap ${record.type === 'INCOME' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
-                          {formatCurrency(locale, record.amount)}
-                        </td>
-                        <td className="px-4 py-3 text-center">{attachmentCountOf(record)}</td>
-                        <td className="px-4 py-3 max-w-[160px] truncate text-gray-500" title={record.note || ''}>{record.note || '-'}</td>
-                        <td className="px-4 py-3">
-                          <span className={`text-xs font-semibold px-2 py-1 rounded-md ${record.status === 'PENDING' ? 'bg-[#FF9500]/10 text-[#FF9500]' : 'bg-[#34C759]/10 text-[#34C759]'}`}>
-                            {record.status === 'PENDING' ? t('pendingApproval') : t('approvedStored')}
-                          </span>
-                        </td>
+                        {showCol('recordIdShort') && (
+                          <td className="px-4 py-3 font-mono text-xs text-gray-500">{record.id.slice(-8)}</td>
+                        )}
+                        {showCol('date') && (
+                          <td className="px-4 py-3 font-medium whitespace-nowrap">{new Date(record.date).toLocaleDateString(dateLocale)}</td>
+                        )}
+                        {showCol('type') && (
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-1 rounded-md text-xs font-semibold ${
+                              record.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 'bg-[#FF3B30]/10 text-[#FF3B30]'
+                            }`}>
+                              {record.type === 'INCOME' ? t('income') : t('expense')}
+                            </span>
+                          </td>
+                        )}
+                        {showCol('category') && (
+                          <td className="px-4 py-3 max-w-[220px]">{categoryPath(record)}</td>
+                        )}
+                        {showCol('role') && (
+                          <td className="px-4 py-3">{record.user?.roleName || '-'}</td>
+                        )}
+                        {showCol('pool') && (
+                          <td className="px-4 py-3">{record.pool?.name || '-'}</td>
+                        )}
+                        {showCol('amount') && (
+                          <td className={`px-4 py-3 font-bold whitespace-nowrap ${record.type === 'INCOME' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
+                            {formatCurrency(locale, record.amount)}
+                          </td>
+                        )}
+                        {showCol('attachmentCount') && (
+                          <td className="px-4 py-3 text-center">{attachmentCountOf(record)}</td>
+                        )}
+                        {showCol('note') && (
+                          <td className="px-4 py-3 max-w-[160px] truncate text-gray-500" title={record.note || ''}>{record.note || '-'}</td>
+                        )}
+                        {showCol('status') && (
+                          <td className="px-4 py-3">
+                            <span className={`text-xs font-semibold px-2 py-1 rounded-md ${record.status === 'PENDING' ? 'bg-[#FF9500]/10 text-[#FF9500]' : 'bg-[#34C759]/10 text-[#34C759]'}`}>
+                              {record.status === 'PENDING' ? t('pendingApproval') : t('approvedStored')}
+                            </span>
+                          </td>
+                        )}
                         <td className="px-4 py-3">
                           {!record.isReviewing ? (
                             <button onClick={() => handleEditClick(record)} className="text-[#007AFF] hover:underline font-medium text-sm">{t('modify')}</button>
@@ -1343,24 +1495,43 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                   <div key={record.id} className="p-4 space-y-2">
                     <div className="flex justify-between items-center">
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-gray-900 text-sm">{new Date(record.date).toLocaleDateString(dateLocale)}</span>
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                          record.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 'bg-[#FF3B30]/10 text-[#FF3B30]'
-                        }`}>
-                          {record.type === 'INCOME' ? t('income') : t('expense')}
-                        </span>
+                        {showCol('date') && (
+                          <span className="font-semibold text-gray-900 text-sm">{new Date(record.date).toLocaleDateString(dateLocale)}</span>
+                        )}
+                        {showCol('type') && (
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            record.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 'bg-[#FF3B30]/10 text-[#FF3B30]'
+                          }`}>
+                            {record.type === 'INCOME' ? t('income') : t('expense')}
+                          </span>
+                        )}
                       </div>
-                      <span className={`font-bold text-sm ${record.type === 'INCOME' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
-                        {formatCurrency(locale, record.amount)}
-                      </span>
+                      {showCol('amount') && (
+                        <span className={`font-bold text-sm ${record.type === 'INCOME' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
+                          {formatCurrency(locale, record.amount)}
+                        </span>
+                      )}
                     </div>
-                    <div className="text-sm text-gray-600">{categoryPath(record)}</div>
-                    <div className="text-xs text-gray-400">
-                      {t('pool')}: {record.pool?.name || '-'} · {t('attachmentCount')}: {attachmentCountOf(record)}
-                    </div>
-                    {record.note && <div className="text-xs text-gray-500 truncate">{record.note}</div>}
+                    {showCol('recordIdShort') && (
+                      <div className="text-xs font-mono text-gray-400">{t('recordIdShort')}: {record.id.slice(-8)}</div>
+                    )}
+                    {showCol('category') && <div className="text-sm text-gray-600">{categoryPath(record)}</div>}
+                    {(showCol('pool') || showCol('attachmentCount')) && (
+                      <div className="text-xs text-gray-400">
+                        {[
+                          showCol('pool') ? `${t('pool')}: ${record.pool?.name || '-'}` : null,
+                          showCol('attachmentCount') ? `${t('attachmentCount')}: ${attachmentCountOf(record)}` : null,
+                        ].filter(Boolean).join(' · ')}
+                      </div>
+                    )}
+                    {showCol('note') && record.note && <div className="text-xs text-gray-500 truncate">{record.note}</div>}
                     <div className="flex justify-between items-center pt-2 mt-2 border-t border-gray-50">
-                      <span className="text-xs text-gray-400">{record.user?.roleName || '-'} · {record.status === 'PENDING' ? t('pendingApproval') : t('approvedStored')}</span>
+                      <span className="text-xs text-gray-400">
+                        {[
+                          showCol('role') ? (record.user?.roleName || '-') : null,
+                          showCol('status') ? (record.status === 'PENDING' ? t('pendingApproval') : t('approvedStored')) : null,
+                        ].filter(Boolean).join(' · ')}
+                      </span>
                       <div className="flex gap-2">
                         <button onClick={() => setSelectedRecord(record)} className="text-[#007AFF] font-medium text-xs bg-[#007AFF]/10 px-3 py-1 rounded">{t('detail')}</button>
                         {!record.isReviewing && (
@@ -1382,30 +1553,32 @@ export default function ReportClient({ categories, users, pools, locale }: Props
               <table className="w-full text-left text-sm text-gray-700 min-w-[720px]">
                 <thead className="bg-[#FAFBFC] text-[11px] text-gray-500 uppercase tracking-wider border-b border-gray-100">
                   <tr>
-                    <th className="px-4 py-3 font-semibold">{t('activityTitle')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('activityDate')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('reminderDays')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('activityVisibility')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('role')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('attachmentCount')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('note')}</th>
+                    {showCol('recordIdShort') && <th className="px-4 py-3 font-semibold">{t('recordIdShort')}</th>}
+                    {showCol('activityTitle') && <th className="px-4 py-3 font-semibold">{t('activityTitle')}</th>}
+                    {showCol('activityDate') && <th className="px-4 py-3 font-semibold">{t('activityDate')}</th>}
+                    {showCol('reminderDays') && <th className="px-4 py-3 font-semibold">{t('reminderDays')}</th>}
+                    {showCol('activityVisibility') && <th className="px-4 py-3 font-semibold">{t('activityVisibility')}</th>}
+                    {showCol('role') && <th className="px-4 py-3 font-semibold">{t('role')}</th>}
+                    {showCol('attachmentCount') && <th className="px-4 py-3 font-semibold">{t('attachmentCount')}</th>}
+                    {showCol('note') && <th className="px-4 py-3 font-semibold">{t('note')}</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {activities.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="p-8 text-center text-gray-400 font-medium">{t('noDataTrySearch')}</td>
+                      <td colSpan={Math.max(visibleColumnIds.length, 1)} className="p-8 text-center text-gray-400 font-medium">{t('noDataTrySearch')}</td>
                     </tr>
                   ) : (
                     activities.map(item => (
                       <tr key={item.id} className="hover:bg-[#F8FAFF]">
-                        <td className="px-4 py-3 font-medium">{item.title}</td>
-                        <td className="px-4 py-3 whitespace-nowrap">{new Date(item.eventDate).toLocaleDateString(dateLocale)}</td>
-                        <td className="px-4 py-3">{item.reminderDays}</td>
-                        <td className="px-4 py-3">{item.visibility === 'PRIVATE' ? t('privateActivity') : t('publicActivity')}</td>
-                        <td className="px-4 py-3">{item.user?.roleName || '-'}</td>
-                        <td className="px-4 py-3 text-center">{attachmentCountOf(item)}</td>
-                        <td className="px-4 py-3 max-w-[220px] truncate text-gray-500">{item.note || '-'}</td>
+                        {showCol('recordIdShort') && <td className="px-4 py-3 font-mono text-xs text-gray-500">{item.id.slice(-8)}</td>}
+                        {showCol('activityTitle') && <td className="px-4 py-3 font-medium">{item.title}</td>}
+                        {showCol('activityDate') && <td className="px-4 py-3 whitespace-nowrap">{new Date(item.eventDate).toLocaleDateString(dateLocale)}</td>}
+                        {showCol('reminderDays') && <td className="px-4 py-3">{item.reminderDays}</td>}
+                        {showCol('activityVisibility') && <td className="px-4 py-3">{item.visibility === 'PRIVATE' ? t('privateActivity') : t('publicActivity')}</td>}
+                        {showCol('role') && <td className="px-4 py-3">{item.user?.roleName || '-'}</td>}
+                        {showCol('attachmentCount') && <td className="px-4 py-3 text-center">{attachmentCountOf(item)}</td>}
+                        {showCol('note') && <td className="px-4 py-3 max-w-[220px] truncate text-gray-500">{item.note || '-'}</td>}
                       </tr>
                     ))
                   )}
@@ -1421,44 +1594,50 @@ export default function ReportClient({ categories, users, pools, locale }: Props
               <table className="w-full text-left text-sm text-gray-700 min-w-[960px]">
                 <thead className="bg-[#FAFBFC] text-[11px] text-gray-500 uppercase tracking-wider border-b border-gray-100">
                   <tr>
-                    <th className="px-4 py-3 font-semibold">{t('contractTitle')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('type')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('effectiveDate')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('expiryDate')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('categoryPath')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('pool')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('amount')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('role')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('attachmentCount')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('note')}</th>
+                    {showCol('recordIdShort') && <th className="px-4 py-3 font-semibold">{t('recordIdShort')}</th>}
+                    {showCol('contractTitle') && <th className="px-4 py-3 font-semibold">{t('contractTitle')}</th>}
+                    {showCol('type') && <th className="px-4 py-3 font-semibold">{t('type')}</th>}
+                    {showCol('effectiveDate') && <th className="px-4 py-3 font-semibold">{t('effectiveDate')}</th>}
+                    {showCol('expiryDate') && <th className="px-4 py-3 font-semibold">{t('expiryDate')}</th>}
+                    {showCol('category') && <th className="px-4 py-3 font-semibold">{t('categoryPath')}</th>}
+                    {showCol('pool') && <th className="px-4 py-3 font-semibold">{t('pool')}</th>}
+                    {showCol('amount') && <th className="px-4 py-3 font-semibold">{t('amount')}</th>}
+                    {showCol('role') && <th className="px-4 py-3 font-semibold">{t('role')}</th>}
+                    {showCol('attachmentCount') && <th className="px-4 py-3 font-semibold">{t('attachmentCount')}</th>}
+                    {showCol('note') && <th className="px-4 py-3 font-semibold">{t('note')}</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {contracts.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="p-8 text-center text-gray-400 font-medium">{t('noDataTrySearch')}</td>
+                      <td colSpan={Math.max(visibleColumnIds.length, 1)} className="p-8 text-center text-gray-400 font-medium">{t('noDataTrySearch')}</td>
                     </tr>
                   ) : (
                     contracts.map(item => (
                       <tr key={item.id} className="hover:bg-[#F8FAFF]">
-                        <td className="px-4 py-3 font-medium">{item.title}</td>
-                        <td className="px-4 py-3">
-                          <span className={`px-2 py-1 rounded-md text-xs font-semibold ${
-                            item.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 'bg-[#FF3B30]/10 text-[#FF3B30]'
-                          }`}>
-                            {item.type === 'INCOME' ? t('income') : t('expense')}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">{new Date(item.effectiveDate).toLocaleDateString(dateLocale)}</td>
-                        <td className="px-4 py-3 whitespace-nowrap">{new Date(item.expiryDate).toLocaleDateString(dateLocale)}</td>
-                        <td className="px-4 py-3 max-w-[200px]">{categoryPath(item)}</td>
-                        <td className="px-4 py-3">{item.pool?.name || '-'}</td>
-                        <td className={`px-4 py-3 font-bold whitespace-nowrap ${item.type === 'INCOME' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
-                          {formatCurrency(locale, item.amount)}
-                        </td>
-                        <td className="px-4 py-3">{item.user?.roleName || '-'}</td>
-                        <td className="px-4 py-3 text-center">{attachmentCountOf(item)}</td>
-                        <td className="px-4 py-3 max-w-[180px] truncate text-gray-500">{item.note || '-'}</td>
+                        {showCol('recordIdShort') && <td className="px-4 py-3 font-mono text-xs text-gray-500">{item.id.slice(-8)}</td>}
+                        {showCol('contractTitle') && <td className="px-4 py-3 font-medium">{item.title}</td>}
+                        {showCol('type') && (
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-1 rounded-md text-xs font-semibold ${
+                              item.type === 'INCOME' ? 'bg-[#007AFF]/10 text-[#007AFF]' : 'bg-[#FF3B30]/10 text-[#FF3B30]'
+                            }`}>
+                              {item.type === 'INCOME' ? t('income') : t('expense')}
+                            </span>
+                          </td>
+                        )}
+                        {showCol('effectiveDate') && <td className="px-4 py-3 whitespace-nowrap">{new Date(item.effectiveDate).toLocaleDateString(dateLocale)}</td>}
+                        {showCol('expiryDate') && <td className="px-4 py-3 whitespace-nowrap">{new Date(item.expiryDate).toLocaleDateString(dateLocale)}</td>}
+                        {showCol('category') && <td className="px-4 py-3 max-w-[200px]">{categoryPath(item)}</td>}
+                        {showCol('pool') && <td className="px-4 py-3">{item.pool?.name || '-'}</td>}
+                        {showCol('amount') && (
+                          <td className={`px-4 py-3 font-bold whitespace-nowrap ${item.type === 'INCOME' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
+                            {formatCurrency(locale, item.amount)}
+                          </td>
+                        )}
+                        {showCol('role') && <td className="px-4 py-3">{item.user?.roleName || '-'}</td>}
+                        {showCol('attachmentCount') && <td className="px-4 py-3 text-center">{attachmentCountOf(item)}</td>}
+                        {showCol('note') && <td className="px-4 py-3 max-w-[180px] truncate text-gray-500">{item.note || '-'}</td>}
                       </tr>
                     ))
                   )}
