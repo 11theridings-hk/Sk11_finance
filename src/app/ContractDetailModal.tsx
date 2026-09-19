@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { addContractAttachment, addContractMemo, appendContractNoteKeywords, deleteContract, updateContract } from './actions/contract'
+import { addContractAttachment, addContractMemo, appendContractOcrFields, deleteContract, updateContract } from './actions/contract'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
 import { compressImage, MAX_PDF_PAGES, openAttachment, prepareAttachments, type ClientAttachment } from '@/lib/image'
 import OcrNoteButton, { type OcrResolvedPayload } from '@/components/OcrNoteButton'
@@ -33,11 +33,13 @@ export default function ContractDetailModal({
   const [reminderDays, setReminderDays] = useState(String(contract.reminderDays ?? 15))
   const [amount, setAmount] = useState(String(Math.abs(Number(contract.amount) || 0)))
   const [poolId, setPoolId] = useState(contract.poolId || '')
+  const [content, setContent] = useState(contract.content || '')
   const [note, setNote] = useState(contract.note || '')
   const [attachments, setAttachments] = useState<ClientAttachment[]>([])
   const [ocrAttachmentIndex, setOcrAttachmentIndex] = useState(0)
   const [attachmentNote, setAttachmentNote] = useState('')
-  const [pendingOcrKeywords, setPendingOcrKeywords] = useState('')
+  const [pendingOcrContent, setPendingOcrContent] = useState('')
+  const [pendingOcrNote, setPendingOcrNote] = useState('')
   const [loading, setLoading] = useState(false)
 
   const handleAttachmentChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -94,6 +96,7 @@ export default function ContractDetailModal({
       expiryDate: new Date(expiryDate),
       reminderDays: Number(reminderDays),
       amount: numericAmount,
+      content: content.trim() || undefined,
       note: note.trim() || undefined,
       poolId: poolId || undefined,
       categoryId: contract.categoryId || undefined,
@@ -123,24 +126,40 @@ export default function ContractDetailModal({
         return
       }
     }
-    if (pendingOcrKeywords.trim()) {
-      await appendContractNoteKeywords(contract.id, pendingOcrKeywords.trim())
+    if (pendingOcrContent.trim() || pendingOcrNote.trim()) {
+      await appendContractOcrFields(contract.id, {
+        contentText: pendingOcrContent.trim() || undefined,
+        noteText: pendingOcrNote.trim() || undefined,
+      })
     }
     window.location.reload()
   }
 
   const onOcrResolved = (payload: OcrResolvedPayload | string) => {
-    const noteText = typeof payload === 'string' ? payload : payload.noteText
-    const attachmentMemo = typeof payload === 'string' ? '' : payload.attachmentMemo
-    if (noteText) {
-      setNote((current: string) => (current.trim() ? `${current.trim()}\n${noteText}` : noteText))
-      setPendingOcrKeywords((current) => (current.trim() ? `${current.trim()}\n${noteText}` : noteText))
+    if (typeof payload === 'string') {
+      setContent((current: string) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
+      setPendingOcrContent((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
+      return
     }
-    if (attachmentMemo) {
+    if (payload.contentText) {
+      setContent((current: string) =>
+        current.trim() ? `${current.trim()}\n${payload.contentText}` : payload.contentText
+      )
+      setPendingOcrContent((current) =>
+        current.trim() ? `${current.trim()}\n${payload.contentText}` : payload.contentText
+      )
+    }
+    if (payload.noteText) {
+      setNote((current: string) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
+      setPendingOcrNote((current) =>
+        current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText
+      )
+    }
+    if (payload.attachmentMemo) {
       const ocrIndex = attachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0
-      setAttachmentNote(attachmentMemo)
+      setAttachmentNote(payload.attachmentMemo)
       setAttachments((prev) =>
-        prev.map((item, index) => (index === ocrIndex ? { ...item, note: attachmentMemo } : item))
+        prev.map((item, index) => (index === ocrIndex ? { ...item, note: payload.attachmentMemo } : item))
       )
     }
   }
@@ -266,6 +285,20 @@ export default function ContractDetailModal({
                 </select>
               ) : (
                 <div className={readOnlyFieldClass}>{contract.pool?.name || '-'}</div>
+              )}
+            </div>
+
+            <div className="md:col-span-2">
+              <div className="text-gray-500 mb-1">{t('content')}</div>
+              {canManage ? (
+                <input
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  className={inputClass}
+                  placeholder={t('contentPlaceholder')}
+                />
+              ) : (
+                <div className={readOnlyFieldClass}>{contract.content || '-'}</div>
               )}
             </div>
 

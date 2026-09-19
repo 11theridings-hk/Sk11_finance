@@ -56,6 +56,7 @@ type RecordItem = {
   type: string
   status?: string
   amount: number
+  content?: string | null
   note?: string | null
   category?: RecordRelation | null
   subCategory?: RecordRelation | null
@@ -90,6 +91,7 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
   const [ocrAttachmentIndex, setOcrAttachmentIndex] = useState(0)
   const [attachmentNote, setAttachmentNote] = useState('')
   const [note, setNote] = useState('')
+  const [content, setContent] = useState('')
   const [ocrMemo, setOcrMemo] = useState('')
 
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -165,7 +167,7 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
 
   const appendRecognizedText = (payload: OcrResolvedPayload | string) => {
     if (typeof payload === 'string') {
-      setNote((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
+      setContent((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
       setOcrMemo((current) => {
         const line = `${locale === 'en' ? 'OCR' : '圖像辨識'}: ${payload}`
         return current.trim() ? `${current.trim()}\n${line}` : line
@@ -175,10 +177,21 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
     if (payload.amount != null) {
       setAmount(String(Math.abs(payload.amount)))
     }
+    if (payload.contentText) {
+      setContent((current) =>
+        current.trim() ? `${current.trim()}\n${payload.contentText}` : payload.contentText
+      )
+    }
     if (payload.noteText) {
       setNote((current) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
+    }
+    if (payload.contentText || payload.noteText) {
       setOcrMemo((current) => {
-        const line = `${locale === 'en' ? 'OCR' : '圖像辨識'}: ${payload.noteText}`
+        const parts = [
+          payload.contentText && `內容: ${payload.contentText}`,
+          payload.noteText && `備註: ${payload.noteText}`,
+        ].filter(Boolean)
+        const line = `${locale === 'en' ? 'OCR' : '圖像辨識'}:\n${parts.join('\n')}`
         return current.trim() ? `${current.trim()}\n${line}` : line
       })
     }
@@ -221,6 +234,7 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
     const res = await createRecord({
       type,
       date: new Date(date),
+      content,
       note,
       amount: finalAmount,
       categoryId,
@@ -245,7 +259,7 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
       alert(`${t('submitFailed')}: ${res.error}`)
       setIsSubmitting(false)
     }
-  }, [amount, attachments, attachmentNote, categoryId, date, note, ocrMemo, poolId, subCategoryId, t, thirdCategoryId, type])
+  }, [amount, attachments, attachmentNote, categoryId, content, date, note, ocrMemo, poolId, subCategoryId, t, thirdCategoryId, type])
 
   useEffect(() => {
     if (!showConfirmDialog || countdown <= 0) {
@@ -440,6 +454,16 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('contentOptional')}</label>
+              <input
+                value={content}
+                onChange={e => setContent(e.target.value)}
+                className={inputClass}
+                placeholder={t('contentPlaceholder')}
+              />
             </div>
 
             <div className="md:col-span-2">

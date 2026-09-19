@@ -15,6 +15,7 @@ type AttachmentPayload = {
 
 export type CreateActivityInput = {
   title: string
+  content?: string
   note?: string
   eventDate: Date
   reminderDays: number
@@ -26,6 +27,7 @@ export type CreateActivityInput = {
 
 export type UpdateActivityInput = {
   title: string
+  content?: string
   note?: string
   eventDate: Date
   reminderDays: number
@@ -102,6 +104,7 @@ export async function createActivity(data: CreateActivityInput) {
       const created = await tx.activity.create({
         data: {
           title: data.title,
+          content: data.content,
           note: data.note,
           eventDate: data.eventDate,
           reminderDays: data.reminderDays,
@@ -173,6 +176,7 @@ export async function updateActivity(activityId: string, data: UpdateActivityInp
       where: { id: activityId },
       data: {
         title: data.title,
+        content: data.content,
         note: data.note,
         eventDate: data.eventDate,
         reminderDays: data.reminderDays,
@@ -242,27 +246,45 @@ export async function addActivityMemo(activityId: string, content: string) {
   }
 }
 
-export async function appendActivityNoteKeywords(activityId: string, noteText: string) {
+export async function appendActivityOcrFields(
+  activityId: string,
+  fields: { contentText?: string; noteText?: string }
+) {
   try {
     const { session, activity } = await assertActivityPermission(activityId)
-    const addition = noteText.trim()
-    if (!addition) return { success: true }
+    const contentAdd = (fields.contentText || '').trim()
+    const noteAdd = (fields.noteText || '').trim()
+    if (!contentAdd && !noteAdd) return { success: true }
 
-    const nextNote = activity.note?.trim() ? `${activity.note.trim()}\n${addition}` : addition
+    const nextContent = contentAdd
+      ? activity.content?.trim()
+        ? `${activity.content.trim()}\n${contentAdd}`
+        : contentAdd
+      : activity.content
+    const nextNote = noteAdd
+      ? activity.note?.trim()
+        ? `${activity.note.trim()}\n${noteAdd}`
+        : noteAdd
+      : activity.note
+
+    const memoBody = [contentAdd && `內容: ${contentAdd}`, noteAdd && `備註: ${noteAdd}`]
+      .filter(Boolean)
+      .join('\n')
+
     await prisma.$transaction(async (tx) => {
       await tx.activity.update({
         where: { id: activityId },
-        data: { note: nextNote },
+        data: { content: nextContent, note: nextNote },
       })
-      await tx.memo.create({
-        data: {
-          content: addition.startsWith('OCR') || addition.startsWith('圖像辨識')
-            ? addition
-            : `圖像辨識: ${addition}`,
-          authorId: session.userId,
-          activityId,
-        },
-      })
+      if (memoBody) {
+        await tx.memo.create({
+          data: {
+            content: `圖像辨識:\n${memoBody}`,
+            authorId: session.userId,
+            activityId,
+          },
+        })
+      }
     })
 
     revalidatePath('/activities')
@@ -270,6 +292,10 @@ export async function appendActivityNoteKeywords(activityId: string, noteText: s
   } catch (error: any) {
     return { success: false, error: error.message }
   }
+}
+
+export async function appendActivityNoteKeywords(activityId: string, noteText: string) {
+  return appendActivityOcrFields(activityId, { noteText })
 }
 
 export async function deleteActivity(activityId: string) {

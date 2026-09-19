@@ -16,6 +16,7 @@ type AttachmentPayload = {
 export type CreatePrivateRecordInput = {
   type: 'INCOME' | 'EXPENSE'
   date: Date
+  content?: string
   note?: string
   customCategory?: string
   amount: number
@@ -241,6 +242,7 @@ export async function createPrivateRecord(data: CreatePrivateRecordInput) {
         data: {
           type: data.type,
           date: data.date,
+          content: data.content,
           note: data.note,
           customCategory: customCategory || null,
           amount: data.amount,
@@ -342,27 +344,45 @@ export async function addPrivateRecordMemo(recordId: string, content: string) {
   }
 }
 
-export async function appendPrivateRecordNoteKeywords(recordId: string, noteText: string) {
+export async function appendPrivateRecordOcrFields(
+  recordId: string,
+  fields: { contentText?: string; noteText?: string }
+) {
   try {
     const { session, record } = await assertPrivateRecordPermission(recordId)
-    const addition = noteText.trim()
-    if (!addition) return { success: true }
+    const contentAdd = (fields.contentText || '').trim()
+    const noteAdd = (fields.noteText || '').trim()
+    if (!contentAdd && !noteAdd) return { success: true }
 
-    const nextNote = record.note?.trim() ? `${record.note.trim()}\n${addition}` : addition
+    const nextContent = contentAdd
+      ? record.content?.trim()
+        ? `${record.content.trim()}\n${contentAdd}`
+        : contentAdd
+      : record.content
+    const nextNote = noteAdd
+      ? record.note?.trim()
+        ? `${record.note.trim()}\n${noteAdd}`
+        : noteAdd
+      : record.note
+
+    const memoBody = [contentAdd && `內容: ${contentAdd}`, noteAdd && `備註: ${noteAdd}`]
+      .filter(Boolean)
+      .join('\n')
+
     await prisma.$transaction(async (tx) => {
       await tx.privateRecord.update({
         where: { id: recordId },
-        data: { note: nextNote },
+        data: { content: nextContent, note: nextNote },
       })
-      await tx.memo.create({
-        data: {
-          content: addition.startsWith('OCR') || addition.startsWith('圖像辨識')
-            ? addition
-            : `圖像辨識: ${addition}`,
-          authorId: session.userId,
-          privateRecordId: recordId,
-        },
-      })
+      if (memoBody) {
+        await tx.memo.create({
+          data: {
+            content: `圖像辨識:\n${memoBody}`,
+            authorId: session.userId,
+            privateRecordId: recordId,
+          },
+        })
+      }
     })
 
     revalidatePath('/private-ledger')
@@ -371,6 +391,10 @@ export async function appendPrivateRecordNoteKeywords(recordId: string, noteText
   } catch (error: any) {
     return { success: false, error: error.message }
   }
+}
+
+export async function appendPrivateRecordNoteKeywords(recordId: string, noteText: string) {
+  return appendPrivateRecordOcrFields(recordId, { noteText })
 }
 
 export async function deletePrivateRecord(recordId: string) {

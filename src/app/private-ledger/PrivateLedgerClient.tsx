@@ -15,6 +15,7 @@ type PrivateRecordItem = {
   date: string | Date
   type: string
   amount: number
+  content?: string | null
   note?: string | null
   customCategory?: string | null
   category?: { name: string } | null
@@ -56,6 +57,7 @@ export default function PrivateLedgerClient({
   const [date, setDate] = useState(initialDate)
   const [customCategory, setCustomCategory] = useState('')
   const [amount, setAmount] = useState('')
+  const [content, setContent] = useState('')
   const [note, setNote] = useState('')
   const [ocrMemo, setOcrMemo] = useState('')
   const [attachments, setAttachments] = useState<ClientAttachment[]>([])
@@ -125,7 +127,7 @@ export default function PrivateLedgerClient({
 
   const appendRecognizedText = (payload: OcrResolvedPayload | string) => {
     if (typeof payload === 'string') {
-      setNote((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
+      setContent((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
       setOcrMemo((current) => {
         const line = `${locale === 'en' ? 'OCR' : '圖像辨識'}: ${payload}`
         return current.trim() ? `${current.trim()}\n${line}` : line
@@ -135,10 +137,21 @@ export default function PrivateLedgerClient({
     if (payload.amount != null) {
       setAmount(String(Math.abs(payload.amount)))
     }
+    if (payload.contentText) {
+      setContent((current) =>
+        current.trim() ? `${current.trim()}\n${payload.contentText}` : payload.contentText
+      )
+    }
     if (payload.noteText) {
       setNote((current) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
+    }
+    if (payload.contentText || payload.noteText) {
       setOcrMemo((current) => {
-        const line = `${locale === 'en' ? 'OCR' : '圖像辨識'}: ${payload.noteText}`
+        const parts = [
+          payload.contentText && `內容: ${payload.contentText}`,
+          payload.noteText && `備註: ${payload.noteText}`,
+        ].filter(Boolean)
+        const line = `${locale === 'en' ? 'OCR' : '圖像辨識'}:\n${parts.join('\n')}`
         return current.trim() ? `${current.trim()}\n${line}` : line
       })
     }
@@ -160,6 +173,7 @@ export default function PrivateLedgerClient({
     const res = await createPrivateRecord({
       type,
       date: new Date(date),
+      content,
       note,
       customCategory,
       amount: numericAmount,
@@ -330,6 +344,15 @@ export default function PrivateLedgerClient({
                     onChange={(e) => setCustomCategory(e.target.value)}
                     className={inputClass}
                     placeholder={t('privateCategoryPlaceholder')}
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('contentOptional')}</label>
+                  <input
+                    value={content}
+                    onChange={(e) => setContent(e.target.value)}
+                    className={inputClass}
+                    placeholder={t('contentPlaceholder')}
                   />
                 </div>
                 <div className="md:col-span-2">

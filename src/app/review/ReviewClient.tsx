@@ -25,6 +25,7 @@ type EditForm = {
   type: 'INCOME' | 'EXPENSE'
   date: string
   amount: string
+  content: string
   note: string
   categoryId: string
   subCategoryId: string
@@ -43,6 +44,7 @@ function buildForm(record: any): EditForm {
     type: record.type === 'INCOME' ? 'INCOME' : 'EXPENSE',
     date: toDateInput(record.date || record.createdAt),
     amount: String(Math.abs(Number(record.amount) || 0)),
+    content: record.content || '',
     note: record.note || '',
     categoryId: record.categoryId || record.category?.id || '',
     subCategoryId: record.subCategoryId || record.subCategory?.id || '',
@@ -112,6 +114,7 @@ export default function ReviewClient({
       edits = {
         type: form.type,
         date: form.date,
+        content: form.content,
         note: form.note,
         amount,
         categoryId: form.categoryId,
@@ -163,13 +166,14 @@ export default function ReviewClient({
                 <th className="px-6 py-3 font-medium">{t('role')}</th>
                 <th className="px-6 py-3 font-medium">{t('pool')}</th>
                 <th className="px-6 py-3 font-medium">{t('amount')}</th>
+                <th className="px-6 py-3 font-medium">{t('content')}</th>
                 <th className="px-6 py-3 font-medium">{t('note')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {records.length === 0 ? (
                 <tr>
-                  <td colSpan={tab === 'REVIEWED' ? 8 : 7} className="p-8 text-center font-medium text-gray-400">
+                  <td colSpan={tab === 'REVIEWED' ? 9 : 8} className="p-8 text-center font-medium text-gray-400">
                     {t('noData')}
                   </td>
                 </tr>
@@ -216,6 +220,7 @@ export default function ReviewClient({
                     <td className={`px-6 py-4 font-bold ${record.amount > 0 ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
                       {formatCurrency(locale, record.amount)}
                     </td>
+                    <td className="max-w-[120px] truncate px-6 py-4 text-gray-500">{record.content || '-'}</td>
                     <td className="max-w-[150px] truncate px-6 py-4 text-gray-500">{record.note || '-'}</td>
                   </tr>
                 ))
@@ -367,6 +372,15 @@ export default function ReviewClient({
                       </div>
                     </div>
                     <div className="col-span-2">
+                      <span className="mb-1 block text-gray-500">{t('content')}</span>
+                      <input
+                        value={form.content}
+                        onChange={(e) => setForm((prev) => (prev ? { ...prev, content: e.target.value } : prev))}
+                        className={inputClass}
+                        placeholder={t('contentPlaceholder')}
+                      />
+                    </div>
+                    <div className="col-span-2">
                       <span className="mb-1 block text-gray-500">{t('note')}</span>
                       <textarea
                         rows={3}
@@ -404,6 +418,12 @@ export default function ReviewClient({
                         className={`font-bold ${modalRecord.amount > 0 ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}
                       >
                         {formatCurrency(locale, modalRecord.amount)}
+                      </span>
+                    </div>
+                    <div className="col-span-2">
+                      <span className="mb-1 block text-gray-500">{t('content')}</span>
+                      <span className="whitespace-pre-wrap font-semibold text-gray-900">
+                        {modalRecord.content || '-'}
                       </span>
                     </div>
                     <div className="col-span-2">

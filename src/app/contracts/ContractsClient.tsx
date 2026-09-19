@@ -15,6 +15,7 @@ type ContractItem = {
   effectiveDate: string | Date
   expiryDate: string | Date
   reminderDays: number
+  content?: string | null
   note?: string | null
   amount: number
   poolId?: string | null
@@ -54,6 +55,7 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
   const [reminderDays, setReminderDays] = useState('15')
   const [amount, setAmount] = useState('')
   const [poolId, setPoolId] = useState('')
+  const [content, setContent] = useState('')
   const [note, setNote] = useState('')
   const [ocrMemo, setOcrMemo] = useState('')
   const [attachments, setAttachments] = useState<ClientAttachment[]>([])
@@ -137,6 +139,7 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
       expiryDate: new Date(expiryDate),
       reminderDays: Number(reminderDays),
       amount: numericAmount,
+      content: content.trim() || undefined,
       note: note.trim() || undefined,
       poolId: poolId || undefined,
       attachment: first
@@ -163,7 +166,7 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
 
   const appendRecognizedText = (payload: OcrResolvedPayload | string) => {
     if (typeof payload === 'string') {
-      setNote((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
+      setContent((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
       setOcrMemo((current) => {
         const line = `${locale === 'en' ? 'OCR' : '圖像辨識'}: ${payload}`
         return current.trim() ? `${current.trim()}\n${line}` : line
@@ -173,10 +176,21 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
     if (payload.amount != null) {
       setAmount(String(Math.abs(payload.amount)))
     }
+    if (payload.contentText) {
+      setContent((current) =>
+        current.trim() ? `${current.trim()}\n${payload.contentText}` : payload.contentText
+      )
+    }
     if (payload.noteText) {
       setNote((current) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
+    }
+    if (payload.contentText || payload.noteText) {
       setOcrMemo((current) => {
-        const line = `${locale === 'en' ? 'OCR' : '圖像辨識'}: ${payload.noteText}`
+        const parts = [
+          payload.contentText && `內容: ${payload.contentText}`,
+          payload.noteText && `備註: ${payload.noteText}`,
+        ].filter(Boolean)
+        const line = `${locale === 'en' ? 'OCR' : '圖像辨識'}:\n${parts.join('\n')}`
         return current.trim() ? `${current.trim()}\n${line}` : line
       })
     }
@@ -303,6 +317,16 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
                 <option value="">{t('all')}</option>
                 {pools.map((pool: any) => <option key={pool.id} value={pool.id}>{pool.name}</option>)}
               </select>
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('contentOptional')}</label>
+              <input
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                className={inputClass}
+                placeholder={t('contentPlaceholder')}
+              />
             </div>
 
             <div className="md:col-span-2">

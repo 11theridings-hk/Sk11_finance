@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { addActivityAttachment, addActivityMemo, appendActivityNoteKeywords, deleteActivity, updateActivity } from './actions/activity'
+import { addActivityAttachment, addActivityMemo, appendActivityOcrFields, deleteActivity, updateActivity } from './actions/activity'
 import { createTranslator, type Locale } from '@/lib/i18n'
 import { compressImage, MAX_PDF_PAGES, openAttachment, prepareAttachments, type ClientAttachment } from '@/lib/image'
 import OcrNoteButton, { type OcrResolvedPayload } from '@/components/OcrNoteButton'
@@ -24,11 +24,13 @@ export default function ActivityDetailModal({
   const [eventDate, setEventDate] = useState(new Date(activity.eventDate).toISOString().split('T')[0])
   const [reminderDays, setReminderDays] = useState(String(activity.reminderDays))
   const [visibility, setVisibility] = useState<'PUBLIC' | 'PRIVATE'>(activity.visibility)
+  const [content, setContent] = useState(activity.content || '')
   const [note, setNote] = useState(activity.note || '')
   const [attachments, setAttachments] = useState<ClientAttachment[]>([])
   const [ocrAttachmentIndex, setOcrAttachmentIndex] = useState(0)
   const [attachmentNote, setAttachmentNote] = useState('')
-  const [pendingOcrKeywords, setPendingOcrKeywords] = useState('')
+  const [pendingOcrContent, setPendingOcrContent] = useState('')
+  const [pendingOcrNote, setPendingOcrNote] = useState('')
   const [loading, setLoading] = useState(false)
 
   const handleAttachmentChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -79,6 +81,7 @@ export default function ActivityDetailModal({
     setLoading(true)
     const res = await updateActivity(activity.id, {
       title: title.trim(),
+      content: content.trim() || undefined,
       note: note.trim() || undefined,
       eventDate: new Date(eventDate),
       reminderDays: Number(reminderDays),
@@ -107,8 +110,11 @@ export default function ActivityDetailModal({
         return
       }
     }
-    if (pendingOcrKeywords.trim()) {
-      await appendActivityNoteKeywords(activity.id, pendingOcrKeywords.trim())
+    if (pendingOcrContent.trim() || pendingOcrNote.trim()) {
+      await appendActivityOcrFields(activity.id, {
+        contentText: pendingOcrContent.trim() || undefined,
+        noteText: pendingOcrNote.trim() || undefined,
+      })
     }
     window.location.reload()
   }
@@ -127,13 +133,21 @@ export default function ActivityDetailModal({
 
   const appendRecognizedText = (payload: OcrResolvedPayload | string) => {
     if (typeof payload === 'string') {
-      setNote((current: string) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
-      setPendingOcrKeywords((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
+      setContent((current: string) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
+      setPendingOcrContent((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
       return
+    }
+    if (payload.contentText) {
+      setContent((current: string) =>
+        current.trim() ? `${current.trim()}\n${payload.contentText}` : payload.contentText
+      )
+      setPendingOcrContent((current) =>
+        current.trim() ? `${current.trim()}\n${payload.contentText}` : payload.contentText
+      )
     }
     if (payload.noteText) {
       setNote((current: string) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
-      setPendingOcrKeywords((current) =>
+      setPendingOcrNote((current) =>
         current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText
       )
     }
@@ -199,6 +213,19 @@ export default function ActivityDetailModal({
             <div>
               <div className="mb-1 text-gray-500">{t('userLabel')}</div>
               <div className={readOnlyFieldClass}>{activity.user?.roleName || '-'}</div>
+            </div>
+            <div className="md:col-span-2">
+              <div className="mb-1 text-gray-500">{t('content')}</div>
+              {canManage ? (
+                <input
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  className={inputClass}
+                  placeholder={t('contentPlaceholder')}
+                />
+              ) : (
+                <div className={readOnlyFieldClass}>{activity.content || '-'}</div>
+              )}
             </div>
             <div className="md:col-span-2">
               <div className="mb-1 text-gray-500">{t('note')}</div>

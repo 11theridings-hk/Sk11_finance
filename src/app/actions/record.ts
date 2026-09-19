@@ -16,6 +16,7 @@ type AttachmentPayload = {
 export type CreateRecordInput = {
   type: 'INCOME' | 'EXPENSE'
   date: Date
+  content?: string
   note?: string
   amount: number
   categoryId: string
@@ -77,6 +78,7 @@ export async function createRecord(data: CreateRecordInput) {
           type: data.type,
           status,
           date: data.date,
+          content: data.content,
           note: data.note,
           amount: data.amount, // 前端传过来的已处理好正负
           attachmentUrl: attachmentList[0]?.url,
@@ -312,28 +314,46 @@ export async function addRecordMemo(recordId: string, content: string) {
   }
 }
 
-/** Append OCR/keywords text to Record.note and create a timeline memo. */
-export async function appendRecordNoteKeywords(recordId: string, noteText: string) {
+/** Append OCR fields: short keywords → content, detail → note, plus timeline memo. */
+export async function appendRecordOcrFields(
+  recordId: string,
+  fields: { contentText?: string; noteText?: string }
+) {
   try {
     const { session, record } = await assertRecordPermission(recordId)
-    const addition = noteText.trim()
-    if (!addition) return { success: true }
+    const contentAdd = (fields.contentText || '').trim()
+    const noteAdd = (fields.noteText || '').trim()
+    if (!contentAdd && !noteAdd) return { success: true }
 
-    const nextNote = record.note?.trim() ? `${record.note.trim()}\n${addition}` : addition
+    const nextContent = contentAdd
+      ? record.content?.trim()
+        ? `${record.content.trim()}\n${contentAdd}`
+        : contentAdd
+      : record.content
+    const nextNote = noteAdd
+      ? record.note?.trim()
+        ? `${record.note.trim()}\n${noteAdd}`
+        : noteAdd
+      : record.note
+
+    const memoBody = [contentAdd && `內容: ${contentAdd}`, noteAdd && `備註: ${noteAdd}`]
+      .filter(Boolean)
+      .join('\n')
+
     await prisma.$transaction(async (tx) => {
       await tx.record.update({
         where: { id: recordId },
-        data: { note: nextNote },
+        data: { content: nextContent, note: nextNote },
       })
-      await tx.memo.create({
-        data: {
-          content: addition.startsWith('OCR') || addition.startsWith('圖像辨識')
-            ? addition
-            : `圖像辨識: ${addition}`,
-          authorId: session.userId,
-          recordId,
-        },
-      })
+      if (memoBody) {
+        await tx.memo.create({
+          data: {
+            content: `圖像辨識:\n${memoBody}`,
+            authorId: session.userId,
+            recordId,
+          },
+        })
+      }
     })
 
     revalidatePath('/')
@@ -343,6 +363,11 @@ export async function appendRecordNoteKeywords(recordId: string, noteText: strin
   } catch (error: any) {
     return { success: false, error: error.message }
   }
+}
+
+/** @deprecated use appendRecordOcrFields */
+export async function appendRecordNoteKeywords(recordId: string, noteText: string) {
+  return appendRecordOcrFields(recordId, { noteText })
 }
 
 export async function deleteRecord(recordId: string) {

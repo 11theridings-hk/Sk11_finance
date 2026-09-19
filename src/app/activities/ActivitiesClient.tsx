@@ -10,6 +10,7 @@ import OcrNoteButton, { type OcrResolvedPayload } from '@/components/OcrNoteButt
 type ActivityItem = {
   id: string
   title: string
+  content?: string | null
   note?: string | null
   eventDate: string | Date
   reminderDays: number
@@ -39,6 +40,7 @@ export default function ActivitiesClient({ locale, currentUserId, isAdmin, initi
   const [eventDate, setEventDate] = useState(() => new Date().toISOString().split('T')[0])
   const [reminderDays, setReminderDays] = useState('15')
   const [visibility, setVisibility] = useState<'PUBLIC' | 'PRIVATE'>('PUBLIC')
+  const [content, setContent] = useState('')
   const [note, setNote] = useState('')
   const [ocrMemo, setOcrMemo] = useState('')
   const [attachments, setAttachments] = useState<ClientAttachment[]>([])
@@ -125,6 +127,7 @@ export default function ActivitiesClient({ locale, currentUserId, isAdmin, initi
     setIsSubmitting(true)
     const res = await createActivity({
       title: title.trim(),
+      content: content.trim() || undefined,
       note: note.trim() || undefined,
       eventDate: new Date(eventDate),
       reminderDays: Number(reminderDays),
@@ -151,17 +154,28 @@ export default function ActivitiesClient({ locale, currentUserId, isAdmin, initi
 
   const appendRecognizedText = (payload: OcrResolvedPayload | string) => {
     if (typeof payload === 'string') {
-      setNote((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
+      setContent((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
       setOcrMemo((current) => {
         const line = `${locale === 'en' ? 'OCR' : '圖像辨識'}: ${payload}`
         return current.trim() ? `${current.trim()}\n${line}` : line
       })
       return
     }
+    if (payload.contentText) {
+      setContent((current) =>
+        current.trim() ? `${current.trim()}\n${payload.contentText}` : payload.contentText
+      )
+    }
     if (payload.noteText) {
       setNote((current) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
+    }
+    if (payload.contentText || payload.noteText) {
       setOcrMemo((current) => {
-        const line = `${locale === 'en' ? 'OCR' : '圖像辨識'}: ${payload.noteText}`
+        const parts = [
+          payload.contentText && `內容: ${payload.contentText}`,
+          payload.noteText && `備註: ${payload.noteText}`,
+        ].filter(Boolean)
+        const line = `${locale === 'en' ? 'OCR' : '圖像辨識'}:\n${parts.join('\n')}`
         return current.trim() ? `${current.trim()}\n${line}` : line
       })
     }
@@ -264,6 +278,15 @@ export default function ActivitiesClient({ locale, currentUserId, isAdmin, initi
                 <option value="PUBLIC">{t('publicActivity')}</option>
                 <option value="PRIVATE">{t('privateActivity')}</option>
               </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('contentOptional')}</label>
+              <input
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                className={inputClass}
+                placeholder={t('contentPlaceholder')}
+              />
             </div>
             <div className="md:col-span-2">
               <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('noteOptional')}</label>

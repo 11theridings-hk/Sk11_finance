@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { addRecordAttachment, appendRecordNoteKeywords, deleteRecord, addRecordMemo } from './actions/record'
+import { addRecordAttachment, appendRecordOcrFields, deleteRecord, addRecordMemo } from './actions/record'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
 import { compressImage, MAX_PDF_PAGES, openAttachment, prepareAttachments, type ClientAttachment } from '@/lib/image'
 import NoteTimeline from '@/components/NoteTimeline'
@@ -20,7 +20,8 @@ export default function RecordDetailModal({
   const t = createTranslator(locale)
   const [attachments, setAttachments] = useState<ClientAttachment[]>([])
   const [attachmentNote, setAttachmentNote] = useState('')
-  const [pendingOcrKeywords, setPendingOcrKeywords] = useState('')
+  const [pendingOcrContent, setPendingOcrContent] = useState('')
+  const [pendingOcrNote, setPendingOcrNote] = useState('')
   const [loading, setLoading] = useState(false)
 
   const handleAttachmentChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -64,8 +65,11 @@ export default function RecordDetailModal({
         return
       }
     }
-    if (pendingOcrKeywords.trim()) {
-      await appendRecordNoteKeywords(record.id, pendingOcrKeywords.trim())
+    if (pendingOcrContent.trim() || pendingOcrNote.trim()) {
+      await appendRecordOcrFields(record.id, {
+        contentText: pendingOcrContent.trim() || undefined,
+        noteText: pendingOcrNote.trim() || undefined,
+      })
     }
     window.location.reload()
   }
@@ -83,14 +87,23 @@ export default function RecordDetailModal({
   }
 
   const onOcrResolved = (payload: OcrResolvedPayload | string) => {
-    const noteText = typeof payload === 'string' ? payload : payload.noteText
-    const attachmentMemo = typeof payload === 'string' ? '' : payload.attachmentMemo
-    if (noteText) {
-      setPendingOcrKeywords((current) => (current.trim() ? `${current.trim()}\n${noteText}` : noteText))
+    if (typeof payload === 'string') {
+      setPendingOcrContent((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
+      return
     }
-    if (attachmentMemo) {
-      setAttachmentNote(attachmentMemo)
-      setAttachments((prev) => prev.map((item, index) => (index === 0 ? { ...item, note: attachmentMemo } : item)))
+    if (payload.contentText) {
+      setPendingOcrContent((current) =>
+        current.trim() ? `${current.trim()}\n${payload.contentText}` : payload.contentText
+      )
+    }
+    if (payload.noteText) {
+      setPendingOcrNote((current) =>
+        current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText
+      )
+    }
+    if (payload.attachmentMemo) {
+      setAttachmentNote(payload.attachmentMemo)
+      setAttachments((prev) => prev.map((item, index) => (index === 0 ? { ...item, note: payload.attachmentMemo } : item)))
     }
   }
 
@@ -131,6 +144,10 @@ export default function RecordDetailModal({
             <div>
               <div className="mb-1 text-gray-500">{t('pool')}</div>
               <div className="font-semibold text-gray-900">{record.pool?.name || '-'}</div>
+            </div>
+            <div className="md:col-span-2">
+              <div className="mb-1 text-gray-500">{t('content')}</div>
+              <div className="whitespace-pre-wrap font-semibold text-gray-900">{record.content || '-'}</div>
             </div>
             <div className="md:col-span-2">
               <div className="mb-1 text-gray-500">{t('note')}</div>

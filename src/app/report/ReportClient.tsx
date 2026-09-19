@@ -169,6 +169,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
   const [editSubCategoryId, setEditSubCategoryId] = useState('')
   const [editThirdCategoryId, setEditThirdCategoryId] = useState('')
   const [editAmount, setEditAmount] = useState('')
+  const [editContent, setEditContent] = useState('')
   const [editNote, setEditNote] = useState('')
   const [editAttachments, setEditAttachments] = useState<ClientAttachment[]>([])
   const [ocrAttachmentIndex, setOcrAttachmentIndex] = useState(0)
@@ -191,6 +192,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     setEditSubCategoryId(record.subCategoryId || '')
     setEditThirdCategoryId(record.thirdCategoryId || '')
     setEditAmount(Math.abs(record.amount).toString())
+    setEditContent(record.content || '')
     setEditNote(record.note || '')
     setEditAttachments([])
     setOcrAttachmentIndex(0)
@@ -212,6 +214,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       subCategoryId: editSubCategoryId,
       thirdCategoryId: editThirdCategoryId,
       amount: finalAmount,
+      content: editContent,
       note: editNote,
       poolId: editingRecord.poolId,
       attachments:
@@ -274,11 +277,16 @@ export default function ReportClient({ categories, users, pools, locale }: Props
 
   const appendRecognizedText = (payload: OcrResolvedPayload | string) => {
     if (typeof payload === 'string') {
-      setEditNote((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
+      setEditContent((current) => (current.trim() ? `${current.trim()}\n${payload}` : payload))
       return
     }
     if (payload.amount != null) {
       setEditAmount(String(Math.abs(payload.amount)))
+    }
+    if (payload.contentText) {
+      setEditContent((current) =>
+        current.trim() ? `${current.trim()}\n${payload.contentText}` : payload.contentText
+      )
     }
     if (payload.noteText) {
       setEditNote((current) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
@@ -511,6 +519,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         { id: 'pool', value: r.pool?.name || '-' },
         { id: 'role', value: r.user?.roleName || '-' },
         { id: 'amount', value: formatCurrency(locale, r.amount) },
+        { id: 'content', value: r.content || '-' },
         { id: 'attachmentCount', value: String(attachmentCountOf(r)) },
         { id: 'note', value: r.note || '-' },
         { id: 'status', value: r.status === 'PENDING' ? t('pendingApproval') : t('approvedStored') },
@@ -535,6 +544,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       { id: 'pool', label: t('pool') },
       { id: 'role', label: t('role') },
       { id: 'amount', label: t('amount') },
+      { id: 'content', label: t('content') },
       { id: 'attachmentCount', label: t('attachmentCount') },
       { id: 'note', label: t('note') },
       { id: 'status', label: t('status') },
@@ -604,6 +614,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       { id: 'activityVisibility', label: t('activityVisibility') },
       { id: 'role', label: t('role') },
       { id: 'attachmentCount', label: t('attachmentCount') },
+      { id: 'content', label: t('content') },
       { id: 'note', label: t('note') },
     ]
     const activityHead = activityHeadMeta.filter((c) => showCol(c.id)).map((c) => c.label)
@@ -617,6 +628,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         activityVisibility: a.visibility === 'PRIVATE' ? t('privateActivity') : t('publicActivity'),
         role: a.user?.roleName || '-',
         attachmentCount: String(attachmentCountOf(a)),
+        content: a.content || '-',
         note: a.note || '-',
       }
       return activityHeadMeta.filter((c) => showCol(c.id)).map((c) => map[c.id])
@@ -673,6 +685,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       { id: 'amount', label: t('amount') },
       { id: 'role', label: t('role') },
       { id: 'attachmentCount', label: t('attachmentCount') },
+      { id: 'content', label: t('content') },
       { id: 'note', label: t('note') },
     ]
     const visibleContractHead = contractHeadMeta.filter((c) => {
@@ -694,6 +707,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         amount: formatCurrency(locale, c.amount),
         role: c.user?.roleName || '-',
         attachmentCount: String(attachmentCountOf(c)),
+        content: c.content || '-',
         note: c.note || '-',
       }
       return visibleContractHead.map((col) => map[col.id])
@@ -769,6 +783,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         { id: 'pool', label: t('pool') },
         { id: 'role', label: t('role') },
         { id: 'amount', label: t('amount') },
+        { id: 'content', label: t('content') },
         { id: 'note', label: t('note') },
         { id: 'status', label: t('status') },
         { id: 'recordIdShort', label: t('recordId') },
@@ -807,6 +822,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
           pool: r.pool?.name || '-',
           role: r.user?.roleName || '-',
           amount: amountAbs.toFixed(2),
+          content: r.content || '-',
           note: r.note || '-',
           status: r.status === 'PENDING' ? t('pendingApproval') : t('approvedStored'),
           recordIdShort: r.id,
@@ -995,6 +1011,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         { id: 'pool', label: t('pool') },
         { id: 'role', label: t('role') },
         { id: 'amount', label: t('amount') },
+        { id: 'content', label: t('content') },
         { id: 'note', label: t('note') },
         { id: '_voucherFile', label: t('voucherFile'), locked: true },
       ]
@@ -1016,6 +1033,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
           pool: r.pool?.name || '-',
           role: r.user?.roleName || '-',
           amount: formatCurrency(locale, r.amount),
+          content: r.content || '-',
           note: r.note || '-',
           _voucherFile: row.fileNames.length > 0 ? row.fileNames.join('; ') : t('noVoucher'),
         }
@@ -1409,6 +1427,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                     {showCol('role') && <th className="px-4 py-3 font-semibold">{t('role')}</th>}
                     {showCol('pool') && <th className="px-4 py-3 font-semibold">{t('pool')}</th>}
                     {showCol('amount') && <th className="px-4 py-3 font-semibold">{t('amount')}</th>}
+                    {showCol('content') && <th className="px-4 py-3 font-semibold">{t('content')}</th>}
                     {showCol('attachmentCount') && <th className="px-4 py-3 font-semibold">{t('attachmentCount')}</th>}
                     {showCol('note') && <th className="px-4 py-3 font-semibold">{t('note')}</th>}
                     {showCol('status') && <th className="px-4 py-3 font-semibold">{t('status')}</th>}
@@ -1453,6 +1472,9 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                           <td className={`px-4 py-3 font-bold whitespace-nowrap ${record.type === 'INCOME' ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>
                             {formatCurrency(locale, record.amount)}
                           </td>
+                        )}
+                        {showCol('content') && (
+                          <td className="px-4 py-3 max-w-[140px] truncate text-gray-500" title={record.content || ''}>{record.content || '-'}</td>
                         )}
                         {showCol('attachmentCount') && (
                           <td className="px-4 py-3 text-center">{attachmentCountOf(record)}</td>
@@ -1524,6 +1546,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                         ].filter(Boolean).join(' · ')}
                       </div>
                     )}
+                    {showCol('content') && record.content && <div className="text-xs text-gray-500 truncate">{record.content}</div>}
                     {showCol('note') && record.note && <div className="text-xs text-gray-500 truncate">{record.note}</div>}
                     <div className="flex justify-between items-center pt-2 mt-2 border-t border-gray-50">
                       <span className="text-xs text-gray-400">
@@ -1560,6 +1583,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                     {showCol('activityVisibility') && <th className="px-4 py-3 font-semibold">{t('activityVisibility')}</th>}
                     {showCol('role') && <th className="px-4 py-3 font-semibold">{t('role')}</th>}
                     {showCol('attachmentCount') && <th className="px-4 py-3 font-semibold">{t('attachmentCount')}</th>}
+                    {showCol('content') && <th className="px-4 py-3 font-semibold">{t('content')}</th>}
                     {showCol('note') && <th className="px-4 py-3 font-semibold">{t('note')}</th>}
                   </tr>
                 </thead>
@@ -1578,6 +1602,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                         {showCol('activityVisibility') && <td className="px-4 py-3">{item.visibility === 'PRIVATE' ? t('privateActivity') : t('publicActivity')}</td>}
                         {showCol('role') && <td className="px-4 py-3">{item.user?.roleName || '-'}</td>}
                         {showCol('attachmentCount') && <td className="px-4 py-3 text-center">{attachmentCountOf(item)}</td>}
+                        {showCol('content') && <td className="px-4 py-3 max-w-[180px] truncate text-gray-500">{item.content || '-'}</td>}
                         {showCol('note') && <td className="px-4 py-3 max-w-[220px] truncate text-gray-500">{item.note || '-'}</td>}
                       </tr>
                     ))
@@ -1604,6 +1629,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                     {showCol('amount') && <th className="px-4 py-3 font-semibold">{t('amount')}</th>}
                     {showCol('role') && <th className="px-4 py-3 font-semibold">{t('role')}</th>}
                     {showCol('attachmentCount') && <th className="px-4 py-3 font-semibold">{t('attachmentCount')}</th>}
+                    {showCol('content') && <th className="px-4 py-3 font-semibold">{t('content')}</th>}
                     {showCol('note') && <th className="px-4 py-3 font-semibold">{t('note')}</th>}
                   </tr>
                 </thead>
@@ -1637,6 +1663,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                         )}
                         {showCol('role') && <td className="px-4 py-3">{item.user?.roleName || '-'}</td>}
                         {showCol('attachmentCount') && <td className="px-4 py-3 text-center">{attachmentCountOf(item)}</td>}
+                        {showCol('content') && <td className="px-4 py-3 max-w-[140px] truncate text-gray-500">{item.content || '-'}</td>}
                         {showCol('note') && <td className="px-4 py-3 max-w-[180px] truncate text-gray-500">{item.note || '-'}</td>}
                       </tr>
                     ))
@@ -1713,6 +1740,11 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                       <option key={third.id} value={third.id}>{third.name}</option>
                     ))}
                   </select>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase">{t('contentOptional')}</label>
+                  <input value={editContent} onChange={e => setEditContent(e.target.value)} className={inputClass} placeholder={t('contentPlaceholder')} />
                 </div>
 
                 <div className="md:col-span-2">

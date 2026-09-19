@@ -19,6 +19,7 @@ export type CreateContractInput = {
   effectiveDate: Date
   expiryDate: Date
   reminderDays: number
+  content?: string
   note?: string
   amount: number
   categoryId?: string
@@ -81,6 +82,7 @@ export type UpdateContractInput = {
   effectiveDate: Date
   expiryDate: Date
   reminderDays: number
+  content?: string
   note?: string
   amount: number
   categoryId?: string
@@ -141,6 +143,7 @@ export async function createContract(data: CreateContractInput) {
           effectiveDate: data.effectiveDate,
           expiryDate: data.expiryDate,
           reminderDays: data.reminderDays,
+          content: data.content,
           note: data.note,
           amount: data.amount,
           categoryId: data.categoryId,
@@ -224,6 +227,7 @@ export async function updateContract(contractId: string, data: UpdateContractInp
         effectiveDate: data.effectiveDate,
         expiryDate: data.expiryDate,
         reminderDays: data.reminderDays,
+        content: data.content,
         note: data.note,
         amount: data.amount,
         categoryId: data.categoryId || null,
@@ -297,27 +301,45 @@ export async function addContractMemo(contractId: string, content: string) {
   }
 }
 
-export async function appendContractNoteKeywords(contractId: string, noteText: string) {
+export async function appendContractOcrFields(
+  contractId: string,
+  fields: { contentText?: string; noteText?: string }
+) {
   try {
     const { session, contract } = await assertContractAdminAccess(contractId)
-    const addition = noteText.trim()
-    if (!addition) return { success: true }
+    const contentAdd = (fields.contentText || '').trim()
+    const noteAdd = (fields.noteText || '').trim()
+    if (!contentAdd && !noteAdd) return { success: true }
 
-    const nextNote = contract.note?.trim() ? `${contract.note.trim()}\n${addition}` : addition
+    const nextContent = contentAdd
+      ? contract.content?.trim()
+        ? `${contract.content.trim()}\n${contentAdd}`
+        : contentAdd
+      : contract.content
+    const nextNote = noteAdd
+      ? contract.note?.trim()
+        ? `${contract.note.trim()}\n${noteAdd}`
+        : noteAdd
+      : contract.note
+
+    const memoBody = [contentAdd && `內容: ${contentAdd}`, noteAdd && `備註: ${noteAdd}`]
+      .filter(Boolean)
+      .join('\n')
+
     await prisma.$transaction(async (tx) => {
       await tx.contract.update({
         where: { id: contractId },
-        data: { note: nextNote },
+        data: { content: nextContent, note: nextNote },
       })
-      await tx.memo.create({
-        data: {
-          content: addition.startsWith('OCR') || addition.startsWith('圖像辨識')
-            ? addition
-            : `圖像辨識: ${addition}`,
-          authorId: session.userId,
-          contractId,
-        },
-      })
+      if (memoBody) {
+        await tx.memo.create({
+          data: {
+            content: `圖像辨識:\n${memoBody}`,
+            authorId: session.userId,
+            contractId,
+          },
+        })
+      }
     })
 
     revalidatePath('/contracts')
@@ -325,6 +347,10 @@ export async function appendContractNoteKeywords(contractId: string, noteText: s
   } catch (error: any) {
     return { success: false, error: error.message }
   }
+}
+
+export async function appendContractNoteKeywords(contractId: string, noteText: string) {
+  return appendContractOcrFields(contractId, { noteText })
 }
 
 export async function deleteContract(contractId: string) {

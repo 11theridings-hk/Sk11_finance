@@ -92,7 +92,8 @@ model Record {
   type          String // "INCOME" | "EXPENSE"
   status        String   @default("APPROVED") // "PENDING" (待审) | "APPROVED" (已审) | "REJECTED" (驳回)
   date          DateTime // 记录日期
-  note          String? // 备注说明
+  content       String? // 內容摘要（OCR 關鍵詞）
+  note          String? // 备注说明（詳細敘述）
   amount        Float // 金额（正数/负数）
   attachmentUrl String? // 附件路径
   createdAt     DateTime @default(now())
@@ -125,6 +126,7 @@ model PrivateRecord {
   id            String   @id @default(uuid())
   type          String // "INCOME" | "EXPENSE"
   date          DateTime
+  content       String? // 內容摘要（OCR 關鍵詞）
   note          String?
   customCategory String?
   amount        Float
@@ -154,6 +156,7 @@ model Contract {
   effectiveDate DateTime
   expiryDate    DateTime
   reminderDays  Int      @default(15)
+  content       String? // 內容摘要（OCR 關鍵詞）
   note          String?
   amount        Float
   createdAt     DateTime @default(now())
@@ -179,6 +182,7 @@ model Contract {
 model Activity {
   id           String   @id @default(uuid())
   title        String
+  content      String? // 內容摘要（OCR 關鍵詞）
   note         String?
   eventDate    DateTime
   reminderDays Int      @default(15)
@@ -419,6 +423,7 @@ model RecurringTemplate {
   id              String   @id @default(uuid())
   type            String // INCOME | EXPENSE
   title           String
+  content         String? // 內容摘要（OCR 關鍵詞）
   note            String?
   amount          Float
   intervalMonths  Int      @default(1) // every N months

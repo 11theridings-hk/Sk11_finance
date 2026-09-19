@@ -66,8 +66,8 @@ export const DEFAULT_OCR_USER_PROMPT = [
   '{"vendor":"","orderNumber":"","documentDate":"","amount":"","summary":"","keywords":["",""],"documentType":"UNKNOWN","documentTypeNote":""}',
   'documentType 必須是：INVOICE、RECEIPT、CONTRACT、BANK_SLIP、QUOTATION、STATEMENT、OTHER、UNKNOWN 之一。',
   'documentTypeNote：只填短類型名（約 2–8 字，如「消費月結單」），不要寫「包含…」等描述。',
-  'summary：一句概括（如「包含一些消費項目」），會寫入記錄備註，不要寫進附件備註。',
-  'keywords：公司名、單號、其他重要短詞。',
+  'summary：詳細文字敘述（如「包含一些消費項目與稅項說明」），會寫入記錄備註欄，不要寫進內容欄或附件備註。',
+  'keywords：短關鍵詞（公司名、單號、品類短詞），會寫入記錄內容欄。',
   '如某欄沒有資料可留空字串或空陣列。',
 ].join('\n')
 
@@ -164,8 +164,44 @@ function looksLikeShortTypeLabel(text: string) {
 }
 
 /**
- * Record note: company, order no., summary, keywords.
- * Default ≤80 chars so summaries like「包含一些消費項目」fit.
+ * Content field: short keywords only (vendor, order no., keywords[]).
+ * Default ≤60 chars for scannable list display.
+ */
+export function formatOcrKeywordsForContent(result: OcrParsedResult, maxChars = 60) {
+  const parts = [
+    result.vendor,
+    result.orderNumber,
+    ...(result.keywords || []),
+  ]
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+
+  const unique: string[] = []
+  for (const part of parts) {
+    if (!unique.includes(part)) unique.push(part)
+  }
+
+  let out = ''
+  for (const part of unique) {
+    const next = out ? `${out}｜${part}` : part
+    if (Array.from(next).length > maxChars) break
+    out = next
+  }
+  return truncateChars(out, maxChars)
+}
+
+/**
+ * Note field: detailed narrative (summary). Does not include short keywords.
+ */
+export function formatOcrDetailForNote(result: OcrParsedResult, maxChars = 200) {
+  const summary = String(result.summary || '').trim()
+  if (!summary) return ''
+  return truncateChars(summary, maxChars)
+}
+
+/**
+ * @deprecated Prefer formatOcrKeywordsForContent + formatOcrDetailForNote.
+ * Legacy: mixed keywords + summary into one note string.
  */
 export function formatOcrKeywordsForNote(result: OcrParsedResult, maxChars = 80) {
   const parts = [

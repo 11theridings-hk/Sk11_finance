@@ -16,6 +16,7 @@ export const RECORD_COLUMNS: ReportColumnDef[] = [
   { id: 'role', labelKey: 'role' },
   { id: 'pool', labelKey: 'pool' },
   { id: 'amount', labelKey: 'amount' },
+  { id: 'content', labelKey: 'content' },
   { id: 'attachmentCount', labelKey: 'attachmentCount' },
   { id: 'note', labelKey: 'note' },
   { id: 'status', labelKey: 'status' },
@@ -29,6 +30,7 @@ export const ACTIVITY_COLUMNS: ReportColumnDef[] = [
   { id: 'activityVisibility', labelKey: 'activityVisibility' },
   { id: 'role', labelKey: 'role' },
   { id: 'attachmentCount', labelKey: 'attachmentCount' },
+  { id: 'content', labelKey: 'content' },
   { id: 'note', labelKey: 'note' },
 ]
 
@@ -43,6 +45,7 @@ export const CONTRACT_COLUMNS: ReportColumnDef[] = [
   { id: 'amount', labelKey: 'amount' },
   { id: 'role', labelKey: 'role' },
   { id: 'attachmentCount', labelKey: 'attachmentCount' },
+  { id: 'content', labelKey: 'content' },
   { id: 'note', labelKey: 'note' },
 ]
 

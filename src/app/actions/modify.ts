@@ -52,6 +52,7 @@ export async function requestModifyRecord(
           type: data.type,
           status: 'PENDING',
           date: new Date(data.date),
+          content: data.content,
           note: data.note,
           amount: data.amount,
           categoryId: data.categoryId,
