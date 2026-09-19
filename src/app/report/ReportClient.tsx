@@ -1161,7 +1161,11 @@ export default function ReportClient({ categories, users, pools, locale }: Props
               type="text"
               value={noteKeyword}
               onChange={e => setNoteKeyword(e.target.value)}
-              placeholder={reportTab === 'records' ? t('reportNoteSearchPlaceholder') : t('reportKeywordPlaceholder')}
+              placeholder={
+                reportTab === 'records'
+                  ? t('reportNoteSearchPlaceholder')
+                  : t('reportKeywordPlaceholder')
+              }
               className={inputClass}
             />
           </div>
