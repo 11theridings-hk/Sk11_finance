@@ -146,6 +146,7 @@ export async function getReportActivities(filter: ActivityReportFilter) {
     const kw = filter.noteKeyword.trim()
     where.OR = [
       { title: { contains: kw, mode: 'insensitive' } },
+      { content: { contains: kw, mode: 'insensitive' } },
       { note: { contains: kw, mode: 'insensitive' } },
       { memos: { some: { content: { contains: kw, mode: 'insensitive' } } } },
     ]
@@ -208,6 +209,7 @@ export async function getReportContracts(filter: ContractReportFilter) {
       {
         OR: [
           { title: { contains: kw, mode: 'insensitive' } },
+          { content: { contains: kw, mode: 'insensitive' } },
           { note: { contains: kw, mode: 'insensitive' } },
           { memos: { some: { content: { contains: kw, mode: 'insensitive' } } } },
         ],
