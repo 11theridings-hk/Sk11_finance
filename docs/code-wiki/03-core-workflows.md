@@ -162,13 +162,17 @@ HomePageClient 切换应收/付模式
 ```text
 管理员 reviewRecord(id, 'APPROVE')
   -> 查询待审记录
-  -> 若 originalRecordId 存在，表示“修改申请”
+  -> 应用可选编辑到待审副本
+  -> Record.status = PENDING_PAYMENT
+  -> 原记录仍保持 isReviewing=true（待付款完成后再合并）
+```
+
+待付款完成（`completePayment`）时：
   -> 撤销原记录对资金池的影响
   -> 应用新记录对资金池的影响
   -> 用待审记录内容覆盖原记录
-  -> 原记录 isReviewing=false
+  -> 原记录 isReviewing=false / status=APPROVED
   -> 删除待审副本
-```
 
 ### 6.4 审批驳回流程
 
@@ -198,16 +202,20 @@ HomePageClient 切换应收/付模式
 管理员 reviewRecord(id, action)
   -> 若无 originalRecordId，表示普通新增待审
   -> APPROVE:
-       Record.status = APPROVED
-       更新 CapitalPool 余额
+       Record.status = PENDING_PAYMENT（进入待付款，不入账）
   -> REJECT:
        Record.status = REJECTED
 ```
 
+完成后由待付款控制台 `completePayment`：
+- 上传支付附件，或
+- 人工通过
+→ `Record.status = APPROVED` 并更新 CapitalPool 余额
+
 ### 7.3 关键规则
 
 - 只有收入 / 支出会影响资金池余额
-- 审核通过后才真正入账
+- 审核通过后进入待付款；完成付款关卡后才真正入账
 
 ## 8. 归结单聚合与结单
 

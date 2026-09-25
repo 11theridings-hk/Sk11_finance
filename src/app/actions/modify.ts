@@ -31,6 +31,9 @@ export async function requestModifyRecord(
     }
 
     if (originalRecord.isReviewing) return { success: false, error: t('reviewingInProgress') }
+    if (originalRecord.status !== 'APPROVED') {
+      return { success: false, error: t('onlyCompletedCanModify') }
+    }
 
     const attachmentList =
       data.attachments && data.attachments.length > 0

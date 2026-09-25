@@ -111,7 +111,13 @@ async function handleConfirm(actor: WhatsAppActor): Promise<string> {
     `分類：${pending.categoryLabel}`,
     pending.poolLabel ? `資金池：${pending.poolLabel}` : null,
     pending.note ? `備註：${pending.note}` : null,
-    `狀態：${status === 'PENDING' ? '待審核' : '已通過'}`,
+    `狀態：${
+      status === 'PENDING'
+        ? '待審批'
+        : status === 'PENDING_PAYMENT'
+          ? '待付款'
+          : '已完成'
+    }`,
     `單號：${record.id.slice(0, 8)}…`,
   ]
     .filter(Boolean)

@@ -5,6 +5,7 @@ import { getSession } from './auth'
 import { revalidatePath } from 'next/cache'
 import { getCurrentLocale } from '@/lib/locale'
 import { createTranslator } from '@/lib/i18n'
+import { RECORD_STATUS } from '@/lib/recordStatus'
 
 export type ReviewRecordEdits = {
   type?: 'INCOME' | 'EXPENSE'
@@ -23,11 +24,13 @@ export async function getPendingReviewCount() {
   if (!session || !session.isAdmin) return 0
 
   return await prisma.record.count({
-    where: { status: 'PENDING' }
+    where: { status: RECORD_STATUS.PENDING }
   })
 }
 
-export async function getReviewRecords(status: 'PENDING' | 'APPROVED' | 'REJECTED') {
+export async function getReviewRecords(
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'PENDING_PAYMENT'
+) {
   const session = await getSession()
   if (!session || !session.isAdmin) return []
 
@@ -104,7 +107,8 @@ function normalizeEdits(edits: ReviewRecordEdits | undefined, t: (key: any) => s
 
 /**
  * Approve/reject a PENDING record.
- * Optional edits are applied only on APPROVE (B3: persist with 通過).
+ * Approve → PENDING_PAYMENT (pool / modification merge deferred until payment complete).
+ * Optional edits are applied only on APPROVE.
  */
 export async function reviewRecord(
   id: string,
@@ -119,7 +123,7 @@ export async function reviewRecord(
   try {
     await prisma.$transaction(async (tx) => {
       const record = await tx.record.findUnique({ where: { id } })
-      if (!record || record.status !== 'PENDING') throw new Error(t('recordAlreadyReviewed'))
+      if (!record || record.status !== RECORD_STATUS.PENDING) throw new Error(t('recordAlreadyReviewed'))
 
       const patch = action === 'APPROVE' ? normalizeEdits(edits, t) : null
       const effective = patch
@@ -190,71 +194,28 @@ export async function reviewRecord(
                   ? `Review edit: ${changedSummary}`
                   : `審批修改：${changedSummary}`,
               authorId: session.userId,
-              recordId: record.originalRecordId || id,
+              recordId: id,
             },
           })
         }
       }
 
       if (action === 'APPROVE') {
-        if (record.originalRecordId) {
-          const oldRecord = await tx.record.findUnique({ where: { id: record.originalRecordId } })
-          if (!oldRecord) throw new Error(t('originalRecordNotFound'))
+        await tx.record.update({
+          where: { id },
+          data: { status: RECORD_STATUS.PENDING_PAYMENT },
+        })
 
-          if (oldRecord.poolId && (oldRecord.type === 'INCOME' || oldRecord.type === 'EXPENSE')) {
-            await tx.capitalPool.update({
-              where: { id: oldRecord.poolId },
-              data: { balanceHkd: { decrement: oldRecord.amount } }
-            })
-          }
-
-          if (effective.poolId && (effective.type === 'INCOME' || effective.type === 'EXPENSE')) {
-            await tx.capitalPool.update({
-              where: { id: effective.poolId },
-              data: { balanceHkd: { increment: effective.amount } }
-            })
-          }
-
-          await tx.record.update({
-            where: { id: record.originalRecordId },
-            data: {
-              amount: effective.amount,
-              categoryId: effective.categoryId,
-              subCategoryId: effective.subCategoryId,
-              thirdCategoryId: effective.thirdCategoryId,
-              content: effective.content,
-              note: effective.note,
-              date: effective.date,
-              type: effective.type,
-              poolId: effective.poolId,
-              attachmentUrl: record.attachmentUrl,
-              isReviewing: false
-            }
-          })
-
-          // Move memos from pending copy to original when present
-          await tx.memo.updateMany({
-            where: { recordId: id },
-            data: { recordId: record.originalRecordId },
-          })
-
-          await tx.attachment.updateMany({
-            where: { recordId: record.id },
-            data: { recordId: record.originalRecordId }
-          })
-          await tx.record.delete({ where: { id } })
-        } else {
-          await tx.record.update({
-            where: { id },
-            data: { status: 'APPROVED' }
-          })
-          if (effective.poolId && (effective.type === 'INCOME' || effective.type === 'EXPENSE')) {
-            await tx.capitalPool.update({
-              where: { id: effective.poolId },
-              data: { balanceHkd: { increment: effective.amount } }
-            })
-          }
-        }
+        await tx.memo.create({
+          data: {
+            content:
+              locale === 'en'
+                ? 'Approved; waiting for payment'
+                : '審批通過，進入待付款',
+            authorId: session.userId,
+            recordId: id,
+          },
+        })
       } else {
         if (record.originalRecordId) {
           await tx.record.update({
@@ -264,13 +225,14 @@ export async function reviewRecord(
         }
         await tx.record.update({
           where: { id },
-          data: { status: 'REJECTED' }
+          data: { status: RECORD_STATUS.REJECTED }
         })
       }
     })
 
     revalidatePath('/')
     revalidatePath('/review')
+    revalidatePath('/payment')
     revalidatePath('/report')
     return { success: true }
   } catch (error: any) {

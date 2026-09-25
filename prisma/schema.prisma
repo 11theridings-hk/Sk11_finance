@@ -93,7 +93,7 @@ model CapitalPool {
 model Record {
   id            String   @id @default(uuid())
   type          String // "INCOME" | "EXPENSE"
-  status        String   @default("APPROVED") // "PENDING" (待审) | "APPROVED" (已审) | "REJECTED" (驳回)
+  status        String   @default("APPROVED") // "PENDING" | "PENDING_PAYMENT" | "APPROVED" | "REJECTED"
   date          DateTime // 记录日期
   content       String? // 內容摘要（OCR 關鍵詞）
   note          String? // 备注说明（詳細敘述）
