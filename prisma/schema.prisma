@@ -65,6 +65,9 @@ model Category {
   contracts      Contract[]   @relation("CategoryContracts")
   subContracts   Contract[]   @relation("SubCategoryContracts")
   thirdContracts Contract[]   @relation("ThirdCategoryContracts")
+  activities     Activity[]   @relation("CategoryActivities")
+  subActivities  Activity[]   @relation("SubCategoryActivities")
+  thirdActivities Activity[]  @relation("ThirdCategoryActivities")
   attachments    Attachment[] @relation("CategoryAttachments")
   recurringTemplates RecurringTemplate[] @relation("CategoryRecurringTemplates")
   subRecurringTemplates RecurringTemplate[] @relation("SubCategoryRecurringTemplates")
@@ -191,12 +194,18 @@ model Activity {
   updatedAt    DateTime @updatedAt
 
   // 外键
-  userId String
+  userId          String
+  categoryId      String?
+  subCategoryId   String?
+  thirdCategoryId String?
 
   // 关系
-  user        User         @relation("UserActivities", fields: [userId], references: [id])
-  attachments Attachment[] @relation("ActivityAttachments")
-  memos       Memo[]       @relation("ActivityMemos")
+  user          User         @relation("UserActivities", fields: [userId], references: [id])
+  category      Category?    @relation("CategoryActivities", fields: [categoryId], references: [id])
+  subCategory   Category?    @relation("SubCategoryActivities", fields: [subCategoryId], references: [id])
+  thirdCategory Category?    @relation("ThirdCategoryActivities", fields: [thirdCategoryId], references: [id])
+  attachments   Attachment[] @relation("ActivityAttachments")
+  memos         Memo[]       @relation("ActivityMemos")
 }
 
 model Attachment {

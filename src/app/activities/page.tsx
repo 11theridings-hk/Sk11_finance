@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { getSession } from '../actions/auth'
 import { getActivities } from '../actions/activity'
+import { getCategories } from '../actions/category'
 import { getCurrentLocale } from '@/lib/locale'
 import { getPluginFlags } from '../actions/settings'
 import ActivitiesClient from './ActivitiesClient'
@@ -21,7 +22,7 @@ export default async function ActivitiesPage() {
   }
 
   const locale = await getCurrentLocale()
-  const activities = await getActivities()
+  const [activities, categories] = await Promise.all([getActivities(), getCategories()])
 
   return (
     <div className="min-h-screen bg-[#F2F2F7]">
@@ -30,6 +31,7 @@ export default async function ActivitiesPage() {
         currentUserId={session.userId}
         isAdmin={session.isAdmin}
         initialActivities={activities}
+        categories={categories}
       />
     </div>
   )

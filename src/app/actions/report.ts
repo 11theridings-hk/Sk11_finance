@@ -123,6 +123,9 @@ export type ActivityReportFilter = {
   noteKeyword?: string
   visibility?: 'PUBLIC' | 'PRIVATE' | 'ALL'
   userId?: string
+  categoryId?: string
+  /** When true, only activities with no category */
+  uncategorizedOnly?: boolean
 }
 
 export async function getReportActivities(filter: ActivityReportFilter) {
@@ -137,6 +140,15 @@ export async function getReportActivities(filter: ActivityReportFilter) {
   if (filter.userId) {
     where.userId = filter.userId
   }
+  if (filter.uncategorizedOnly) {
+    where.categoryId = null
+  } else if (filter.categoryId) {
+    where.OR = [
+      { categoryId: filter.categoryId },
+      { subCategoryId: filter.categoryId },
+      { thirdCategoryId: filter.categoryId },
+    ]
+  }
   if (filter.startDate || filter.endDate) {
     where.eventDate = {}
     if (filter.startDate) where.eventDate.gte = filter.startDate
@@ -144,12 +156,18 @@ export async function getReportActivities(filter: ActivityReportFilter) {
   }
   if (filter.noteKeyword?.trim()) {
     const kw = filter.noteKeyword.trim()
-    where.OR = [
+    const keywordOr = [
       { title: { contains: kw, mode: 'insensitive' } },
       { content: { contains: kw, mode: 'insensitive' } },
       { note: { contains: kw, mode: 'insensitive' } },
       { memos: { some: { content: { contains: kw, mode: 'insensitive' } } } },
     ]
+    if (where.OR) {
+      where.AND = [{ OR: where.OR }, { OR: keywordOr }]
+      delete where.OR
+    } else {
+      where.OR = keywordOr
+    }
   }
 
   return prisma.activity.findMany({
@@ -157,6 +175,9 @@ export async function getReportActivities(filter: ActivityReportFilter) {
     orderBy: [{ eventDate: 'desc' }, { createdAt: 'desc' }],
     include: {
       user: { select: { roleName: true } },
+      category: { select: { name: true } },
+      subCategory: { select: { name: true } },
+      thirdCategory: { select: { name: true } },
       attachments: {
         orderBy: { createdAt: 'desc' },
         select: { id: true },

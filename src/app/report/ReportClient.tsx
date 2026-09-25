@@ -377,6 +377,8 @@ export default function ReportClient({ categories, users, pools, locale }: Props
           userId: userId || undefined,
           noteKeyword: noteKeyword.trim() || undefined,
           visibility: activityVisibility,
+          categoryId: categoryId === '__none__' ? undefined : categoryId || undefined,
+          uncategorizedOnly: categoryId === '__none__',
         }))
       } else {
         setContracts(await getReportContracts({
@@ -612,6 +614,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       { id: 'recordIdShort', label: t('recordIdShort') },
       { id: 'activityTitle', label: t('activityTitle') },
       { id: 'activityDate', label: t('activityDate') },
+      { id: 'category', label: t('categoryPath') },
       { id: 'reminderDays', label: t('reminderDays') },
       { id: 'activityVisibility', label: t('activityVisibility') },
       { id: 'role', label: t('role') },
@@ -626,6 +629,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         recordIdShort: a.id.slice(-8),
         activityTitle: a.title || '-',
         activityDate: new Date(a.eventDate).toLocaleDateString(dateLocale),
+        category: categoryPath(a),
         reminderDays: String(a.reminderDays ?? '-'),
         activityVisibility: a.visibility === 'PRIVATE' ? t('privateActivity') : t('publicActivity'),
         role: a.user?.roleName || '-',
@@ -1239,14 +1243,26 @@ export default function ReportClient({ categories, users, pools, locale }: Props
           )}
 
           {reportTab === 'activities' && (
-            <div>
-              <label className="block text-[11px] font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('activityVisibility')}</label>
-              <select value={activityVisibility} onChange={e => setActivityVisibility(e.target.value as 'ALL' | 'PUBLIC' | 'PRIVATE')} className={inputClass}>
-                <option value="ALL">{t('all')}</option>
-                <option value="PUBLIC">{t('publicActivity')}</option>
-                <option value="PRIVATE">{t('privateActivity')}</option>
-              </select>
-            </div>
+            <>
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('activityVisibility')}</label>
+                <select value={activityVisibility} onChange={e => setActivityVisibility(e.target.value as 'ALL' | 'PUBLIC' | 'PRIVATE')} className={inputClass}>
+                  <option value="ALL">{t('all')}</option>
+                  <option value="PUBLIC">{t('publicActivity')}</option>
+                  <option value="PRIVATE">{t('privateActivity')}</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('mainCategory')}</label>
+                <select value={categoryId} onChange={e => setCategoryId(e.target.value)} className={inputClass}>
+                  <option value="">{t('all')}</option>
+                  <option value="__none__">{t('uncategorized')}</option>
+                  {categories.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            </>
           )}
 
           {reportTab === 'contracts' && (
@@ -1585,6 +1601,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                     {showCol('recordIdShort') && <th className="px-4 py-3 font-semibold">{t('recordIdShort')}</th>}
                     {showCol('activityTitle') && <th className="px-4 py-3 font-semibold">{t('activityTitle')}</th>}
                     {showCol('activityDate') && <th className="px-4 py-3 font-semibold">{t('activityDate')}</th>}
+                    {showCol('category') && <th className="px-4 py-3 font-semibold">{t('categoryPath')}</th>}
                     {showCol('reminderDays') && <th className="px-4 py-3 font-semibold">{t('reminderDays')}</th>}
                     {showCol('activityVisibility') && <th className="px-4 py-3 font-semibold">{t('activityVisibility')}</th>}
                     {showCol('role') && <th className="px-4 py-3 font-semibold">{t('role')}</th>}
@@ -1604,6 +1621,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                         {showCol('recordIdShort') && <td className="px-4 py-3 font-mono text-xs text-gray-500">{item.id.slice(-8)}</td>}
                         {showCol('activityTitle') && <td className="px-4 py-3 font-medium">{item.title}</td>}
                         {showCol('activityDate') && <td className="px-4 py-3 whitespace-nowrap">{new Date(item.eventDate).toLocaleDateString(dateLocale)}</td>}
+                        {showCol('category') && <td className="px-4 py-3 max-w-[200px]">{categoryPath(item)}</td>}
                         {showCol('reminderDays') && <td className="px-4 py-3">{item.reminderDays}</td>}
                         {showCol('activityVisibility') && <td className="px-4 py-3">{item.visibility === 'PRIVATE' ? t('privateActivity') : t('publicActivity')}</td>}
                         {showCol('role') && <td className="px-4 py-3">{item.user?.roleName || '-'}</td>}

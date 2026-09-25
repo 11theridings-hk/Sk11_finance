@@ -8,14 +8,23 @@ import OcrNoteButton, { type OcrResolvedPayload } from '@/components/OcrNoteButt
 import OcrSavedAttachmentButton from '@/components/OcrSavedAttachmentButton'
 import NoteTimeline from '@/components/NoteTimeline'
 
+type Category = {
+  id: string
+  name: string
+  type?: string
+  children?: Category[]
+}
+
 export default function ActivityDetailModal({
   activity,
   locale,
+  categories = [],
   canManage,
   onClose,
 }: {
   activity: any
   locale: Locale
+  categories?: Category[]
   canManage: boolean
   onClose: () => void
 }) {
@@ -24,6 +33,9 @@ export default function ActivityDetailModal({
   const [eventDate, setEventDate] = useState(new Date(activity.eventDate).toISOString().split('T')[0])
   const [reminderDays, setReminderDays] = useState(String(activity.reminderDays))
   const [visibility, setVisibility] = useState<'PUBLIC' | 'PRIVATE'>(activity.visibility)
+  const [categoryId, setCategoryId] = useState(activity.categoryId || '')
+  const [subCategoryId, setSubCategoryId] = useState(activity.subCategoryId || '')
+  const [thirdCategoryId, setThirdCategoryId] = useState(activity.thirdCategoryId || '')
   const [content, setContent] = useState(activity.content || '')
   const [note, setNote] = useState(activity.note || '')
   const [attachments, setAttachments] = useState<ClientAttachment[]>([])
@@ -32,6 +44,12 @@ export default function ActivityDetailModal({
   const [pendingOcrContent, setPendingOcrContent] = useState('')
   const [pendingOcrNote, setPendingOcrNote] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const currentCategory = categories.find((c) => c.id === categoryId)
+  const currentSub = currentCategory?.children?.find((c) => c.id === subCategoryId)
+  const categoryPath = [activity.category?.name, activity.subCategory?.name, activity.thirdCategory?.name]
+    .filter(Boolean)
+    .join(' / ')
 
   const handleAttachmentChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -86,6 +104,9 @@ export default function ActivityDetailModal({
       eventDate: new Date(eventDate),
       reminderDays: Number(reminderDays),
       visibility,
+      categoryId: categoryId || null,
+      subCategoryId: categoryId ? subCategoryId || null : null,
+      thirdCategoryId: categoryId ? thirdCategoryId || null : null,
     })
     if (res.success) {
       window.location.reload()
@@ -212,6 +233,64 @@ export default function ActivityDetailModal({
                 <div className={readOnlyFieldClass}>{activity.visibility === 'PUBLIC' ? t('publicActivity') : t('privateActivity')}</div>
               )}
             </div>
+            <div>
+              <div className="mb-1 text-gray-500">{t('activityCategoryOptional')}</div>
+              {canManage ? (
+                <select
+                  value={categoryId}
+                  onChange={(e) => {
+                    setCategoryId(e.target.value)
+                    setSubCategoryId('')
+                    setThirdCategoryId('')
+                  }}
+                  className={inputClass}
+                >
+                  <option value="">{t('uncategorized')}</option>
+                  {categories.map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.type === 'INCOME' ? `${cat.name}（${t('income')}）` : cat.type === 'EXPENSE' ? `${cat.name}（${t('expense')}）` : cat.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div className={readOnlyFieldClass}>{categoryPath || t('uncategorized')}</div>
+              )}
+            </div>
+            {canManage && (
+              <>
+                <div>
+                  <div className="mb-1 text-gray-500">{t('subCategory')}</div>
+                  <select
+                    value={subCategoryId}
+                    onChange={(e) => {
+                      setSubCategoryId(e.target.value)
+                      setThirdCategoryId('')
+                    }}
+                    disabled={!currentCategory?.children?.length}
+                    className={inputClass}
+                  >
+                    <option value="">{t('selectSubCategory')}</option>
+                    {currentCategory?.children?.map((cat) => (
+                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <div className="mb-1 text-gray-500">{t('grandCategory')}</div>
+                  <select
+                    value={thirdCategoryId}
+                    onChange={(e) => setThirdCategoryId(e.target.value)}
+                    disabled={!currentSub?.children?.length}
+                    className={inputClass}
+                  >
+                    <option value="">{t('selectGrandCategory')}</option>
+                    {currentSub?.children?.map((cat) => (
+                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
             <div>
               <div className="mb-1 text-gray-500">{t('userLabel')}</div>
               <div className={readOnlyFieldClass}>{activity.user?.roleName || '-'}</div>

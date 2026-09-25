@@ -26,6 +26,7 @@ export const ACTIVITY_COLUMNS: ReportColumnDef[] = [
   { id: 'recordIdShort', labelKey: 'recordIdShort', defaultVisible: false },
   { id: 'activityTitle', labelKey: 'activityTitle' },
   { id: 'activityDate', labelKey: 'activityDate' },
+  { id: 'category', labelKey: 'categoryPath' },
   { id: 'reminderDays', labelKey: 'reminderDays' },
   { id: 'activityVisibility', labelKey: 'activityVisibility' },
   { id: 'role', labelKey: 'role' },
