@@ -65,11 +65,14 @@ async function deleteMeta(token: string) {
 
 /**
  * 產生本月公帳摘要 PDF（伺服器端），回傳短時下載 URL。
+ * locale=en → 英文版文件；zh → 中文版。
  */
 export async function createWhatsAppMonthReportPdf(input: {
   userId: string
+  locale?: 'zh' | 'en'
 }): Promise<{ ok: true; url: string; expiresAt: number; summaryLabel: string } | { ok: false; error: string }> {
   try {
+    const locale = input.locale === 'en' ? 'en' : 'zh'
     const summary = await getMonthSummaryAdmin()
     const fonts = loadChineseFonts()
     const doc = new jsPDF({ unit: 'pt', format: 'a4', compress: true })
@@ -84,26 +87,46 @@ export async function createWhatsAppMonthReportPdf(input: {
     doc.addFont(`${regularName}.ttf`, regularName, 'bold')
     doc.setFont(regularName, 'bold')
 
-    const title = `SK11 公帳摘要 ${summary.year}/${String(summary.month).padStart(2, '0')}`
+    const monthPad = String(summary.month).padStart(2, '0')
+    const title =
+      locale === 'en'
+        ? `SK11 Public Ledger Summary ${summary.year}/${monthPad}`
+        : `SK11 公帳摘要 ${summary.year}/${monthPad}`
     doc.setFontSize(18)
     doc.text(title, 40, 56)
     doc.setFont(regularName, 'normal')
     doc.setFontSize(11)
     let y = 90
-    const lines = [
-      `統計月份：${summary.year} 年 ${summary.month} 月`,
-      `核准筆數：${summary.count}`,
-      `收入：+${summary.income.toFixed(2)} HKD`,
-      `支出：-${summary.expense.toFixed(2)} HKD`,
-      `淨額：${summary.net >= 0 ? '+' : ''}${summary.net.toFixed(2)} HKD`,
-      `資金池合計：${summary.poolTotal.toFixed(2)} HKD`,
-      '',
-      '資金池明細：',
-      ...summary.pools.map((p) => `• ${p.name}：${p.balanceHkd.toFixed(2)} HKD`),
-      '',
-      `產生時間：${new Date().toLocaleString('zh-HK')}`,
-      '本檔由 WhatsApp 指令產生，僅供內部參考。',
-    ]
+    const lines =
+      locale === 'en'
+        ? [
+            `Period: ${summary.year}-${monthPad}`,
+            `Approved entries: ${summary.count}`,
+            `Income: +${summary.income.toFixed(2)} HKD`,
+            `Expense: -${summary.expense.toFixed(2)} HKD`,
+            `Net: ${summary.net >= 0 ? '+' : ''}${summary.net.toFixed(2)} HKD`,
+            `Pools total: ${summary.poolTotal.toFixed(2)} HKD`,
+            '',
+            'Pools:',
+            ...summary.pools.map((p) => `• ${p.name}: ${p.balanceHkd.toFixed(2)} HKD`),
+            '',
+            `Generated: ${new Date().toLocaleString('en-HK')}`,
+            'Generated via WhatsApp. For internal use only.',
+          ]
+        : [
+            `統計月份：${summary.year} 年 ${summary.month} 月`,
+            `核准筆數：${summary.count}`,
+            `收入：+${summary.income.toFixed(2)} HKD`,
+            `支出：-${summary.expense.toFixed(2)} HKD`,
+            `淨額：${summary.net >= 0 ? '+' : ''}${summary.net.toFixed(2)} HKD`,
+            `資金池合計：${summary.poolTotal.toFixed(2)} HKD`,
+            '',
+            '資金池明細：',
+            ...summary.pools.map((p) => `• ${p.name}：${p.balanceHkd.toFixed(2)} HKD`),
+            '',
+            `產生時間：${new Date().toLocaleString('zh-HK')}`,
+            '本檔由 WhatsApp 指令產生，僅供內部參考。',
+          ]
     for (const line of lines) {
       doc.text(line, 40, y)
       y += 18
@@ -115,7 +138,10 @@ export async function createWhatsAppMonthReportPdf(input: {
 
     const pdfBytes = Buffer.from(doc.output('arraybuffer'))
     const token = randomBytes(24).toString('hex')
-    const filename = `sk11-report-${summary.year}-${String(summary.month).padStart(2, '0')}.pdf`
+    const filename =
+      locale === 'en'
+        ? `sk11-report-${summary.year}-${monthPad}-en.pdf`
+        : `sk11-report-${summary.year}-${monthPad}.pdf`
     const filePath = join(exportsDir(), `${token}.pdf`)
     writeFileSync(filePath, pdfBytes)
 

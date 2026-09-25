@@ -17,6 +17,8 @@ export type PendingLedgerDraft = {
   dateIso: string
   createdAt: number
   userId: string
+  /** 入數當下語系；確認回覆沿用 */
+  locale?: 'zh' | 'en'
 }
 
 export type PendingAction = PendingLedgerDraft
