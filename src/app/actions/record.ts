@@ -129,6 +129,7 @@ export async function createRecord(data: CreateRecordInput) {
     revalidatePath('/report')
     revalidatePath('/admin')
     revalidatePath('/review')
+    revalidatePath('/payment')
     return { success: true, record: result }
   } catch (error: any) {
     return { success: false, error: error.message }
@@ -380,7 +381,7 @@ export async function deleteRecord(recordId: string) {
         await tx.attachment.deleteMany({ where: { recordId } })
         await tx.record.delete({ where: { id: recordId } })
 
-        if (record.status === 'PENDING') {
+        if (record.status === 'PENDING' || record.status === 'PENDING_PAYMENT') {
           await tx.record.update({
             where: { id: record.originalRecordId },
             data: { isReviewing: false }

@@ -120,7 +120,7 @@ Attachment
 #### 字段重点
 
 - `type`：`INCOME` / `EXPENSE` / `AR` / `AP`
-- `status`：`PENDING` / `APPROVED` / `REJECTED`
+- `status`：`PENDING` / `PENDING_PAYMENT` / `APPROVED` / `REJECTED`
 - `date`：业务日期
 - `executionDate`：AR / AP 的执行期限
 - `currency`：`HKD` / `RMB`

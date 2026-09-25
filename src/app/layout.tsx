@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { getSession } from "./actions/auth";
 import { getPendingReviewCount } from "./actions/review";
+import { getPendingPaymentCount } from "./actions/payment";
 import { getActivityReminderItems, getContractReminderItems, type ReminderItem } from "./actions/reminder";
 import { getRecurringReminderItems } from "./actions/recurring";
 import { getPluginFlags } from "./actions/settings";
@@ -42,6 +43,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const session = await getSession();
   const locale = await getCurrentLocale();
   let pendingCount = 0;
+  let pendingPaymentCount = 0;
   let pluginFlags = DEFAULT_PLUGIN_FLAGS;
   let reminderOverview: {
     contracts: ReminderItem[];
@@ -67,9 +69,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   if (session?.isAdmin) {
     try {
-      pendingCount = await getPendingReviewCount()
+      const [reviewCount, paymentCount] = await Promise.all([
+        getPendingReviewCount(),
+        getPendingPaymentCount(),
+      ])
+      pendingCount = reviewCount
+      pendingPaymentCount = paymentCount
     } catch (_e) {
       pendingCount = 0
+      pendingPaymentCount = 0
     }
   }
   if (session) {
@@ -109,6 +117,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <TopNav
               session={session}
               pendingCount={pendingCount}
+              pendingPaymentCount={pendingPaymentCount}
               contractReminderCount={reminderOverview.contractCount}
               activityReminderCount={reminderOverview.activityCount}
               recurringReminderCount={reminderOverview.recurringCount}

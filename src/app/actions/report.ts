@@ -12,7 +12,7 @@ export type ReportFilter = {
   poolId?: string
   userId?: string
   noteKeyword?: string
-  status?: 'PENDING' | 'APPROVED' | 'ALL'
+  status?: 'PENDING' | 'PENDING_PAYMENT' | 'APPROVED' | 'ALL' | 'REJECTED'
 }
 
 export async function getReportRecords(filter: ReportFilter) {

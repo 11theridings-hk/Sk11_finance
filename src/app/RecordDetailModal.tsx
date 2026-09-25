@@ -129,7 +129,15 @@ export default function RecordDetailModal({
             </div>
             <div>
               <div className="mb-1 text-gray-500">{t('status')}</div>
-              <div className="font-semibold text-gray-900">{record.status === 'PENDING' ? t('pendingApproval') : t('approvedStored')}</div>
+              <div className="font-semibold text-gray-900">
+                {record.status === 'PENDING'
+                  ? t('pendingApproval')
+                  : record.status === 'PENDING_PAYMENT'
+                    ? t('pendingPayment')
+                    : record.status === 'REJECTED'
+                      ? t('reviewerRejected')
+                      : t('approvedStored')}
+              </div>
             </div>
             <div>
               <div className="mb-1 text-gray-500">{t('type')}</div>

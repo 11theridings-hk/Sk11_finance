@@ -36,6 +36,7 @@ function CountBadge({ count }: { count?: number }) {
 export default function TopNav({
   session,
   pendingCount = 0,
+  pendingPaymentCount = 0,
   contractReminderCount = 0,
   activityReminderCount = 0,
   recurringReminderCount = 0,
@@ -44,6 +45,7 @@ export default function TopNav({
 }: {
   session: NavSession | null
   pendingCount?: number
+  pendingPaymentCount?: number
   contractReminderCount?: number
   activityReminderCount?: number
   recurringReminderCount?: number
@@ -79,6 +81,7 @@ export default function TopNav({
 
   if (session?.isAdmin) {
     secondaryNavItems.push({ name: t('review'), href: '/review', count: pendingCount })
+    secondaryNavItems.push({ name: t('payment'), href: '/payment', count: pendingPaymentCount })
     if (pluginFlags.contracts) {
       secondaryNavItems.push({ name: t('contracts'), href: '/contracts', count: contractReminderCount })
     }

@@ -30,6 +30,20 @@ function attachmentCountOf(item: any) {
   return item?.attachmentUrl ? 1 : 0
 }
 
+function recordStatusLabel(t: (key: any) => string, status: string | null | undefined) {
+  if (status === 'PENDING') return t('pendingApproval')
+  if (status === 'PENDING_PAYMENT') return t('pendingPayment')
+  if (status === 'REJECTED') return t('reviewerRejected')
+  return t('approvedStored')
+}
+
+function recordStatusClass(status: string | null | undefined) {
+  if (status === 'PENDING') return 'bg-[#FF9500]/10 text-[#FF9500]'
+  if (status === 'PENDING_PAYMENT') return 'bg-[#5856D6]/10 text-[#5856D6]'
+  if (status === 'REJECTED') return 'bg-[#FF3B30]/10 text-[#FF3B30]'
+  return 'bg-[#34C759]/10 text-[#34C759]'
+}
+
 function safeFilePart(value: string, max = 36) {
   return String(value || '-')
     .replace(/[\\/:*?"<>|\r\n\t]+/g, '_')
@@ -149,7 +163,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
   const [subCategoryId, setSubCategoryId] = useState('')
   const [thirdCategoryId, setThirdCategoryId] = useState('')
   const [poolId, setPoolId] = useState('')
-  const [status, setStatus] = useState<'APPROVED' | 'PENDING' | 'ALL'>('APPROVED')
+  const [status, setStatus] = useState<'APPROVED' | 'PENDING' | 'PENDING_PAYMENT' | 'ALL'>('APPROVED')
   const [userId, setUserId] = useState('')
   const [activityVisibility, setActivityVisibility] = useState<'ALL' | 'PUBLIC' | 'PRIVATE'>('ALL')
   const [contractType, setContractType] = useState<'ALL' | 'INCOME' | 'EXPENSE'>('ALL')
@@ -526,7 +540,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         { id: 'content', value: r.content || '-' },
         { id: 'attachmentCount', value: String(attachmentCountOf(r)) },
         { id: 'note', value: r.note || '-' },
-        { id: 'status', value: r.status === 'PENDING' ? t('pendingApproval') : t('approvedStored') },
+        { id: 'status', value: recordStatusLabel(t, r.status) },
       ]
       return cells
         .filter((c) => {
@@ -830,7 +844,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
           amount: amountAbs.toFixed(2),
           content: r.content || '-',
           note: r.note || '-',
-          status: r.status === 'PENDING' ? t('pendingApproval') : t('approvedStored'),
+          status: recordStatusLabel(t, r.status),
           recordIdShort: r.id,
         }
 
@@ -937,7 +951,15 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         `${t('pool')}: ${poolName}`,
         `${t('role')}: ${roleName}`,
         `${t('reportNoteSearch')}: ${noteKeywordLabel}`,
-        `${t('status')}: ${status === 'ALL' ? t('all') : status === 'PENDING' ? t('pendingApproval') : t('approvedStored')}`,
+        `${t('status')}: ${
+          status === 'ALL'
+            ? t('all')
+            : status === 'PENDING'
+              ? t('pendingApproval')
+              : status === 'PENDING_PAYMENT'
+                ? t('pendingPayment')
+                : t('approvedStored')
+        }`,
       ]
       filterLines.forEach((lineText) => {
         doc.text(lineText, mx, y)
@@ -1233,9 +1255,10 @@ export default function ReportClient({ categories, users, pools, locale }: Props
               </div>
               <div>
                 <label className="block text-[11px] font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('status')}</label>
-                <select value={status} onChange={e => setStatus(e.target.value as 'APPROVED' | 'PENDING' | 'ALL')} className={inputClass}>
+                <select value={status} onChange={e => setStatus(e.target.value as 'APPROVED' | 'PENDING' | 'PENDING_PAYMENT' | 'ALL')} className={inputClass}>
                   <option value="APPROVED">{t('approvedStored')}</option>
                   <option value="PENDING">{t('pendingApproval')}</option>
+                  <option value="PENDING_PAYMENT">{t('pendingPayment')}</option>
                   <option value="ALL">{t('all')}</option>
                 </select>
               </div>
@@ -1506,8 +1529,8 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                         )}
                         {showCol('status') && (
                           <td className="px-4 py-3">
-                            <span className={`text-xs font-semibold px-2 py-1 rounded-md ${record.status === 'PENDING' ? 'bg-[#FF9500]/10 text-[#FF9500]' : 'bg-[#34C759]/10 text-[#34C759]'}`}>
-                              {record.status === 'PENDING' ? t('pendingApproval') : t('approvedStored')}
+                            <span className={`text-xs font-semibold px-2 py-1 rounded-md ${recordStatusClass(record.status)}`}>
+                              {recordStatusLabel(t, record.status)}
                             </span>
                           </td>
                         )}
@@ -1574,7 +1597,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                       <span className="text-xs text-gray-400">
                         {[
                           showCol('role') ? (record.user?.roleName || '-') : null,
-                          showCol('status') ? (record.status === 'PENDING' ? t('pendingApproval') : t('approvedStored')) : null,
+                          showCol('status') ? recordStatusLabel(t, record.status) : null,
                         ].filter(Boolean).join(' · ')}
                       </span>
                       <div className="flex gap-2">
