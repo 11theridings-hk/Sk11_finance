@@ -26,6 +26,7 @@ function safeEqual(a: string, b: string): boolean {
  * Body: { from, text, messageId? } → { ok, reply }
  *
  * 閘道負責把 reply 發回 WhatsApp；此端點不呼叫 send。
+ * reply 為 null 時表示不應回覆（非白名單）；閘道必須略過發送。
  */
 export async function POST(request: Request) {
   const config = getWhatsAppConfig()
@@ -60,7 +61,8 @@ export async function POST(request: Request) {
     const reply = await processWhatsAppInboundText(from, text)
     return NextResponse.json({
       ok: true,
-      reply,
+      reply: reply ?? null,
+      ignored: reply == null,
       messageId: body.messageId || undefined,
     })
   } catch (e: unknown) {

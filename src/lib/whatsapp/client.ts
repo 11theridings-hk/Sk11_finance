@@ -47,7 +47,11 @@ async function sendViaCloud(config: WhatsAppConfig, toDigits: string, text: stri
   }
 }
 
-async function sendViaGateway(config: WhatsAppConfig, toDigits: string, text: string): Promise<SendTextResult> {
+async function sendViaGateway(
+  config: WhatsAppConfig,
+  to: string,
+  text: string,
+): Promise<SendTextResult> {
   try {
     const res = await fetch(gatewaySendUrl(config), {
       method: 'POST',
@@ -55,7 +59,8 @@ async function sendViaGateway(config: WhatsAppConfig, toDigits: string, text: st
         Authorization: `Bearer ${config.bridgeSecret}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ to: toDigits, body: text }),
+      // 群組傳完整 JID（…@g.us）；私人可傳純數字或 …@c.us
+      body: JSON.stringify({ to, body: text }),
     })
 
     const json = (await res.json().catch(() => ({}))) as {
@@ -80,9 +85,25 @@ async function sendViaGateway(config: WhatsAppConfig, toDigits: string, text: st
   }
 }
 
+function resolveOutboundRecipient(to: string): { kind: 'phone' | 'group'; value: string } | null {
+  const raw = String(to || '').trim()
+  if (!raw) return null
+  const lower = raw.toLowerCase()
+  if (lower.endsWith('@g.us')) {
+    const user = raw.slice(0, raw.indexOf('@')).replace(/\D/g, '')
+    return user ? { kind: 'group', value: `${user}@g.us` } : null
+  }
+  if (lower.endsWith('@c.us') || lower.endsWith('@s.whatsapp.net')) {
+    const user = raw.slice(0, raw.indexOf('@')).replace(/\D/g, '')
+    return user ? { kind: 'phone', value: user } : null
+  }
+  const digits = raw.replace(/\D/g, '')
+  return digits ? { kind: 'phone', value: digits } : null
+}
+
 /**
  * 發送純文字。依 WHATSAPP_PROVIDER / 自動偵測走 gateway（WS-BOT）或 Meta Cloud API。
- * to：收件人電話（E.164 純數字，不含 +）。
+ * to：收件人電話（E.164 純數字）或群組 JID（…@g.us）。群組僅 gateway 支援。
  */
 export async function sendWhatsAppText(to: string, body: string): Promise<SendTextResult> {
   const config = getWhatsAppConfig()
@@ -90,14 +111,21 @@ export async function sendWhatsAppText(to: string, body: string): Promise<SendTe
     return { ok: false, error: 'WhatsApp outbound not configured' }
   }
 
-  const toDigits = to.replace(/\D/g, '')
-  if (!toDigits) return { ok: false, error: 'Invalid recipient phone' }
+  const recipient = resolveOutboundRecipient(to)
+  if (!recipient) return { ok: false, error: 'Invalid recipient' }
 
   const text = body.length > 4000 ? `${body.slice(0, 3990)}…` : body
 
-  if (config.provider === 'gateway') {
-    return sendViaGateway(config, toDigits, text)
+  if (recipient.kind === 'group') {
+    if (config.provider !== 'gateway') {
+      return { ok: false, error: 'Group send requires WHATSAPP_PROVIDER=gateway' }
+    }
+    return sendViaGateway(config, recipient.value, text)
   }
 
-  return sendViaCloud(config, toDigits, text)
+  if (config.provider === 'gateway') {
+    return sendViaGateway(config, recipient.value, text)
+  }
+
+  return sendViaCloud(config, recipient.value, text)
 }

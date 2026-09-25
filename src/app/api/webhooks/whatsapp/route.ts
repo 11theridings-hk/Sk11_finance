@@ -86,6 +86,8 @@ export async function POST(request: Request) {
   for (const msg of inbound) {
     try {
       const reply = await processWhatsAppInboundText(msg.from, msg.text)
+      // null = 非白名單等，保持沉默（唔答）
+      if (!reply) continue
       const sent = await sendWhatsAppText(msg.from, reply)
       if (!sent.ok) {
         console.error('[whatsapp] send failed', sent.error, msg.messageId)
