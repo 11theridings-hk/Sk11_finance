@@ -55,6 +55,29 @@ Meta 變數（`WHATSAPP_VERIFY_TOKEN` 等）審過後再填；設 `WHATSAPP_PROV
 { "ok": true, "groups": [{ "id": "1203630…@g.us", "name": "財務群" }] }
 ```
 
+群組 **只作出站推播**（提醒等）；**不**在群內回覆指令。互動入數／查詢請用 1 對 1。
+
+## LLM 進出站（可選）
+
+複用 `OCR_API_KEY` + `OCR_API_BASE_URL`（OpenAI 相容），**模型與 OCR 分開**：
+
+```env
+WHATSAPP_LLM_ENABLED=true
+WHATSAPP_LLM_INBOUND=true
+WHATSAPP_LLM_OUTBOUND=true
+WHATSAPP_LLM_MODEL=deepseek/deepseek-v4-pro-0813
+# 可選
+WHATSAPP_LLM_MIN_CONFIDENCE=0.55
+WHATSAPP_EXPORT_TTL_MS=1800000
+APP_BASE_URL=https://sk11finance.up.railway.app
+```
+
+- 入站：固定指令優先；未命中才 LLM → Intent（入帳仍須「確認」）
+- 出站：提醒推播潤飾；結構化確認卡不潤飾
+- `報表PDF`：伺服器產 PDF → `GET /api/exports/whatsapp/{token}` 短時連結
+
+傳圖 OCR 入數暫緩（需改 WS-BOT 媒體管線）。
+
 ## 入站 API
 
 `POST /api/internal/whatsapp/inbound`

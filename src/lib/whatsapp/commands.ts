@@ -15,11 +15,13 @@ import {
   resolveDefaultPool,
 } from './ledger'
 import { collectWhatsAppReminders, formatRemindersMessage } from './reminders'
+import { parseWhatsAppLlmIntent, type WhatsAppLlmIntent } from './llmInbound'
+import { createWhatsAppMonthReportPdf } from './reportExport'
 
 function helpText(actor: WhatsAppActor) {
   const lines = [
     `你好，${actor.roleName} 👋`,
-    '可用指令：',
+    '可用指令（亦可口語描述，系統會嘗試理解）：',
     '',
     '• 幫助',
     '• 提醒　→ 合約／事項／恆常到期一覽',
@@ -29,7 +31,8 @@ function helpText(actor: WhatsAppActor) {
   ]
 
   if (actor.isAdmin) {
-    lines.push('• 報表　→ 本月收支摘要（管理員）')
+    lines.push('• 報表　→ 本月收支文字摘要')
+    lines.push('• 報表PDF　→ 產生本月摘要 PDF（短時下載連結）')
   }
 
   if (actorCanUsePublicLedger(actor)) {
@@ -45,6 +48,7 @@ function helpText(actor: WhatsAppActor) {
   }
 
   lines.push('', '取消待確認：取消')
+  lines.push('群組只收系統推播；互動請用 1 對 1 對話。')
   return lines.join('\n')
 }
 
@@ -55,7 +59,6 @@ function parseLedgerCommand(text: string): {
   note?: string
   poolHint?: string
 } | null {
-  // 公帳 支/支出/收/收入 金額 [分類] [備註...] [@資金池]
   const m = text.match(
     /^公帳\s*(支|支出|收|收入)\s*([\d]+(?:\.\d{1,2})?)\s*(.*)$/i,
   )
@@ -165,8 +168,106 @@ async function prepareLedger(
     .join('\n')
 }
 
+async function handleReportSummary(actor: WhatsAppActor): Promise<string> {
+  if (!actor.isAdmin) return '報表摘要僅管理員可用。'
+  const s = await getMonthSummaryAdmin()
+  return [
+    `📊 ${s.year}/${s.month} 公帳摘要`,
+    `筆數：${s.count}`,
+    `收入：+${s.income.toFixed(2)}`,
+    `支出：-${s.expense.toFixed(2)}`,
+    `淨額：${s.net >= 0 ? '+' : ''}${s.net.toFixed(2)}`,
+    `資金池合計：${s.poolTotal.toFixed(2)} HKD`,
+    '',
+    '需要 PDF：傳送「報表PDF」（短時下載連結，不經聊天傳檔）。',
+  ].join('\n')
+}
+
+async function handleReportPdf(actor: WhatsAppActor): Promise<string> {
+  if (!actor.isAdmin) return '報表 PDF 僅管理員可用。'
+  const created = await createWhatsAppMonthReportPdf({ userId: actor.userId })
+  if (!created.ok) {
+    return `產生 PDF 失敗：${created.error}`
+  }
+  const mins = Math.max(1, Math.round((created.expiresAt - Date.now()) / 60000))
+  return [
+    `📄 ${created.summaryLabel} 公帳摘要 PDF 已備妥`,
+    `下載（約 ${mins} 分鐘內有效）：`,
+    created.url,
+    '',
+    '連結過期後請再傳送「報表PDF」。完整會計包請用網頁匯出。',
+  ].join('\n')
+}
+
+async function dispatchIntent(
+  actor: WhatsAppActor,
+  intent: WhatsAppLlmIntent,
+): Promise<string | null> {
+  const minConfidence = Number(process.env.WHATSAPP_LLM_MIN_CONFIDENCE || 0.55)
+  if (intent.confidence < minConfidence) return null
+
+  switch (intent.intent) {
+    case 'help':
+      return helpText(actor)
+    case 'reminders': {
+      const items = await collectWhatsAppReminders(actor)
+      return formatRemindersMessage(items)
+    }
+    case 'recent': {
+      if (!actorCanUsePublicLedger(actor)) return '沒有公帳權限。'
+      const rows = await getRecentRecordsForUser(actor.userId, 5)
+      if (rows.length === 0) return '尚無公帳紀錄。'
+      const lines = ['🧾 最近公帳：', '']
+      for (const r of rows) {
+        const sign = r.amount >= 0 ? '+' : ''
+        lines.push(
+          `• ${r.date.toISOString().slice(0, 10)} ${r.type === 'INCOME' ? '收' : '支'} ${sign}${r.amount.toFixed(2)}`,
+          `  ${r.category?.name || '—'}${r.note ? `｜${r.note}` : ''}`,
+        )
+      }
+      return lines.join('\n')
+    }
+    case 'categories': {
+      const [ex, inc] = await Promise.all([
+        listTopCategories('EXPENSE'),
+        listTopCategories('INCOME'),
+      ])
+      return [
+        '📂 分類（部分）',
+        '',
+        '支出：' + (ex.join('、') || '（無）'),
+        '收入：' + (inc.join('、') || '（無）'),
+      ].join('\n')
+    }
+    case 'pools': {
+      const pools = await listPools()
+      if (pools.length === 0) return '尚未建立資金池。'
+      return [
+        '🏦 資金池',
+        '',
+        ...pools.map((p) => `• ${p.name}：${p.balanceHkd.toFixed(2)} HKD`),
+      ].join('\n')
+    }
+    case 'report_summary':
+      return handleReportSummary(actor)
+    case 'report_pdf':
+      return handleReportPdf(actor)
+    case 'ledger_draft':
+      return prepareLedger(actor, {
+        type: intent.type,
+        amountAbs: intent.amountAbs,
+        categoryHint: intent.categoryHint,
+        note: intent.note,
+        poolHint: intent.poolHint,
+      })
+    default:
+      return null
+  }
+}
+
 /**
  * 處理單則入站文字，回傳要回覆給用戶的訊息。
+ * 群組互動不在此處理（閘道入站已 skip @g.us；群組只作出站推播）。
  */
 export async function handleWhatsAppCommand(
   actor: WhatsAppActor,
@@ -237,19 +338,20 @@ export async function handleWhatsAppCommand(
     ].join('\n')
   }
 
+  if (
+    text === '報表PDF' ||
+    text === '报表PDF' ||
+    text === '報表 pdf' ||
+    lower === 'report pdf' ||
+    lower === 'reportpdf' ||
+    text === 'PDF報表' ||
+    text === 'pdf報表'
+  ) {
+    return handleReportPdf(actor)
+  }
+
   if (text === '報表' || text === '报表' || lower === 'report' || text === '摘要') {
-    if (!actor.isAdmin) return '報表摘要僅管理員可用。完整 PDF 請登入系統「報表」頁。'
-    const s = await getMonthSummaryAdmin()
-    return [
-      `📊 ${s.year}/${s.month} 公帳摘要`,
-      `筆數：${s.count}`,
-      `收入：+${s.income.toFixed(2)}`,
-      `支出：-${s.expense.toFixed(2)}`,
-      `淨額：${s.net >= 0 ? '+' : ''}${s.net.toFixed(2)}`,
-      `資金池合計：${s.poolTotal.toFixed(2)} HKD`,
-      '',
-      '完整 PDF／會計結算包請用網頁匯出。',
-    ].join('\n')
+    return handleReportSummary(actor)
   }
 
   const ledger = parseLedgerCommand(text)
@@ -257,9 +359,12 @@ export async function handleWhatsAppCommand(
     return prepareLedger(actor, ledger)
   }
 
-  return [
-    '未能辨識指令。',
-    '',
-    helpText(actor),
-  ].join('\n')
+  // 固定指令未命中 → LLM 口語解析（入帳仍須「確認」）
+  const intent = await parseWhatsAppLlmIntent(text)
+  if (intent) {
+    const viaLlm = await dispatchIntent(actor, intent)
+    if (viaLlm) return viaLlm
+  }
+
+  return ['未能辨識指令。', '', helpText(actor)].join('\n')
 }

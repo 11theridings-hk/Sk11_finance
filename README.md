@@ -27,6 +27,9 @@
    WHATSAPP_BRIDGE_SECRET="shared-with-ws-bot"
    WHATSAPP_GATEWAY_URL="https://wa-bot.yourdomain.com"
    WHATSAPP_ALLOWED_PHONES="85291234567"
+   # APP_BASE_URL="https://sk11finance.up.railway.app"
+   # WHATSAPP_LLM_ENABLED="true"
+   # WHATSAPP_LLM_MODEL="deepseek/deepseek-v4-pro-0813"  # 與 OCR 模型分開；金鑰用 OCR_API_KEY
    # WHATSAPP_VERIFY_TOKEN="your-verify-token"
    # WHATSAPP_ACCESS_TOKEN="EAAB..."
    # WHATSAPP_PHONE_NUMBER_ID="1234567890"
