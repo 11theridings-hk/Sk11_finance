@@ -44,7 +44,11 @@ export async function sendWhatsAppReminder(input: {
 
   const raw = `🔔 ${input.subject}\n\n${input.body}`
   // 出站潤飾；群組只收推播（不處理群組入站互動）
-  const text = await polishWhatsAppOutboundText(raw)
+  // 提醒預設中文（cron）；含明顯英文 subject 則英文化潤飾
+  const locale = /[A-Za-z]{4,}/.test(input.subject) && !/[\u3400-\u9FFF]/.test(input.subject)
+    ? 'en'
+    : 'zh'
+  const text = await polishWhatsAppOutboundText(raw, locale)
   let sent = 0
   let failed = 0
   const errors: string[] = []

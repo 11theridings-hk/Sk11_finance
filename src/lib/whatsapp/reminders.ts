@@ -57,6 +57,18 @@ const BUCKET_ZH: Record<WaReminderBucket, string> = {
   upcoming: '即將到期',
 }
 
+const BUCKET_EN: Record<WaReminderBucket, string> = {
+  overdue: 'Overdue',
+  today: 'Today',
+  upcoming: 'Upcoming',
+}
+
+const SOURCE_EN: Record<WaReminderItem['source'], string> = {
+  合約: 'Contract',
+  事項: 'Matter',
+  恆常: 'Recurring',
+}
+
 /**
  * 彙總合約 / 事項 / 恆常提醒（依用戶權限過濾）。
  */
@@ -133,23 +145,49 @@ export async function collectWhatsAppReminders(actor: WhatsAppActor): Promise<Wa
   return items
 }
 
-export function formatRemindersMessage(items: WaReminderItem[], limit = 15): string {
+export function formatRemindersMessage(
+  items: WaReminderItem[],
+  locale: 'zh' | 'en' = 'zh',
+  limit = 15,
+): string {
   if (items.length === 0) {
-    return '目前沒有到期／即將到期的合約、事項或恆常收支。'
+    return locale === 'en'
+      ? 'No overdue or upcoming contracts, matters, or recurring items.'
+      : '目前沒有到期／即將到期的合約、事項或恆常收支。'
   }
-  const lines = [`📋 提醒一覽（共 ${items.length} 項）`, '']
+  const bucketLabel = locale === 'en' ? BUCKET_EN : BUCKET_ZH
+  const lines = [
+    locale === 'en'
+      ? `📋 Reminders (${items.length})`
+      : `📋 提醒一覽（共 ${items.length} 項）`,
+    '',
+  ]
   for (const item of items.slice(0, limit)) {
     const when =
       item.daysDiff < 0
-        ? `過期 ${Math.abs(item.daysDiff)} 天`
+        ? locale === 'en'
+          ? `${Math.abs(item.daysDiff)}d overdue`
+          : `過期 ${Math.abs(item.daysDiff)} 天`
         : item.daysDiff === 0
-          ? '今天'
-          : `${item.daysDiff} 天後`
+          ? locale === 'en'
+            ? 'today'
+            : '今天'
+          : locale === 'en'
+            ? `in ${item.daysDiff}d`
+            : `${item.daysDiff} 天後`
+    const source = locale === 'en' ? SOURCE_EN[item.source] : item.source
     lines.push(
-      `• [${BUCKET_ZH[item.bucket]}] ${item.source}｜${item.title}`,
+      `• [${bucketLabel[item.bucket]}] ${source}｜${item.title}`,
       `  ${ymd(item.targetDate)}（${when}）`,
     )
   }
-  if (items.length > limit) lines.push('', `…其餘 ${items.length - limit} 項請登入系統查看`)
+  if (items.length > limit) {
+    lines.push(
+      '',
+      locale === 'en'
+        ? `…and ${items.length - limit} more — open the web app`
+        : `…其餘 ${items.length - limit} 項請登入系統查看`,
+    )
+  }
   return lines.join('\n')
 }
