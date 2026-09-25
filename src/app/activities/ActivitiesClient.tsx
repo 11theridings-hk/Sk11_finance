@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { createActivity } from '../actions/activity'
 import { createTranslator, type Locale } from '@/lib/i18n'
 import { compressImage, MAX_PDF_PAGES, prepareAttachments, type ClientAttachment } from '@/lib/image'
@@ -47,6 +47,22 @@ export default function ActivitiesClient({ locale, currentUserId, isAdmin, initi
   const [ocrAttachmentIndex, setOcrAttachmentIndex] = useState(0)
   const [attachmentNote, setAttachmentNote] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const openId = new URLSearchParams(window.location.search).get('open')
+    if (!openId) return
+    const match = initialActivities.find((activity) => activity.id === openId)
+    if (match) setSelectedActivity(match)
+  }, [initialActivities])
+
+  const clearOpenParam = () => {
+    if (typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    if (!url.searchParams.has('open')) return
+    url.searchParams.delete('open')
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+  }
 
   const reminderGroups = useMemo(() => {
     const today = new Date()
@@ -180,7 +196,9 @@ export default function ActivitiesClient({ locale, currentUserId, isAdmin, initi
       })
     }
     if (payload.attachmentMemo) {
-      const ocrIndex = attachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0
+      const ocrIndex =
+        payload.pageIndexes?.find((index) => attachments[index]) ??
+        (attachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0)
       setAttachmentNote(payload.attachmentMemo)
       setAttachments((prev) =>
         prev.map((item, index) => (index === ocrIndex ? { ...item, note: payload.attachmentMemo } : item))
@@ -205,7 +223,12 @@ export default function ActivitiesClient({ locale, currentUserId, isAdmin, initi
           <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${pillClass}`}>{items.length}</span>
         </div>
         {items.slice(0, 4).map((activity) => (
-          <div key={activity.id} className="flex flex-col gap-1 rounded-xl bg-white/80 px-3 py-2 text-sm text-gray-700 sm:flex-row sm:items-center sm:justify-between">
+          <button
+            key={activity.id}
+            type="button"
+            onClick={() => setSelectedActivity(activity)}
+            className="flex w-full flex-col gap-1 rounded-xl bg-white/80 px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-white sm:flex-row sm:items-center sm:justify-between"
+          >
             <div>
               <div className="font-medium text-gray-900">{activity.title}</div>
               <div className="text-xs text-gray-500">{activity.visibility === 'PUBLIC' ? t('publicActivity') : t('privateActivity')}</div>
@@ -224,7 +247,7 @@ export default function ActivitiesClient({ locale, currentUserId, isAdmin, initi
                       : `尚餘 ${activity.daysUntilEvent} 天`}
               </span>
             </div>
-          </div>
+          </button>
         ))}
       </div>
     )
@@ -444,7 +467,10 @@ export default function ActivitiesClient({ locale, currentUserId, isAdmin, initi
           activity={selectedActivity}
           locale={locale}
           canManage={isAdmin || selectedActivity.userId === currentUserId}
-          onClose={() => setSelectedActivity(null)}
+          onClose={() => {
+            setSelectedActivity(null)
+            clearOpenParam()
+          }}
         />
       )}
     </div>

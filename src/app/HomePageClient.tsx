@@ -196,7 +196,9 @@ export default function HomePageClient({ locale, session, stats, initialDate, in
       })
     }
     if (payload.attachmentMemo) {
-      const ocrIndex = attachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0
+      const ocrIndex =
+        payload.pageIndexes?.find((index) => attachments[index]) ??
+        (attachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0)
       setAttachmentNote(payload.attachmentMemo)
       setAttachments((prev) =>
         prev.map((item, index) => (index === ocrIndex ? { ...item, note: payload.attachmentMemo } : item))

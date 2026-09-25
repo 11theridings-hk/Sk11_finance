@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createTranslator, type Locale } from '@/lib/i18n'
 import { MAX_PDF_PAGES, prepareAttachments } from '@/lib/image'
 import {
@@ -133,6 +133,15 @@ export default function RecurringClient({
     setPoolId(template.poolId || '')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const openId = new URLSearchParams(window.location.search).get('open')
+    if (!openId) return
+    const match = templates.find((template) => template.id === openId)
+    if (match) startEdit(match)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- open once from deep link
+  }, [templates])
 
   const handleSubmit = async () => {
     setBusy(true)

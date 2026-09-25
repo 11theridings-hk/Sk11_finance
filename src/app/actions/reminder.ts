@@ -78,7 +78,7 @@ export async function getContractReminderItems() {
           bucket,
           daysDiff,
           reminderDays: contract.reminderDays,
-          href: '/contracts',
+          href: `/contracts?open=${contract.id}`,
         } satisfies ReminderItem
       })
       .filter(Boolean) as ReminderItem[]
@@ -125,7 +125,7 @@ export async function getActivityReminderItems() {
           bucket,
           daysDiff,
           reminderDays: activity.reminderDays,
-          href: '/activities',
+          href: `/activities?open=${activity.id}`,
         } satisfies ReminderItem
       })
       .filter(Boolean) as ReminderItem[]

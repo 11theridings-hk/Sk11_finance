@@ -292,7 +292,9 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       setEditNote((current) => (current.trim() ? `${current.trim()}\n${payload.noteText}` : payload.noteText))
     }
     if (payload.attachmentMemo) {
-      const ocrIndex = editAttachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0
+      const ocrIndex =
+        payload.pageIndexes?.find((index) => editAttachments[index]) ??
+        (editAttachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0)
       setEditAttachmentNote(payload.attachmentMemo)
       setEditAttachments((prev) =>
         prev.map((item, index) => (index === ocrIndex ? { ...item, note: payload.attachmentMemo } : item))

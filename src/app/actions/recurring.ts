@@ -511,7 +511,7 @@ export async function getRecurringReminderItems() {
           bucket,
           daysDiff,
           reminderDays: template.reminderDays,
-          href: '/recurring',
+          href: `/recurring?open=${template.id}`,
         }
       })
       .filter(Boolean)

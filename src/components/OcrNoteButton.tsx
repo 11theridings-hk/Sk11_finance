@@ -122,7 +122,8 @@ export default function OcrNoteButton({
     const payload: OcrResolvedPayload = {
       contentText: mergeUnique(contentParts),
       noteText: mergeUnique(noteParts),
-      attachmentMemo: memoParts[0] || '',
+      // Prefer first non-empty type label from selected pages (skip weak/empty).
+      attachmentMemo: memoParts.find((memo) => Boolean(memo.trim())) || '',
       amount,
       parsed: lastParsed,
       pageIndexes: indexes,

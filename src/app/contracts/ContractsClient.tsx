@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { createContract } from '../actions/contract'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
 import { compressImage, MAX_PDF_PAGES, prepareAttachments, type ClientAttachment } from '@/lib/image'
@@ -58,6 +58,22 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
   const [content, setContent] = useState('')
   const [note, setNote] = useState('')
   const [ocrMemo, setOcrMemo] = useState('')
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const openId = new URLSearchParams(window.location.search).get('open')
+    if (!openId) return
+    const match = initialContracts.find((contract) => contract.id === openId)
+    if (match) setSelectedContract(match)
+  }, [initialContracts])
+
+  const clearOpenParam = () => {
+    if (typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    if (!url.searchParams.has('open')) return
+    url.searchParams.delete('open')
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+  }
   const [attachments, setAttachments] = useState<ClientAttachment[]>([])
   const [ocrAttachmentIndex, setOcrAttachmentIndex] = useState(0)
   const [attachmentNote, setAttachmentNote] = useState('')
@@ -195,7 +211,9 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
       })
     }
     if (payload.attachmentMemo) {
-      const ocrIndex = attachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0
+      const ocrIndex =
+        payload.pageIndexes?.find((index) => attachments[index]) ??
+        (attachments[ocrAttachmentIndex] ? ocrAttachmentIndex : 0)
       setAttachmentNote(payload.attachmentMemo)
       setAttachments((prev) =>
         prev.map((item, index) => (index === ocrIndex ? { ...item, note: payload.attachmentMemo } : item))
@@ -222,7 +240,12 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
           <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${pillClass}`}>{items.length}</span>
         </div>
         {items.slice(0, 3).map((contract) => (
-          <div key={contract.id} className="flex flex-col gap-1 rounded-xl bg-white/80 px-3 py-2 text-sm text-gray-700 sm:flex-row sm:items-center sm:justify-between">
+          <button
+            key={contract.id}
+            type="button"
+            onClick={() => setSelectedContract(contract)}
+            className="flex w-full flex-col gap-1 rounded-xl bg-white/80 px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-white sm:flex-row sm:items-center sm:justify-between"
+          >
             <div className="font-medium text-gray-900">{contract.title}</div>
             <div className="flex items-center gap-2 text-xs sm:text-sm">
               <span>{new Date(contract.expiryDate).toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK')}</span>
@@ -238,7 +261,7 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
                       : `尚餘 ${contract.daysUntilExpiry} 天`}
               </span>
             </div>
-          </div>
+          </button>
         ))}
       </div>
     )
@@ -477,7 +500,10 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
           locale={locale}
           pools={pools}
           canManage={selectedContract.userId === currentUserId}
-          onClose={() => setSelectedContract(null)}
+          onClose={() => {
+            setSelectedContract(null)
+            clearOpenParam()
+          }}
         />
       )}
     </div>

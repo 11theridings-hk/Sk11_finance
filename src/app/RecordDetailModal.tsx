@@ -102,8 +102,12 @@ export default function RecordDetailModal({
       )
     }
     if (payload.attachmentMemo) {
+      const targetIndex =
+        payload.pageIndexes?.find((index) => index >= 0 && index < attachments.length) ?? 0
       setAttachmentNote(payload.attachmentMemo)
-      setAttachments((prev) => prev.map((item, index) => (index === 0 ? { ...item, note: payload.attachmentMemo } : item)))
+      setAttachments((prev) =>
+        prev.map((item, index) => (index === targetIndex ? { ...item, note: payload.attachmentMemo } : item))
+      )
     }
   }
 
