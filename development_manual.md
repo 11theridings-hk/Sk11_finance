@@ -51,6 +51,10 @@
   - SK11：`POST /api/internal/whatsapp/inbound`；出站可走 `WHATSAPP_GATEWAY_URL`。
   - Meta Cloud API 程式保留，審過後可 `WHATSAPP_PROVIDER=cloud`。
   - 說明：[`docs/whatsapp-gateway-bridge.md`](./docs/whatsapp-gateway-bridge.md)。
+- **[2026-09-25] WhatsApp 白名單（管理後台）**:
+  - 管理後台「WhatsApp」可維護允許回覆電話；存 `SystemSetting`（可退回 `WHATSAPP_ALLOWED_PHONES`）。
+  - 非白名單來電不回覆；WS-BOT 僅登入／QR，不放白名單 UI。
+  - 說明：[`docs/whatsapp-webhooks.md`](./docs/whatsapp-webhooks.md)。
 
 ### 1.5 部署到 Railway 相關問題與修復
 *   **Next.js 靜態打包錯誤 (Prerender Error)**：Next.js 在 `npm run build` 時會嘗試預渲染頁面，導致存取資料庫失敗。

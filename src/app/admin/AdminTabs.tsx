@@ -19,6 +19,11 @@ import {
   listWhatsAppBindings,
   removeWhatsAppBinding,
   upsertWhatsAppBinding,
+  getWhatsAppAllowlist,
+  addWhatsAppAllowlistPhone,
+  removeWhatsAppAllowlistPhone,
+  updateWhatsAppAllowlist,
+  type WhatsAppAllowlistSnapshot,
 } from "../actions/whatsapp";
 
 type WhatsAppBindingRow = {
@@ -36,10 +41,11 @@ type AdminTabsProps = {
   initialAISettings: AISettings
   initialPluginFlags: PluginFlags
   initialWhatsAppBindings: WhatsAppBindingRow[]
+  initialWhatsAppAllowlist: WhatsAppAllowlistSnapshot
   locale: Locale
 }
 
-export default function AdminTabs({ initialCategories, initialAttachments, initialPools, initialUsers, initialAISettings, initialPluginFlags, initialWhatsAppBindings, locale }: AdminTabsProps) {
+export default function AdminTabs({ initialCategories, initialAttachments, initialPools, initialUsers, initialAISettings, initialPluginFlags, initialWhatsAppBindings, initialWhatsAppAllowlist, locale }: AdminTabsProps) {
   const t = createTranslator(locale as Locale);
   const [activeTab, setActiveTab] = useState("category");
   
@@ -93,6 +99,7 @@ export default function AdminTabs({ initialCategories, initialAttachments, initi
         {activeTab === "whatsapp" && (
           <WhatsAppTab
             initialBindings={initialWhatsAppBindings}
+            initialAllowlist={initialWhatsAppAllowlist}
             users={initialUsers}
             locale={locale}
           />
@@ -1407,26 +1414,83 @@ function PluginsTab({ initialFlags, locale }: { initialFlags: PluginFlags; local
   );
 }
 
-// ---------------- WhatsApp 綁定 ----------------
+// ---------------- WhatsApp 綁定＋白名單 ----------------
 function WhatsAppTab({
   initialBindings,
+  initialAllowlist,
   users,
   locale,
 }: {
   initialBindings: WhatsAppBindingRow[]
+  initialAllowlist: WhatsAppAllowlistSnapshot
   users: any[]
   locale: Locale
 }) {
   const t = createTranslator(locale);
   const [bindings, setBindings] = useState(initialBindings);
+  const [allowlist, setAllowlist] = useState(initialAllowlist);
+  const [allowPhone, setAllowPhone] = useState('');
   const [userId, setUserId] = useState(users[0]?.id || '');
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
   const refresh = async () => {
-    const rows = await listWhatsAppBindings();
+    const [rows, list] = await Promise.all([
+      listWhatsAppBindings(),
+      getWhatsAppAllowlist(),
+    ]);
     setBindings(rows as WhatsAppBindingRow[]);
+    setAllowlist(list);
+  };
+
+  const sourceLabel =
+    allowlist.source === 'db'
+      ? t('whatsappAllowlistSourceDb')
+      : allowlist.source === 'env'
+        ? t('whatsappAllowlistSourceEnv')
+        : t('whatsappAllowlistSourceNone');
+
+  const handleAddAllow = async () => {
+    if (!allowPhone.trim()) return;
+    setLoading(true);
+    setMessage('');
+    const res = await addWhatsAppAllowlistPhone(allowPhone.trim());
+    setLoading(false);
+    if (res.success) {
+      setAllowPhone('');
+      setMessage(t('whatsappAllowlistSaved'));
+      await refresh();
+    } else {
+      setMessage(res.error || t('whatsappAllowlistFail'));
+    }
+  };
+
+  const handleRemoveAllow = async (p: string) => {
+    if (!confirm(t('whatsappAllowlistConfirmRemove'))) return;
+    setLoading(true);
+    setMessage('');
+    const res = await removeWhatsAppAllowlistPhone(p);
+    setLoading(false);
+    if (res.success) {
+      setMessage(t('whatsappAllowlistSaved'));
+      await refresh();
+    } else {
+      setMessage(res.error || t('whatsappAllowlistFail'));
+    }
+  };
+
+  const handleSeedSave = async () => {
+    setLoading(true);
+    setMessage('');
+    const res = await updateWhatsAppAllowlist(allowlist.phones);
+    setLoading(false);
+    if (res.success) {
+      setMessage(t('whatsappAllowlistSaved'));
+      await refresh();
+    } else {
+      setMessage(res.error || t('whatsappAllowlistFail'));
+    }
   };
 
   const handleBind = async () => {
@@ -1453,75 +1517,139 @@ function WhatsAppTab({
   };
 
   return (
-    <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-5">
-      <div>
-        <h2 className="text-lg font-semibold text-gray-800">{t('whatsapp')}</h2>
-        <p className="mt-2 text-sm text-gray-500">{t('whatsappHint')}</p>
-      </div>
+    <div className="space-y-5">
+      <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-5">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-800">{t('whatsappAllowlist')}</h2>
+          <p className="mt-2 text-sm text-gray-500">{t('whatsappAllowlistHint')}</p>
+          <p className="mt-1 text-xs text-gray-400">{sourceLabel}</p>
+        </div>
 
-      <div className="space-y-3 rounded-2xl bg-[#F2F2F7] p-4">
-        <label className="block text-sm font-medium text-gray-700">
-          {t('whatsappSelectUser')}
-          <select
-            value={userId}
-            onChange={(e) => setUserId(e.target.value)}
-            className="mt-1 w-full rounded-xl border-0 bg-white px-3 py-2 text-sm"
-          >
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.roleName} ({u.email})
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-sm font-medium text-gray-700">
-          {t('whatsappPhone')}
-          <input
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder={t('whatsappPhonePlaceholder')}
-            className="mt-1 w-full rounded-xl border-0 bg-white px-3 py-2 text-sm"
-          />
-        </label>
-        <button
-          onClick={handleBind}
-          disabled={loading || !userId}
-          className="rounded-xl bg-[#25D366] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
-        >
-          {t('whatsappBind')}
-        </button>
-        {message ? <p className="text-sm text-gray-600">{message}</p> : null}
-      </div>
-
-      <div>
-        <h3 className="text-sm font-semibold text-gray-800 mb-2">{t('whatsappBound')}</h3>
-        {bindings.length === 0 ? (
-          <p className="text-sm text-gray-500">{t('whatsappEmpty')}</p>
-        ) : (
-          <ul className="space-y-2">
-            {bindings.map((b) => (
-              <li
-                key={b.id}
-                className="flex items-center justify-between gap-3 rounded-2xl border border-gray-100 px-4 py-3 text-sm"
+        <div className="space-y-3 rounded-2xl bg-[#F2F2F7] p-4">
+          <label className="block text-sm font-medium text-gray-700">
+            {t('whatsappPhone')}
+            <input
+              value={allowPhone}
+              onChange={(e) => setAllowPhone(e.target.value)}
+              placeholder={t('whatsappPhonePlaceholder')}
+              className="mt-1 w-full rounded-xl border-0 bg-white px-3 py-2 text-sm"
+            />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={handleAddAllow}
+              disabled={loading || !allowPhone.trim()}
+              className="rounded-xl bg-[#007AFF] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {t('whatsappAllowlistAdd')}
+            </button>
+            {allowlist.source === 'env' ? (
+              <button
+                onClick={handleSeedSave}
+                disabled={loading}
+                className="rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 border border-gray-200 disabled:opacity-50"
               >
-                <div>
-                  <div className="font-semibold text-gray-900">+{b.phoneE164}</div>
-                  <div className="text-gray-500">
-                    {b.user.roleName} · {b.user.email}
-                    {!b.enabled ? ' · OFF' : ''}
-                  </div>
-                </div>
-                <button
-                  onClick={() => handleRemove(b.id)}
-                  disabled={loading}
-                  className="text-[#FF3B30] font-semibold disabled:opacity-50"
+                {t('whatsappAllowlistSeedSave')}
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <div>
+          {allowlist.phones.length === 0 ? (
+            <p className="text-sm text-gray-500">{t('whatsappAllowlistEmpty')}</p>
+          ) : (
+            <ul className="space-y-2">
+              {allowlist.phones.map((p) => (
+                <li
+                  key={p}
+                  className="flex items-center justify-between gap-3 rounded-2xl border border-gray-100 px-4 py-3 text-sm"
                 >
-                  {t('whatsappUnbind')}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+                  <div className="font-semibold text-gray-900">+{p}</div>
+                  <button
+                    onClick={() => handleRemoveAllow(p)}
+                    disabled={loading}
+                    className="text-[#FF3B30] font-semibold disabled:opacity-50"
+                  >
+                    {t('whatsappAllowlistRemove')}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-5">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-800">{t('whatsapp')}</h2>
+          <p className="mt-2 text-sm text-gray-500">{t('whatsappHint')}</p>
+        </div>
+
+        <div className="space-y-3 rounded-2xl bg-[#F2F2F7] p-4">
+          <label className="block text-sm font-medium text-gray-700">
+            {t('whatsappSelectUser')}
+            <select
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
+              className="mt-1 w-full rounded-xl border-0 bg-white px-3 py-2 text-sm"
+            >
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.roleName} ({u.email})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-sm font-medium text-gray-700">
+            {t('whatsappPhone')}
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder={t('whatsappPhonePlaceholder')}
+              className="mt-1 w-full rounded-xl border-0 bg-white px-3 py-2 text-sm"
+            />
+          </label>
+          <button
+            onClick={handleBind}
+            disabled={loading || !userId}
+            className="rounded-xl bg-[#25D366] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {t('whatsappBind')}
+          </button>
+          {message ? <p className="text-sm text-gray-600">{message}</p> : null}
+        </div>
+
+        <div>
+          <h3 className="text-sm font-semibold text-gray-800 mb-2">{t('whatsappBound')}</h3>
+          {bindings.length === 0 ? (
+            <p className="text-sm text-gray-500">{t('whatsappEmpty')}</p>
+          ) : (
+            <ul className="space-y-2">
+              {bindings.map((b) => (
+                <li
+                  key={b.id}
+                  className="flex items-center justify-between gap-3 rounded-2xl border border-gray-100 px-4 py-3 text-sm"
+                >
+                  <div>
+                    <div className="font-semibold text-gray-900">+{b.phoneE164}</div>
+                    <div className="text-gray-500">
+                      {b.user.roleName} · {b.user.email}
+                      {!b.enabled ? ' · OFF' : ''}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRemove(b.id)}
+                    disabled={loading}
+                    className="text-[#FF3B30] font-semibold disabled:opacity-50"
+                  >
+                    {t('whatsappUnbind')}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
     </div>
   );

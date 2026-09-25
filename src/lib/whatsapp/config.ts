@@ -12,7 +12,10 @@ export type WhatsAppConfig = {
   phoneNumberId: string
   appSecret: string
   apiVersion: string
-  /** 若設定，僅允許清單內電話（純數字 E.164） */
+  /**
+   * 環境變數 WHATSAPP_ALLOWED_PHONES 的同步快照（僅供參考）。
+   * 實際入站白名單請用 allowlist.ts（優先 SystemSetting／管理後台）。
+   */
   allowedPhones: Set<string> | null
   bridgeSecret: string
   gatewayUrl: string

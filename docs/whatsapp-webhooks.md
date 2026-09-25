@@ -43,7 +43,7 @@ Webhook 欄位請訂閱：`messages`。
 | `WHATSAPP_PHONE_NUMBER_ID` | ✅（回覆） | 發送用 Phone number ID（非顯示號碼） |
 | `WHATSAPP_APP_SECRET` | ✅（生產） | App Secret，用於驗 `X-Hub-Signature-256` |
 | `WHATSAPP_API_VERSION` | 可選 | 預設 `v21.0` |
-| `WHATSAPP_ALLOWED_PHONES` | 建議 | 白名單，逗號分隔，如 `85291111111,85292222222` |
+| `WHATSAPP_ALLOWED_PHONES` | 建議 | 白名單初始值（逗號分隔）。管理後台「WhatsApp」分頁可覆寫並寫入 `SystemSetting`；非白名單來電**不回覆** |
 | `WHATSAPP_USER_MAP` | 可選 | `電話:userId` 對照，如 `85291111111:uuid-...` |
 | `WHATSAPP_REMINDER_PHONES` | 可選 | 每日到期提醒要推到的號碼 |
 
@@ -54,7 +54,8 @@ Webhook 欄位請訂閱：`messages`。
 1. **個人資料／管理後台「聯絡電話」**（建議）  
    儲存時會正規化成 E.164，並**自動同步 `WhatsAppBinding`**。香港 8 位本地號會補 `852`。
 2. **管理後台 → WhatsApp 分頁**  
-   手動綁定；會反寫 `contactPhone`。
+   - **允許回覆的電話（白名單）**：加入／移除號碼；非清單內號碼 bot **不回覆**（其他人問野唔答）。未於後台儲存前可沿用 `WHATSAPP_ALLOWED_PHONES`。  
+   - **綁定**：手動綁定用戶；會反寫 `contactPhone`。
 3. **環境變數 `WHATSAPP_USER_MAP`**（可選）  
    `電話:userId` 對照。
 
@@ -90,7 +91,7 @@ Webhook 欄位請訂閱：`messages`。
 ## 安全注意
 
 - 生產環境**必須**設定 `WHATSAPP_APP_SECRET`，否則簽名驗證會拒絕 POST。
-- 建議設定 `WHATSAPP_ALLOWED_PHONES`，避免陌生人觸發指令（未綁定也會被拒，但白名單可再擋一層）。
+- 建議在管理後台維護 WhatsApp 白名單（或設 `WHATSAPP_ALLOWED_PHONES`），非清單內號碼**保持沉默、不回覆**。
 - 公帳入數一律二次確認；備註會加上 `[WhatsApp]` 前綴方便稽核。
 - 需審核的資金池仍會建成 `PENDING`，與網頁行為一致。
 

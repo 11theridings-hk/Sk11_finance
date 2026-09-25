@@ -10,7 +10,7 @@ import { getCurrentLocale } from "@/lib/locale";
 import { createTranslator } from "@/lib/i18n";
 import { getDefaultHomePath } from "@/lib/access";
 import { getAISettings, getPluginFlags } from "../actions/settings";
-import { listWhatsAppBindings } from "../actions/whatsapp";
+import { listWhatsAppBindings, getWhatsAppAllowlist } from "../actions/whatsapp";
 
 export const metadata = {
   title: "管理后台",
@@ -35,6 +35,7 @@ export default async function AdminPage() {
   const aiSettings = await getAISettings();
   const pluginFlags = await getPluginFlags();
   const whatsappBindings = await listWhatsAppBindings();
+  const whatsappAllowlist = await getWhatsAppAllowlist();
 
   return (
     <div className="bg-[#F2F2F7] min-h-screen">
@@ -68,6 +69,7 @@ export default async function AdminPage() {
           initialAISettings={aiSettings}
           initialPluginFlags={pluginFlags}
           initialWhatsAppBindings={whatsappBindings}
+          initialWhatsAppAllowlist={whatsappAllowlist}
           locale={locale}
         />
       </main>
