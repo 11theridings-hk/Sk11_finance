@@ -2,6 +2,9 @@
 
 透過 Meta WhatsApp Cloud API，用手機直接對系統發指令：查提醒、公帳入數、本月摘要等。
 
+> **現階段主渠道**已改為家用 iMac 上的 [WS-BOT](https://github.com/11theridings-hk/WS-BOT)（wwebjs）。請優先看 [`whatsapp-gateway-bridge.md`](./whatsapp-gateway-bridge.md)。  
+> 本文描述的 Meta Cloud API 路徑**程式仍保留**，待審批通過後可再啟用。
+
 ## 架構
 
 ```

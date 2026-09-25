@@ -46,6 +46,11 @@
   - 流程：`公帳`／傳圖 → 類型按鈕 → 分類 List → 金額／備註／附件 → 是否 OCR → 確認入帳。
   - 手填優先、OCR 補缺；確認前不寫庫。
   - 規格與 checklist：[`docs/whatsapp-interaction-roadmap.md`](./docs/whatsapp-interaction-roadmap.md) §4.1。
+- **[2026-09-25] WhatsApp WS-BOT 閘道（現階段主渠道）**:
+  - 因 Meta 審批受阻，主渠道改為 [WS-BOT](https://github.com/11theridings-hk/WS-BOT)（wwebjs，家用 iMac + Tunnel）。
+  - SK11：`POST /api/internal/whatsapp/inbound`；出站可走 `WHATSAPP_GATEWAY_URL`。
+  - Meta Cloud API 程式保留，審過後可 `WHATSAPP_PROVIDER=cloud`。
+  - 說明：[`docs/whatsapp-gateway-bridge.md`](./docs/whatsapp-gateway-bridge.md)。
 
 ### 1.5 部署到 Railway 相關問題與修復
 *   **Next.js 靜態打包錯誤 (Prerender Error)**：Next.js 在 `npm run build` 時會嘗試預渲染頁面，導致存取資料庫失敗。

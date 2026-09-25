@@ -24,7 +24,7 @@ export async function resolveWhatsAppActor(fromPhone: string): Promise<{
   if (!phoneE164) return { actor: null, reason: '無法識別電話號碼' }
 
   const config = getWhatsAppConfig()
-  if (config?.allowedPhones && !config.allowedPhones.has(phoneE164)) {
+  if (config.allowedPhones && !config.allowedPhones.has(phoneE164)) {
     // 也允許尾碼比對（防止清單寫成較短形式）
     const allowed = [...config.allowedPhones].some((p) => phonesMatch(p, phoneE164))
     if (!allowed) {

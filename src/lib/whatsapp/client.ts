@@ -1,4 +1,10 @@
-import { getWhatsAppConfig, graphMessagesUrl, isWhatsAppOutboundReady } from './config'
+import {
+  getWhatsAppConfig,
+  graphMessagesUrl,
+  gatewaySendUrl,
+  isWhatsAppOutboundReady,
+  type WhatsAppConfig,
+} from './config'
 
 export type SendTextResult = {
   ok: boolean
@@ -6,22 +12,7 @@ export type SendTextResult = {
   error?: string
 }
 
-/**
- * 透過 WhatsApp Cloud API 發送純文字回覆。
- * to：收件人電話（E.164 純數字，不含 +）。
- */
-export async function sendWhatsAppText(to: string, body: string): Promise<SendTextResult> {
-  const config = getWhatsAppConfig()
-  if (!isWhatsAppOutboundReady(config) || !config) {
-    return { ok: false, error: 'WhatsApp outbound not configured' }
-  }
-
-  const toDigits = to.replace(/\D/g, '')
-  if (!toDigits) return { ok: false, error: 'Invalid recipient phone' }
-
-  // WhatsApp 單則文字建議 < 4096 字元
-  const text = body.length > 4000 ? `${body.slice(0, 3990)}…` : body
-
+async function sendViaCloud(config: WhatsAppConfig, toDigits: string, text: string): Promise<SendTextResult> {
   try {
     const res = await fetch(graphMessagesUrl(config), {
       method: 'POST',
@@ -54,4 +45,59 @@ export async function sendWhatsAppText(to: string, body: string): Promise<SendTe
   } catch (e: unknown) {
     return { ok: false, error: e instanceof Error ? e.message : 'Failed to send WhatsApp message' }
   }
+}
+
+async function sendViaGateway(config: WhatsAppConfig, toDigits: string, text: string): Promise<SendTextResult> {
+  try {
+    const res = await fetch(gatewaySendUrl(config), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.bridgeSecret}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ to: toDigits, body: text }),
+    })
+
+    const json = (await res.json().catch(() => ({}))) as {
+      ok?: boolean
+      messageId?: string
+      error?: string
+    }
+
+    if (!res.ok || !json.ok) {
+      return {
+        ok: false,
+        error: json?.error || `Gateway HTTP ${res.status}`,
+      }
+    }
+
+    return { ok: true, messageId: json.messageId }
+  } catch (e: unknown) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : 'Failed to send via WhatsApp gateway',
+    }
+  }
+}
+
+/**
+ * 發送純文字。依 WHATSAPP_PROVIDER / 自動偵測走 gateway（WS-BOT）或 Meta Cloud API。
+ * to：收件人電話（E.164 純數字，不含 +）。
+ */
+export async function sendWhatsAppText(to: string, body: string): Promise<SendTextResult> {
+  const config = getWhatsAppConfig()
+  if (!isWhatsAppOutboundReady(config)) {
+    return { ok: false, error: 'WhatsApp outbound not configured' }
+  }
+
+  const toDigits = to.replace(/\D/g, '')
+  if (!toDigits) return { ok: false, error: 'Invalid recipient phone' }
+
+  const text = body.length > 4000 ? `${body.slice(0, 3990)}…` : body
+
+  if (config.provider === 'gateway') {
+    return sendViaGateway(config, toDigits, text)
+  }
+
+  return sendViaCloud(config, toDigits, text)
 }
