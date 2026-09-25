@@ -298,6 +298,28 @@ model WhatsAppBinding {
   @@index([userId])
 }
 
+/// WhatsApp 進出訊息監測（管理後台）
+model WhatsAppMessageLog {
+  id        String   @id @default(uuid())
+  /// IN | OUT
+  direction String
+  /// command | command_reply | push | deny | error
+  kind      String   @default("command")
+  /// 對方電話 E.164 或群組 JID
+  peer      String
+  body      String
+  /// OK | DENIED | FAILED | IGNORED
+  status    String   @default("OK")
+  error     String?
+  messageId String?
+  meta      String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([direction, createdAt])
+  @@index([peer, createdAt])
+}
+
 model UserProfile {
   userId               String   @id
   legalNameEn          String

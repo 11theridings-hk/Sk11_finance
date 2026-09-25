@@ -341,3 +341,61 @@ export async function removeWhatsAppBinding(bindingId: string) {
   await prisma.whatsAppBinding.delete({ where: { id: bindingId } })
   return { success: true as const }
 }
+
+export type WhatsAppMessageLogDto = {
+  id: string
+  direction: string
+  kind: string
+  peer: string
+  body: string
+  status: string
+  error: string | null
+  messageId: string | null
+  createdAt: string
+}
+
+/**
+ * 管理員：進出訊息監測列表（新→舊）。
+ */
+export async function listWhatsAppMessageLogsAction(limit = 80): Promise<WhatsAppMessageLogDto[]> {
+  const session = await getSession()
+  if (!session?.isAdmin) return []
+  try {
+    const { listWhatsAppMessageLogs } = await import('@/lib/whatsapp/messageLog')
+    const rows = await listWhatsAppMessageLogs(limit)
+    return rows.map((r) => ({
+      id: r.id,
+      direction: r.direction,
+      kind: r.kind,
+      peer: r.peer,
+      body: r.body,
+      status: r.status,
+      error: r.error,
+      messageId: r.messageId,
+      createdAt: r.createdAt.toISOString(),
+    }))
+  } catch {
+    return []
+  }
+}
+
+export async function clearWhatsAppMessageLogsAction() {
+  const session = await getSession()
+  const locale = await getCurrentLocale()
+  const t = createTranslator(locale)
+  if (!session?.isAdmin) {
+    return { success: false as const, error: t('unauthorized') }
+  }
+  try {
+    const { clearWhatsAppMessageLogs } = await import('@/lib/whatsapp/messageLog')
+    const count = await clearWhatsAppMessageLogs()
+    revalidatePath('/admin')
+    return { success: true as const, count }
+  } catch (e: unknown) {
+    return {
+      success: false as const,
+      error: e instanceof Error ? e.message : t('whatsappMonitorClearFail'),
+    }
+  }
+}
+

@@ -62,6 +62,8 @@
 - **[2026-09-25] WhatsApp LLM 進出站＋報表 PDF 連結**:
   - 口語入站／提醒出站潤飾：複用 `OCR_API_KEY`，模型 `WHATSAPP_LLM_MODEL`（預設 `deepseek/deepseek-v4-pro-0813`；OCR 模型不變）。
   - `報表PDF` → 短時 `GET /api/exports/whatsapp/[token]`；群組只推播、互動 1v1；傳圖 OCR 暫緩。
+- **[2026-09-25] WhatsApp 進出訊息監測**:
+  - 管理後台 WhatsApp 分頁頂部顯示近期 IN/OUT 紀錄（`WhatsAppMessageLog`）；可重新整理／清空。
 
 ### 1.5 部署到 Railway 相關問題與修復
 *   **Next.js 靜態打包錯誤 (Prerender Error)**：Next.js 在 `npm run build` 時會嘗試預渲染頁面，導致存取資料庫失敗。
