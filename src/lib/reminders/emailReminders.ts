@@ -379,7 +379,7 @@ async function sendOneCandidate(candidate: ReminderCandidate): Promise<ReminderS
 
   const { subject, html, text } = buildEmailContent(candidate, pendingKinds)
   const emailConfigured = isReminderEmailConfigured() && recipients.length > 0
-  const waConfigured = isWhatsAppReminderConfigured()
+  const waConfigured = await isWhatsAppReminderConfigured()
   const channelCount = (emailConfigured ? 1 : 0) + (waConfigured ? 1 : 0)
   const toEmails = [
     emailConfigured ? recipients.join(',') : '',
@@ -516,7 +516,7 @@ export async function maybeSendReminderCatchUp(input: {
   eligible?: boolean
 }): Promise<ReminderSendDetail | null> {
   if (input.eligible === false) return null
-  if (!isReminderEmailConfigured() && !isWhatsAppReminderConfigured()) return null
+  if (!isReminderEmailConfigured() && !(await isWhatsAppReminderConfigured())) return null
 
   const flags = await loadPluginFlags()
   if (input.entityType === 'CONTRACT' && !flags.contracts) return null
@@ -550,11 +550,11 @@ export async function runReminderEmailJob(): Promise<ReminderJobResult> {
   const today = hongKongYmd()
   const details: ReminderSendDetail[] = []
 
-  if (!isReminderEmailConfigured() && !isWhatsAppReminderConfigured()) {
+  if (!isReminderEmailConfigured() && !(await isWhatsAppReminderConfigured())) {
     return {
       ok: true,
       skippedReason:
-        'No reminder channels: set RESEND_API_KEY+REMINDER_EMAILS and/or WhatsApp reminder env',
+        'No reminder channels: set RESEND_API_KEY+REMINDER_EMAILS and/or WhatsApp reminder env / admin groups',
       today,
       sent: 0,
       skipped: 0,

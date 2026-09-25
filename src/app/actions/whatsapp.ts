@@ -10,6 +10,13 @@ import {
   saveWhatsAppAllowedPhones,
   type AllowedPhonesSource,
 } from '@/lib/whatsapp/allowlist'
+import { fetchGatewayWhatsAppGroups } from '@/lib/whatsapp/gatewayGroups'
+import {
+  getWhatsAppReminderGroups,
+  normalizeGroupJid,
+  saveWhatsAppReminderGroups,
+  type WhatsAppGroupTarget,
+} from '@/lib/whatsapp/groups'
 import { normalizePhoneE164 } from '@/lib/whatsapp/phone'
 import { mirrorPhoneToUserProfile } from '@/lib/whatsapp/phoneSync'
 
@@ -18,6 +25,143 @@ export type WhatsAppAllowlistSnapshot = {
   source: AllowedPhonesSource
   /** 是否有強制白名單（source 非 none） */
   enforced: boolean
+}
+
+export type { WhatsAppGroupTarget }
+
+/**
+ * 管理員：讀取已儲存的提醒／廣播目標群組。
+ */
+export async function listWhatsAppReminderGroups(): Promise<WhatsAppGroupTarget[]> {
+  const session = await getSession()
+  if (!session?.isAdmin) return []
+  try {
+    return await getWhatsAppReminderGroups()
+  } catch {
+    return []
+  }
+}
+
+/**
+ * 管理員：從 WS-BOT 閘道載入群組清單（GET /api/groups）。
+ */
+export async function loadWhatsAppGroupsFromGateway() {
+  const session = await getSession()
+  const locale = await getCurrentLocale()
+  const t = createTranslator(locale)
+  if (!session?.isAdmin) {
+    return {
+      success: false as const,
+      error: t('unauthorized'),
+      groups: [] as { id: string; name: string }[],
+      gatewayConfigured: false,
+    }
+  }
+
+  const result = await fetchGatewayWhatsAppGroups()
+  if (!result.ok) {
+    return {
+      success: false as const,
+      error: result.error || t('whatsappGroupsFetchFail'),
+      groups: result.groups,
+      gatewayConfigured: result.gatewayConfigured,
+    }
+  }
+  return {
+    success: true as const,
+    groups: result.groups,
+    gatewayConfigured: result.gatewayConfigured,
+  }
+}
+
+/**
+ * 管理員：覆寫提醒目標群組清單。
+ */
+export async function updateWhatsAppReminderGroups(groups: WhatsAppGroupTarget[]) {
+  const session = await getSession()
+  const locale = await getCurrentLocale()
+  const t = createTranslator(locale)
+  if (!session?.isAdmin) {
+    return { success: false as const, error: t('unauthorized') }
+  }
+
+  try {
+    const saved = await saveWhatsAppReminderGroups(groups)
+    revalidatePath('/admin')
+    return { success: true as const, groups: saved }
+  } catch (error: unknown) {
+    return {
+      success: false as const,
+      error: error instanceof Error ? error.message : t('whatsappGroupsSaveFail'),
+    }
+  }
+}
+
+/**
+ * 管理員：加入一個提醒目標群組（jid + 可選名稱）。
+ */
+export async function addWhatsAppReminderGroup(jid: string, name?: string) {
+  const session = await getSession()
+  const locale = await getCurrentLocale()
+  const t = createTranslator(locale)
+  if (!session?.isAdmin) {
+    return { success: false as const, error: t('unauthorized') }
+  }
+
+  const normalized = normalizeGroupJid(jid)
+  if (!normalized) {
+    return { success: false as const, error: t('whatsappGroupsInvalidJid') }
+  }
+
+  try {
+    const current = await getWhatsAppReminderGroups()
+    if (current.some((g) => g.jid === normalized)) {
+      return { success: true as const, groups: current }
+    }
+    const label = (name || '').trim() || normalized
+    const saved = await saveWhatsAppReminderGroups([
+      ...current,
+      { jid: normalized, name: label },
+    ])
+    revalidatePath('/admin')
+    return { success: true as const, groups: saved }
+  } catch (error: unknown) {
+    return {
+      success: false as const,
+      error: error instanceof Error ? error.message : t('whatsappGroupsSaveFail'),
+    }
+  }
+}
+
+/**
+ * 管理員：移除提醒目標群組。
+ */
+export async function removeWhatsAppReminderGroup(jid: string) {
+  const session = await getSession()
+  const locale = await getCurrentLocale()
+  const t = createTranslator(locale)
+  if (!session?.isAdmin) {
+    return { success: false as const, error: t('unauthorized') }
+  }
+
+  const normalized = normalizeGroupJid(jid)
+  if (!normalized) {
+    return { success: false as const, error: t('whatsappGroupsInvalidJid') }
+  }
+
+  try {
+    const current = await getWhatsAppReminderGroups()
+    const saved = await saveWhatsAppReminderGroups(
+      current.filter((g) => g.jid !== normalized),
+    )
+    revalidatePath('/admin')
+    return { success: true as const, groups: saved }
+  } catch (error: unknown) {
+    return {
+      success: false as const,
+      error: error instanceof Error ? error.message : t('whatsappGroupsSaveFail'),
+    }
+  }
 }
 
 /**

@@ -45,7 +45,7 @@ Webhook 欄位請訂閱：`messages`。
 | `WHATSAPP_API_VERSION` | 可選 | 預設 `v21.0` |
 | `WHATSAPP_ALLOWED_PHONES` | 建議 | 白名單初始值（逗號分隔）。管理後台「WhatsApp」分頁可覆寫並寫入 `SystemSetting`；非白名單來電**不回覆** |
 | `WHATSAPP_USER_MAP` | 可選 | `電話:userId` 對照，如 `85291111111:uuid-...` |
-| `WHATSAPP_REMINDER_PHONES` | 可選 | 每日到期提醒要推到的號碼 |
+| `WHATSAPP_REMINDER_PHONES` | 可選 | 每日到期提醒要推到的私人號碼；可另在管理後台設目標群組 |
 
 部署後執行 migration：`WhatsAppBinding` 表。
 
@@ -55,6 +55,7 @@ Webhook 欄位請訂閱：`messages`。
    儲存時會正規化成 E.164，並**自動同步 `WhatsAppBinding`**。香港 8 位本地號會補 `852`。
 2. **管理後台 → WhatsApp 分頁**  
    - **允許回覆的電話（白名單）**：加入／移除號碼；非清單內號碼 bot **不回覆**（其他人問野唔答）。未於後台儲存前可沿用 `WHATSAPP_ALLOWED_PHONES`。  
+   - **提醒／廣播目標群組**：存 `…@g.us` JID；可從閘道載入或手動輸入。每日提醒會發到這些群組。  
    - **綁定**：手動綁定用戶；會反寫 `contactPhone`。
 3. **環境變數 `WHATSAPP_USER_MAP`**（可選）  
    `電話:userId` 對照。

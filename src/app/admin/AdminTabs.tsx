@@ -23,7 +23,12 @@ import {
   addWhatsAppAllowlistPhone,
   removeWhatsAppAllowlistPhone,
   updateWhatsAppAllowlist,
+  listWhatsAppReminderGroups,
+  loadWhatsAppGroupsFromGateway,
+  addWhatsAppReminderGroup,
+  removeWhatsAppReminderGroup,
   type WhatsAppAllowlistSnapshot,
+  type WhatsAppGroupTarget,
 } from "../actions/whatsapp";
 
 type WhatsAppBindingRow = {
@@ -42,10 +47,11 @@ type AdminTabsProps = {
   initialPluginFlags: PluginFlags
   initialWhatsAppBindings: WhatsAppBindingRow[]
   initialWhatsAppAllowlist: WhatsAppAllowlistSnapshot
+  initialWhatsAppGroups: WhatsAppGroupTarget[]
   locale: Locale
 }
 
-export default function AdminTabs({ initialCategories, initialAttachments, initialPools, initialUsers, initialAISettings, initialPluginFlags, initialWhatsAppBindings, initialWhatsAppAllowlist, locale }: AdminTabsProps) {
+export default function AdminTabs({ initialCategories, initialAttachments, initialPools, initialUsers, initialAISettings, initialPluginFlags, initialWhatsAppBindings, initialWhatsAppAllowlist, initialWhatsAppGroups, locale }: AdminTabsProps) {
   const t = createTranslator(locale as Locale);
   const [activeTab, setActiveTab] = useState("category");
   
@@ -100,6 +106,7 @@ export default function AdminTabs({ initialCategories, initialAttachments, initi
           <WhatsAppTab
             initialBindings={initialWhatsAppBindings}
             initialAllowlist={initialWhatsAppAllowlist}
+            initialGroups={initialWhatsAppGroups}
             users={initialUsers}
             locale={locale}
           />
@@ -1414,21 +1421,28 @@ function PluginsTab({ initialFlags, locale }: { initialFlags: PluginFlags; local
   );
 }
 
-// ---------------- WhatsApp 綁定＋白名單 ----------------
+// ---------------- WhatsApp 綁定＋白名單＋群組 ----------------
 function WhatsAppTab({
   initialBindings,
   initialAllowlist,
+  initialGroups,
   users,
   locale,
 }: {
   initialBindings: WhatsAppBindingRow[]
   initialAllowlist: WhatsAppAllowlistSnapshot
+  initialGroups: WhatsAppGroupTarget[]
   users: any[]
   locale: Locale
 }) {
   const t = createTranslator(locale);
   const [bindings, setBindings] = useState(initialBindings);
   const [allowlist, setAllowlist] = useState(initialAllowlist);
+  const [groups, setGroups] = useState(initialGroups);
+  const [gatewayGroups, setGatewayGroups] = useState<{ id: string; name: string }[]>([]);
+  const [pickedGatewayId, setPickedGatewayId] = useState('');
+  const [manualJid, setManualJid] = useState('');
+  const [manualName, setManualName] = useState('');
   const [allowPhone, setAllowPhone] = useState('');
   const [userId, setUserId] = useState(users[0]?.id || '');
   const [phone, setPhone] = useState('');
@@ -1436,12 +1450,14 @@ function WhatsAppTab({
   const [message, setMessage] = useState('');
 
   const refresh = async () => {
-    const [rows, list] = await Promise.all([
+    const [rows, list, savedGroups] = await Promise.all([
       listWhatsAppBindings(),
       getWhatsAppAllowlist(),
+      listWhatsAppReminderGroups(),
     ]);
     setBindings(rows as WhatsAppBindingRow[]);
     setAllowlist(list);
+    setGroups(savedGroups);
   };
 
   const sourceLabel =
@@ -1490,6 +1506,78 @@ function WhatsAppTab({
       await refresh();
     } else {
       setMessage(res.error || t('whatsappAllowlistFail'));
+    }
+  };
+
+  const handleFetchGatewayGroups = async () => {
+    setLoading(true);
+    setMessage('');
+    const res = await loadWhatsAppGroupsFromGateway();
+    setLoading(false);
+    if (res.success) {
+      setGatewayGroups(res.groups);
+      setPickedGatewayId(res.groups[0]?.id || '');
+      setMessage(
+        res.groups.length > 0
+          ? t('whatsappGroupsFetchOk')
+          : t('whatsappGroupsEmpty'),
+      );
+    } else {
+      setGatewayGroups([]);
+      setPickedGatewayId('');
+      setMessage(
+        !res.gatewayConfigured
+          ? t('whatsappGroupsGatewayOff')
+          : res.error || t('whatsappGroupsFetchFail'),
+      );
+    }
+  };
+
+  const handleAddFromGateway = async () => {
+    if (!pickedGatewayId) return;
+    const meta = gatewayGroups.find((g) => g.id === pickedGatewayId);
+    setLoading(true);
+    setMessage('');
+    const res = await addWhatsAppReminderGroup(
+      pickedGatewayId,
+      meta?.name || '',
+    );
+    setLoading(false);
+    if (res.success) {
+      setMessage(t('whatsappGroupsSaved'));
+      await refresh();
+    } else {
+      setMessage(res.error || t('whatsappGroupsSaveFail'));
+    }
+  };
+
+  const handleAddManualGroup = async () => {
+    if (!manualJid.trim()) return;
+    setLoading(true);
+    setMessage('');
+    const res = await addWhatsAppReminderGroup(manualJid.trim(), manualName.trim());
+    setLoading(false);
+    if (res.success) {
+      setManualJid('');
+      setManualName('');
+      setMessage(t('whatsappGroupsSaved'));
+      await refresh();
+    } else {
+      setMessage(res.error || t('whatsappGroupsSaveFail'));
+    }
+  };
+
+  const handleRemoveGroup = async (jid: string) => {
+    if (!confirm(t('whatsappGroupsConfirmRemove'))) return;
+    setLoading(true);
+    setMessage('');
+    const res = await removeWhatsAppReminderGroup(jid);
+    setLoading(false);
+    if (res.success) {
+      setMessage(t('whatsappGroupsSaved'));
+      await refresh();
+    } else {
+      setMessage(res.error || t('whatsappGroupsSaveFail'));
     }
   };
 
@@ -1582,6 +1670,107 @@ function WhatsAppTab({
 
       <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-5">
         <div>
+          <h2 className="text-lg font-semibold text-gray-800">{t('whatsappGroups')}</h2>
+          <p className="mt-2 text-sm text-gray-500">{t('whatsappGroupsHint')}</p>
+        </div>
+
+        <div className="space-y-3 rounded-2xl bg-[#F2F2F7] p-4">
+          <button
+            onClick={handleFetchGatewayGroups}
+            disabled={loading}
+            className="rounded-xl bg-[#007AFF] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {loading ? t('whatsappGroupsFetching') : t('whatsappGroupsFetch')}
+          </button>
+
+          {gatewayGroups.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-gray-600">{t('whatsappGroupsGatewayList')}</p>
+              <label className="block text-sm font-medium text-gray-700">
+                {t('whatsappGroupsSelect')}
+                <select
+                  value={pickedGatewayId}
+                  onChange={(e) => setPickedGatewayId(e.target.value)}
+                  className="mt-1 w-full rounded-xl border-0 bg-white px-3 py-2 text-sm"
+                >
+                  {gatewayGroups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}（{g.id}）
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                onClick={handleAddFromGateway}
+                disabled={loading || !pickedGatewayId}
+                className="rounded-xl bg-[#25D366] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {t('whatsappGroupsPick')}
+              </button>
+            </div>
+          ) : null}
+
+          <div className="border-t border-gray-200 pt-3 space-y-2">
+            <p className="text-xs font-medium text-gray-600">{t('whatsappGroupsManual')}</p>
+            <label className="block text-sm font-medium text-gray-700">
+              JID
+              <input
+                value={manualJid}
+                onChange={(e) => setManualJid(e.target.value)}
+                placeholder={t('whatsappGroupsJidPlaceholder')}
+                className="mt-1 w-full rounded-xl border-0 bg-white px-3 py-2 text-sm font-mono"
+              />
+            </label>
+            <label className="block text-sm font-medium text-gray-700">
+              {t('whatsappGroupsNamePlaceholder')}
+              <input
+                value={manualName}
+                onChange={(e) => setManualName(e.target.value)}
+                placeholder={t('whatsappGroupsNamePlaceholder')}
+                className="mt-1 w-full rounded-xl border-0 bg-white px-3 py-2 text-sm"
+              />
+            </label>
+            <button
+              onClick={handleAddManualGroup}
+              disabled={loading || !manualJid.trim()}
+              className="rounded-xl bg-[#25D366] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {t('whatsappGroupsAdd')}
+            </button>
+          </div>
+        </div>
+
+        <div>
+          {groups.length === 0 ? (
+            <p className="text-sm text-gray-500">{t('whatsappGroupsEmpty')}</p>
+          ) : (
+            <ul className="space-y-2">
+              {groups.map((g) => (
+                <li
+                  key={g.jid}
+                  className="flex items-center justify-between gap-3 rounded-2xl border border-gray-100 px-4 py-3 text-sm"
+                >
+                  <div>
+                    <div className="font-semibold text-gray-900">{g.name}</div>
+                    <div className="text-xs text-gray-500 font-mono break-all">{g.jid}</div>
+                  </div>
+                  <button
+                    onClick={() => handleRemoveGroup(g.jid)}
+                    disabled={loading}
+                    className="text-[#FF3B30] font-semibold disabled:opacity-50 shrink-0"
+                  >
+                    {t('whatsappGroupsRemove')}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        {message ? <p className="text-sm text-gray-600">{message}</p> : null}
+      </div>
+
+      <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-5">
+        <div>
           <h2 className="text-lg font-semibold text-gray-800">{t('whatsapp')}</h2>
           <p className="mt-2 text-sm text-gray-500">{t('whatsappHint')}</p>
         </div>
@@ -1617,7 +1806,6 @@ function WhatsAppTab({
           >
             {t('whatsappBind')}
           </button>
-          {message ? <p className="text-sm text-gray-600">{message}</p> : null}
         </div>
 
         <div>
