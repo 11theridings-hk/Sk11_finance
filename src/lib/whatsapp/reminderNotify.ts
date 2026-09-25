@@ -1,6 +1,7 @@
 import { sendWhatsAppText } from './client'
 import { getWhatsAppConfig, isWhatsAppOutboundReady } from './config'
 import { getWhatsAppReminderGroups } from './groups'
+import { polishWhatsAppOutboundText } from './llmOutbound'
 import { normalizePhoneE164 } from './phone'
 
 /**
@@ -41,7 +42,9 @@ export async function sendWhatsAppReminder(input: {
     return { ok: false, sent: 0, failed: 0, errors: ['WhatsApp reminders not configured'] }
   }
 
-  const text = `🔔 ${input.subject}\n\n${input.body}`
+  const raw = `🔔 ${input.subject}\n\n${input.body}`
+  // 出站潤飾；群組只收推播（不處理群組入站互動）
+  const text = await polishWhatsAppOutboundText(raw)
   let sent = 0
   let failed = 0
   const errors: string[] = []
