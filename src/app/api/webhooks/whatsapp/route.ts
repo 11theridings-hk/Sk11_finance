@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server'
-import { getWhatsAppConfig, isWhatsAppOutboundReady } from '@/lib/whatsapp/config'
+import {
+  getWhatsAppConfig,
+  isWhatsAppCloudVerifyReady,
+  isWhatsAppOutboundReady,
+} from '@/lib/whatsapp/config'
 import { verifyWhatsAppSignature } from '@/lib/whatsapp/signature'
 import { sendWhatsAppText } from '@/lib/whatsapp/client'
-import { resolveWhatsAppActor } from '@/lib/whatsapp/identity'
-import { handleWhatsAppCommand } from '@/lib/whatsapp/commands'
+import { processWhatsAppInboundText } from '@/lib/whatsapp/processInbound'
 import {
   extractInboundTextMessages,
   type WhatsAppWebhookPayload,
@@ -16,6 +19,8 @@ export const runtime = 'nodejs'
  * Meta Webhook 驗證（GET）。
  * Callback URL：https://<你的網域>/api/webhooks/whatsapp
  * Verify Token：與環境變數 WHATSAPP_VERIFY_TOKEN 相同
+ *
+ * 現階段主渠道可為 WS-BOT 閘道；此端點保留供 Meta 審批通過後使用。
  */
 export async function GET(request: Request) {
   const config = getWhatsAppConfig()
@@ -24,7 +29,7 @@ export async function GET(request: Request) {
   const token = url.searchParams.get('hub.verify_token')
   const challenge = url.searchParams.get('hub.challenge')
 
-  if (!config?.verifyToken) {
+  if (!isWhatsAppCloudVerifyReady(config)) {
     return NextResponse.json(
       { error: 'WHATSAPP_VERIFY_TOKEN not configured' },
       { status: 503 },
@@ -42,7 +47,7 @@ export async function GET(request: Request) {
 }
 
 /**
- * 接收 WhatsApp 訊息與狀態回呼（POST）。
+ * 接收 WhatsApp 訊息與狀態回呼（POST）— Meta Cloud API。
  * 必須快速回 200；業務處理同步完成（指令為短操作）。若日後變慢可改 queue。
  */
 export async function POST(request: Request) {
@@ -51,7 +56,7 @@ export async function POST(request: Request) {
 
   // 簽名驗證（有設定 APP_SECRET 時強制）
   const signature = request.headers.get('x-hub-signature-256')
-  if (!verifyWhatsAppSignature(rawBody, signature, config?.appSecret || '')) {
+  if (!verifyWhatsAppSignature(rawBody, signature, config.appSecret || '')) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
@@ -80,13 +85,7 @@ export async function POST(request: Request) {
 
   for (const msg of inbound) {
     try {
-      const { actor, reason } = await resolveWhatsAppActor(msg.from)
-      let reply: string
-      if (!actor) {
-        reply = `⛔ ${reason || '未授權'}`
-      } else {
-        reply = await handleWhatsAppCommand(actor, msg.text)
-      }
+      const reply = await processWhatsAppInboundText(msg.from, msg.text)
       const sent = await sendWhatsAppText(msg.from, reply)
       if (!sent.ok) {
         console.error('[whatsapp] send failed', sent.error, msg.messageId)
