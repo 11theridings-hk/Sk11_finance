@@ -26,6 +26,8 @@ function getDaysDiff(dateValue: Date) {
 }
 
 function getReminderBucket(daysDiff: number, reminderDays: number): ReminderBucket | null {
+  // 0 = reminders disabled for this item
+  if (reminderDays <= 0) return null
   if (daysDiff < 0) return 'overdue'
   if (daysDiff === 0) return 'today'
   if (daysDiff <= reminderDays) return 'upcoming'

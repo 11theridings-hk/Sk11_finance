@@ -503,7 +503,7 @@ export async function getRecurringReminderItems() {
         if (daysDiff < 0) bucket = 'overdue'
         else if (daysDiff === 0) bucket = 'today'
         else if (daysDiff <= template.reminderDays) bucket = 'upcoming'
-        if (!bucket) return null
+        if (!bucket || template.reminderDays <= 0) return null
         return {
           id: template.id,
           title: template.title,

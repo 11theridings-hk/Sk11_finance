@@ -84,9 +84,11 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
       .map((contract) => {
         const daysUntilExpiry = getDaysDiff(contract.expiryDate)
         let bucket: 'overdue' | 'today' | 'upcoming' | null = null
-        if (daysUntilExpiry < 0) bucket = 'overdue'
-        else if (daysUntilExpiry === 0) bucket = 'today'
-        else if (daysUntilExpiry <= contract.reminderDays) bucket = 'upcoming'
+        if (contract.reminderDays > 0) {
+          if (daysUntilExpiry < 0) bucket = 'overdue'
+          else if (daysUntilExpiry === 0) bucket = 'today'
+          else if (daysUntilExpiry <= contract.reminderDays) bucket = 'upcoming'
+        }
 
         return bucket ? { ...contract, daysUntilExpiry, bucket } : null
       })

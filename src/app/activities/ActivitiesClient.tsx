@@ -138,9 +138,11 @@ export default function ActivitiesClient({
         const daysUntilEvent = Math.ceil((eventDay.getTime() - startOfToday.getTime()) / 86400000)
 
         let bucket: 'overdue' | 'today' | 'upcoming' | null = null
-        if (daysUntilEvent < 0) bucket = 'overdue'
-        else if (daysUntilEvent === 0) bucket = 'today'
-        else if (daysUntilEvent <= activity.reminderDays) bucket = 'upcoming'
+        if (activity.reminderDays > 0) {
+          if (daysUntilEvent < 0) bucket = 'overdue'
+          else if (daysUntilEvent === 0) bucket = 'today'
+          else if (daysUntilEvent <= activity.reminderDays) bucket = 'upcoming'
+        }
 
         return {
           ...activity,
@@ -414,6 +416,7 @@ export default function ActivitiesClient({
             <div>
               <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('reminderDays')}</label>
               <input type="number" min="0" value={reminderDays} onChange={(e) => setReminderDays(e.target.value)} className={inputClass} />
+              <p className="mt-1 text-xs text-gray-400">{t('reminderDaysZeroHint')}</p>
             </div>
             <div>
               <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('activityVisibility')}</label>

@@ -217,9 +217,16 @@ export default function ActivityDetailModal({
             <div>
               <div className="mb-1 text-gray-500">{t('reminderDays')}</div>
               {canManage ? (
-                <input type="number" min="0" value={reminderDays} onChange={(e) => setReminderDays(e.target.value)} className={inputClass} />
+                <>
+                  <input type="number" min="0" value={reminderDays} onChange={(e) => setReminderDays(e.target.value)} className={inputClass} />
+                  <p className="mt-1 text-xs text-gray-400">{t('reminderDaysZeroHint')}</p>
+                </>
               ) : (
-                <div className={readOnlyFieldClass}>{activity.reminderDays}</div>
+                <div className={readOnlyFieldClass}>
+                  {activity.reminderDays <= 0
+                    ? t('reminderDaysZeroHint')
+                    : activity.reminderDays}
+                </div>
               )}
             </div>
             <div>

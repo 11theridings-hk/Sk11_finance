@@ -97,6 +97,9 @@ export function daysDiffHongKong(targetDate: Date, todayYmd = hongKongYmd()): nu
  *   (daysDiff <= reminderDays), so a short window (e.g. 7) won't spam d30/d15.
  */
 export function matchReminderKinds(daysDiff: number, reminderDays: number): ReminderKind[] {
+  // 0 = reminders disabled — never fire due/overdue/advance either
+  if (reminderDays <= 0) return []
+
   const kinds: ReminderKind[] = []
   const window = Math.max(0, reminderDays)
 
