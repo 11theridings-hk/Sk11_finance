@@ -5,6 +5,7 @@ import {
   isWhatsAppOutboundReady,
   type WhatsAppConfig,
 } from './config'
+import { logWhatsAppMessage } from './messageLog'
 
 export type SendTextResult = {
   ok: boolean
@@ -108,24 +109,57 @@ function resolveOutboundRecipient(to: string): { kind: 'phone' | 'group'; value:
 export async function sendWhatsAppText(to: string, body: string): Promise<SendTextResult> {
   const config = getWhatsAppConfig()
   if (!isWhatsAppOutboundReady(config)) {
-    return { ok: false, error: 'WhatsApp outbound not configured' }
+    const result = { ok: false as const, error: 'WhatsApp outbound not configured' }
+    await logWhatsAppMessage({
+      direction: 'OUT',
+      kind: 'push',
+      peer: String(to || ''),
+      body,
+      status: 'FAILED',
+      error: result.error,
+    })
+    return result
   }
 
   const recipient = resolveOutboundRecipient(to)
-  if (!recipient) return { ok: false, error: 'Invalid recipient' }
+  if (!recipient) {
+    const result = { ok: false as const, error: 'Invalid recipient' }
+    await logWhatsAppMessage({
+      direction: 'OUT',
+      kind: 'push',
+      peer: String(to || ''),
+      body,
+      status: 'FAILED',
+      error: result.error,
+    })
+    return result
+  }
 
   const text = body.length > 4000 ? `${body.slice(0, 3990)}…` : body
+  const peer = recipient.value
 
+  let result: SendTextResult
   if (recipient.kind === 'group') {
     if (config.provider !== 'gateway') {
-      return { ok: false, error: 'Group send requires WHATSAPP_PROVIDER=gateway' }
+      result = { ok: false, error: 'Group send requires WHATSAPP_PROVIDER=gateway' }
+    } else {
+      result = await sendViaGateway(config, recipient.value, text)
     }
-    return sendViaGateway(config, recipient.value, text)
+  } else if (config.provider === 'gateway') {
+    result = await sendViaGateway(config, recipient.value, text)
+  } else {
+    result = await sendViaCloud(config, recipient.value, text)
   }
 
-  if (config.provider === 'gateway') {
-    return sendViaGateway(config, recipient.value, text)
-  }
-
-  return sendViaCloud(config, recipient.value, text)
+  await logWhatsAppMessage({
+    direction: 'OUT',
+    kind: 'push',
+    peer,
+    body: text,
+    status: result.ok ? 'OK' : 'FAILED',
+    error: result.error || null,
+    messageId: result.messageId || null,
+    meta: { provider: config.provider, recipientKind: recipient.kind },
+  })
+  return result
 }

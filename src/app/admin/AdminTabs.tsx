@@ -27,8 +27,11 @@ import {
   loadWhatsAppGroupsFromGateway,
   addWhatsAppReminderGroup,
   removeWhatsAppReminderGroup,
+  listWhatsAppMessageLogsAction,
+  clearWhatsAppMessageLogsAction,
   type WhatsAppAllowlistSnapshot,
   type WhatsAppGroupTarget,
+  type WhatsAppMessageLogDto,
 } from "../actions/whatsapp";
 
 type WhatsAppBindingRow = {
@@ -48,10 +51,11 @@ type AdminTabsProps = {
   initialWhatsAppBindings: WhatsAppBindingRow[]
   initialWhatsAppAllowlist: WhatsAppAllowlistSnapshot
   initialWhatsAppGroups: WhatsAppGroupTarget[]
+  initialWhatsAppLogs: WhatsAppMessageLogDto[]
   locale: Locale
 }
 
-export default function AdminTabs({ initialCategories, initialAttachments, initialPools, initialUsers, initialAISettings, initialPluginFlags, initialWhatsAppBindings, initialWhatsAppAllowlist, initialWhatsAppGroups, locale }: AdminTabsProps) {
+export default function AdminTabs({ initialCategories, initialAttachments, initialPools, initialUsers, initialAISettings, initialPluginFlags, initialWhatsAppBindings, initialWhatsAppAllowlist, initialWhatsAppGroups, initialWhatsAppLogs, locale }: AdminTabsProps) {
   const t = createTranslator(locale as Locale);
   const [activeTab, setActiveTab] = useState("category");
   
@@ -107,6 +111,7 @@ export default function AdminTabs({ initialCategories, initialAttachments, initi
             initialBindings={initialWhatsAppBindings}
             initialAllowlist={initialWhatsAppAllowlist}
             initialGroups={initialWhatsAppGroups}
+            initialLogs={initialWhatsAppLogs}
             users={initialUsers}
             locale={locale}
           />
@@ -1426,12 +1431,14 @@ function WhatsAppTab({
   initialBindings,
   initialAllowlist,
   initialGroups,
+  initialLogs,
   users,
   locale,
 }: {
   initialBindings: WhatsAppBindingRow[]
   initialAllowlist: WhatsAppAllowlistSnapshot
   initialGroups: WhatsAppGroupTarget[]
+  initialLogs: WhatsAppMessageLogDto[]
   users: any[]
   locale: Locale
 }) {
@@ -1439,6 +1446,7 @@ function WhatsAppTab({
   const [bindings, setBindings] = useState(initialBindings);
   const [allowlist, setAllowlist] = useState(initialAllowlist);
   const [groups, setGroups] = useState(initialGroups);
+  const [logs, setLogs] = useState(initialLogs);
   const [gatewayGroups, setGatewayGroups] = useState<{ id: string; name: string }[]>([]);
   const [pickedGatewayId, setPickedGatewayId] = useState('');
   const [manualJid, setManualJid] = useState('');
@@ -1450,14 +1458,38 @@ function WhatsAppTab({
   const [message, setMessage] = useState('');
 
   const refresh = async () => {
-    const [rows, list, savedGroups] = await Promise.all([
+    const [rows, list, savedGroups, messageLogs] = await Promise.all([
       listWhatsAppBindings(),
       getWhatsAppAllowlist(),
       listWhatsAppReminderGroups(),
+      listWhatsAppMessageLogsAction(100),
     ]);
     setBindings(rows as WhatsAppBindingRow[]);
     setAllowlist(list);
     setGroups(savedGroups);
+    setLogs(messageLogs);
+  };
+
+  const refreshLogs = async () => {
+    setLoading(true);
+    setMessage('');
+    const messageLogs = await listWhatsAppMessageLogsAction(100);
+    setLogs(messageLogs);
+    setLoading(false);
+  };
+
+  const handleClearLogs = async () => {
+    if (!confirm(t('whatsappMonitorClearConfirm'))) return;
+    setLoading(true);
+    setMessage('');
+    const res = await clearWhatsAppMessageLogsAction();
+    setLoading(false);
+    if (res.success) {
+      setLogs([]);
+      setMessage(t('whatsappMonitorClear'));
+    } else {
+      setMessage(res.error || t('whatsappMonitorClearFail'));
+    }
   };
 
   const sourceLabel =
@@ -1606,6 +1638,91 @@ function WhatsAppTab({
 
   return (
     <div className="space-y-5">
+      <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-800">{t('whatsappMonitor')}</h2>
+            <p className="mt-2 text-sm text-gray-500">{t('whatsappMonitorHint')}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={refreshLogs}
+              disabled={loading}
+              className="rounded-xl bg-[#007AFF] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {t('whatsappMonitorRefresh')}
+            </button>
+            <button
+              onClick={handleClearLogs}
+              disabled={loading || logs.length === 0}
+              className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-[#FF3B30] border border-gray-200 disabled:opacity-50"
+            >
+              {t('whatsappMonitorClear')}
+            </button>
+          </div>
+        </div>
+
+        {logs.length === 0 ? (
+          <p className="text-sm text-gray-500">{t('whatsappMonitorEmpty')}</p>
+        ) : (
+          <div className="overflow-x-auto rounded-2xl border border-gray-100">
+            <table className="min-w-full text-left text-sm">
+              <thead className="bg-[#F2F2F7] text-xs text-gray-500">
+                <tr>
+                  <th className="px-3 py-2 font-semibold">{t('whatsappMonitorColTime')}</th>
+                  <th className="px-3 py-2 font-semibold">{t('whatsappMonitorColDir')}</th>
+                  <th className="px-3 py-2 font-semibold">{t('whatsappMonitorColPeer')}</th>
+                  <th className="px-3 py-2 font-semibold">{t('whatsappMonitorColStatus')}</th>
+                  <th className="px-3 py-2 font-semibold">{t('whatsappMonitorColBody')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {logs.map((row) => {
+                  const isIn = row.direction === 'IN'
+                  const statusColor =
+                    row.status === 'OK'
+                      ? 'text-[#34C759]'
+                      : row.status === 'FAILED' || row.status === 'DENIED'
+                        ? 'text-[#FF3B30]'
+                        : 'text-gray-500'
+                  return (
+                    <tr key={row.id} className="border-t border-gray-100 align-top">
+                      <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500">
+                        {new Date(row.createdAt).toLocaleString(locale === 'en' ? 'en-HK' : 'zh-HK')}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <span
+                          className={`inline-flex rounded-lg px-2 py-0.5 text-xs font-semibold ${
+                            isIn ? 'bg-[#007AFF]/10 text-[#007AFF]' : 'bg-[#25D366]/15 text-[#128C7E]'
+                          }`}
+                        >
+                          {isIn ? t('whatsappMonitorIn') : t('whatsappMonitorOut')}
+                          {row.kind && row.kind !== 'command' ? ` · ${row.kind}` : ''}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 font-mono text-xs text-gray-700 break-all max-w-[9rem]">
+                        {row.peer}
+                      </td>
+                      <td className={`px-3 py-2 text-xs font-semibold ${statusColor}`}>
+                        {row.status}
+                        {row.error ? (
+                          <div className="mt-1 font-normal text-[11px] text-[#FF3B30] break-all">
+                            {row.error}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-gray-800 whitespace-pre-wrap break-words max-w-md">
+                        {row.body.length > 400 ? `${row.body.slice(0, 400)}…` : row.body}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-5">
         <div>
           <h2 className="text-lg font-semibold text-gray-800">{t('whatsappAllowlist')}</h2>
