@@ -268,7 +268,10 @@
 | 函数 | 作用 | 说明 |
 | --- | --- | --- |
 | `getPendingReviewCount()` | 查询待审数量 | 顶部导航红点来源 |
-| `getReviewRecords(status)` | 查询审核列表 | `PENDING` / `APPROVED` / `REJECTED` |
+| `getReviewRecords(status)` | 查询审核列表 | `PENDING` / `APPROVED` / `REJECTED` / `PENDING_PAYMENT` |
+| `reviewRecord(id, action, edits?)` | 审核通过/驳回 | 通过后进入 `PENDING_PAYMENT`，不入账 |
+| `getPendingPaymentRecords()` | 查询待付款列表 | 管理员 |
+| `completePayment(id, options)` | 完成待付款 | 上传支付附件或人工通过 → `APPROVED` 并入账 |
 | `reviewRecord(id, action)` | 审核核心入口 | 处理通过、驳回、余额回滚、替换原记录 |
 | `requestModifyRecord(originalId, data)` | 提交修改申请 | 创建待审副本并锁定原记录 |
 
