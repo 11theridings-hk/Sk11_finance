@@ -484,6 +484,7 @@ model RecurringInstance {
   dueDate      DateTime
   status       String   @default("OPEN") // OPEN | CONVERTED | SKIPPED
   amount       Float?
+  content      String? // 內容摘要（OCR 關鍵詞）— 轉入公帳時一併帶入
   note         String?
   processedAt  DateTime?
   createdAt    DateTime @default(now())

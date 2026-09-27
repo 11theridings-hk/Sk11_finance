@@ -29,10 +29,19 @@ async function assertRecurringAccess() {
   return { session, t, locale }
 }
 
+function getDeepestCategoryId(data: {
+  categoryId: string
+  subCategoryId?: string | null
+  thirdCategoryId?: string | null
+}) {
+  return data.thirdCategoryId || data.subCategoryId || data.categoryId
+}
+
 async function ensureOpenInstance(template: {
   id: string
   nextDueDate: Date
   amount: number
+  content: string | null
   note: string | null
   userId: string
   reminderDays: number
@@ -54,10 +63,37 @@ async function ensureOpenInstance(template: {
       userId: template.userId,
       dueDate,
       amount: template.amount,
+      content: template.content,
       note: template.note,
       status: 'OPEN',
     },
   })
+}
+
+async function attachToInstance(opts: {
+  instanceId: string
+  uploaderId: string
+  categoryId: string
+  subCategoryId?: string | null
+  thirdCategoryId?: string | null
+  attachments: AttachmentPayload[]
+  replace?: boolean
+}) {
+  if (opts.replace) {
+    await prisma.attachment.deleteMany({ where: { recurringInstanceId: opts.instanceId } })
+  }
+  for (const item of opts.attachments) {
+    await prisma.attachment.create({
+      data: {
+        fileUrl: item.url,
+        size: item.size,
+        note: item.note,
+        uploaderId: opts.uploaderId,
+        categoryId: getDeepestCategoryId(opts),
+        recurringInstanceId: opts.instanceId,
+      },
+    })
+  }
 }
 
 export async function listRecurringTemplates() {
@@ -111,6 +147,7 @@ export async function listRecurringTemplates() {
 export async function createRecurringTemplate(input: {
   type: 'INCOME' | 'EXPENSE'
   title: string
+  content?: string
   note?: string
   amount: number
   intervalMonths: number
@@ -121,6 +158,7 @@ export async function createRecurringTemplate(input: {
   thirdCategoryId?: string
   poolId?: string
   sourceContractId?: string
+  attachments?: AttachmentPayload[]
 }) {
   try {
     const { session, t } = await assertRecurringAccess()
@@ -133,12 +171,15 @@ export async function createRecurringTemplate(input: {
 
     const signedAmount =
       input.type === 'EXPENSE' ? -Math.abs(input.amount) : Math.abs(input.amount)
+    const content = input.content?.trim() || null
+    const note = input.note?.trim() || null
 
     const template = await prisma.recurringTemplate.create({
       data: {
         type: input.type,
         title: input.title.trim(),
-        note: input.note?.trim() || null,
+        content,
+        note,
         amount: signedAmount,
         intervalMonths,
         dayOfMonth: preferredDayOfMonth(nextDue),
@@ -153,14 +194,27 @@ export async function createRecurringTemplate(input: {
       },
     })
 
-    await ensureOpenInstance({
+    const open = await ensureOpenInstance({
       id: template.id,
       nextDueDate: template.nextDueDate,
       amount: template.amount,
+      content: template.content,
       note: template.note,
       userId: template.userId,
       reminderDays: template.reminderDays,
     })
+
+    if (input.attachments && input.attachments.length > 0) {
+      await attachToInstance({
+        instanceId: open.id,
+        uploaderId: session.userId,
+        categoryId: template.categoryId,
+        subCategoryId: template.subCategoryId,
+        thirdCategoryId: template.thirdCategoryId,
+        attachments: input.attachments,
+        replace: true,
+      })
+    }
 
     revalidatePath('/recurring')
     revalidatePath('/')
@@ -186,6 +240,7 @@ export async function updateRecurringTemplate(input: {
   templateId: string
   type: 'INCOME' | 'EXPENSE'
   title: string
+  content?: string
   note?: string
   amount: number
   intervalMonths: number
@@ -195,9 +250,11 @@ export async function updateRecurringTemplate(input: {
   subCategoryId?: string
   thirdCategoryId?: string
   poolId?: string
+  /** When provided (including empty), replaces open-instance attachments. */
+  attachments?: AttachmentPayload[]
 }) {
   try {
-    const { t } = await assertRecurringAccess()
+    const { session, t } = await assertRecurringAccess()
     if (!input.templateId) throw new Error(t('fillRequiredFields'))
     if (!input.title.trim()) throw new Error(t('fillRequiredFields'))
     if (!input.categoryId || !input.poolId) throw new Error(t('fillRequiredFields'))
@@ -217,13 +274,16 @@ export async function updateRecurringTemplate(input: {
 
     const signedAmount =
       input.type === 'EXPENSE' ? -Math.abs(input.amount) : Math.abs(input.amount)
+    const content = input.content?.trim() || null
+    const note = input.note?.trim() || null
 
     const template = await prisma.recurringTemplate.update({
       where: { id: input.templateId },
       data: {
         type: input.type,
         title: input.title.trim(),
-        note: input.note?.trim() || null,
+        content,
+        note,
         amount: signedAmount,
         intervalMonths,
         dayOfMonth: preferredDayOfMonth(nextDue),
@@ -239,6 +299,7 @@ export async function updateRecurringTemplate(input: {
     const open = existing.instances[0]
     const oldDueKey = normalizeDueDate(existing.nextDueDate).getTime()
     const newDueKey = nextDue.getTime()
+    let openInstanceId = open?.id
 
     if (open) {
       if (oldDueKey !== newDueKey) {
@@ -264,9 +325,11 @@ export async function updateRecurringTemplate(input: {
               where: { id: clash.id },
               data: {
                 amount: signedAmount,
-                note: template.note,
+                content,
+                note,
               },
             })
+            openInstanceId = clash.id
           }
         } else {
           await prisma.recurringInstance.update({
@@ -274,7 +337,8 @@ export async function updateRecurringTemplate(input: {
             data: {
               dueDate: nextDue,
               amount: signedAmount,
-              note: template.note,
+              content,
+              note,
             },
           })
         }
@@ -283,18 +347,33 @@ export async function updateRecurringTemplate(input: {
           where: { id: open.id },
           data: {
             amount: signedAmount,
-            note: template.note,
+            content,
+            note,
           },
         })
       }
     } else {
-      await ensureOpenInstance({
+      const created = await ensureOpenInstance({
         id: template.id,
         nextDueDate: template.nextDueDate,
         amount: template.amount,
+        content: template.content,
         note: template.note,
         userId: template.userId,
         reminderDays: template.reminderDays,
+      })
+      openInstanceId = created.id
+    }
+
+    if (input.attachments !== undefined && openInstanceId) {
+      await attachToInstance({
+        instanceId: openInstanceId,
+        uploaderId: session.userId,
+        categoryId: template.categoryId,
+        subCategoryId: template.subCategoryId,
+        thirdCategoryId: template.thirdCategoryId,
+        attachments: input.attachments,
+        replace: true,
       })
     }
 
@@ -309,8 +388,12 @@ export async function updateRecurringTemplate(input: {
 export async function updateOpenInstance(input: {
   instanceId: string
   amount: number
+  content?: string
   note?: string
   attachment?: AttachmentPayload
+  attachments?: AttachmentPayload[]
+  /** When true with attachments[], replace existing files instead of appending. */
+  replaceAttachments?: boolean
 }) {
   try {
     const { session, t } = await assertRecurringAccess()
@@ -329,20 +412,28 @@ export async function updateOpenInstance(input: {
       where: { id: instance.id },
       data: {
         amount: signedAmount,
-        note: input.note?.trim() || null,
+        content:
+          input.content !== undefined ? input.content.trim() || null : undefined,
+        note: input.note !== undefined ? input.note.trim() || null : undefined,
       },
     })
 
-    if (input.attachment) {
-      await prisma.attachment.create({
-        data: {
-          fileUrl: input.attachment.url,
-          size: input.attachment.size,
-          note: input.attachment.note,
-          uploaderId: session.userId,
-          categoryId: instance.template.categoryId,
-          recurringInstanceId: instance.id,
-        },
+    const attachmentList =
+      input.attachments && input.attachments.length > 0
+        ? input.attachments
+        : input.attachment
+          ? [input.attachment]
+          : []
+
+    if (attachmentList.length > 0 || input.replaceAttachments) {
+      await attachToInstance({
+        instanceId: instance.id,
+        uploaderId: session.userId,
+        categoryId: instance.template.categoryId,
+        subCategoryId: instance.template.subCategoryId,
+        thirdCategoryId: instance.template.thirdCategoryId,
+        attachments: attachmentList,
+        replace: Boolean(input.replaceAttachments),
       })
     }
 
@@ -369,6 +460,7 @@ async function advanceTemplate(templateId: string) {
     id: template.id,
     nextDueDate,
     amount: template.amount,
+    content: template.content,
     note: template.note,
     userId: template.userId,
     reminderDays: template.reminderDays,
@@ -402,9 +494,11 @@ export async function skipRecurringInstance(instanceId: string) {
 export async function convertRecurringInstanceToRecord(input: {
   instanceId: string
   amount?: number
+  content?: string
   note?: string
   date?: string
   attachment?: AttachmentPayload
+  attachments?: AttachmentPayload[]
 }) {
   try {
     const { t } = await assertRecurringAccess()
@@ -426,26 +520,33 @@ export async function convertRecurringInstanceToRecord(input: {
       ? normalizeDueDate(new Date(input.date))
       : normalizeDueDate(new Date())
 
-    const attachment =
-      input.attachment ||
-      (instance.attachments[0]
-        ? {
-            url: instance.attachments[0].fileUrl,
-            size: instance.attachments[0].size,
-            note: instance.attachments[0].note || undefined,
-          }
-        : undefined)
+    const content =
+      (input.content ?? instance.content ?? template.content)?.trim() || undefined
+    const note =
+      (input.note ?? instance.note ?? template.note)?.trim() || undefined
+
+    const attachmentList =
+      input.attachments && input.attachments.length > 0
+        ? input.attachments
+        : input.attachment
+          ? [input.attachment]
+          : instance.attachments.map((item) => ({
+              url: item.fileUrl,
+              size: item.size,
+              note: item.note || undefined,
+            }))
 
     const created = await createRecord({
       type: template.type as 'INCOME' | 'EXPENSE',
       date: recordDate,
-      note: (input.note ?? instance.note ?? template.note) || undefined,
+      content,
+      note,
       amount: signedAmount,
       categoryId: template.categoryId,
       subCategoryId: template.subCategoryId || undefined,
       thirdCategoryId: template.thirdCategoryId || undefined,
       poolId: template.poolId || undefined,
-      attachment,
+      attachments: attachmentList.length > 0 ? attachmentList : undefined,
     })
 
     if (!created.success) {
@@ -459,7 +560,8 @@ export async function convertRecurringInstanceToRecord(input: {
         status: 'CONVERTED',
         processedAt: new Date(),
         amount: signedAmount,
-        note: (input.note ?? instance.note) || null,
+        content: content || null,
+        note: note || null,
       },
     })
     await advanceTemplate(template.id)
