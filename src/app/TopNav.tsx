@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { logout } from './actions/auth'
@@ -56,6 +56,8 @@ export default function TopNav({
   const router = useRouter()
   const t = createTranslator(locale)
   const [isMoreOpen, setIsMoreOpen] = useState(false)
+  const [isDesktopMoreOpen, setIsDesktopMoreOpen] = useState(false)
+  const desktopMoreRef = useRef<HTMLDivElement>(null)
 
   const primaryNavItems: NavItem[] = []
 
@@ -92,13 +94,37 @@ export default function TopNav({
     secondaryNavItems.push({ name: t('admin'), href: '/admin' })
   }
 
-  const desktopNavItems = [...primaryNavItems, ...secondaryNavItems]
+  const allNavItems = [...primaryNavItems, ...secondaryNavItems]
+  const moreBadgeCount = secondaryNavItems.reduce((sum, item) => sum + (item.count ?? 0), 0)
 
   const isPathActive = (href: string) => pathname === href || (href !== '/' && pathname.startsWith(href))
   const isMoreActive = secondaryNavItems.some((item) => isPathActive(item.href))
   const currentPageName =
-    [...desktopNavItems].find((item) => isPathActive(item.href))?.name ??
+    allNavItems.find((item) => isPathActive(item.href))?.name ??
     (pathname === '/login' ? t('login') : t('home'))
+
+  useEffect(() => {
+    if (!isDesktopMoreOpen) return
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!desktopMoreRef.current?.contains(event.target as Node)) {
+        setIsDesktopMoreOpen(false)
+      }
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsDesktopMoreOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isDesktopMoreOpen])
 
   const handleLocaleChange = (nextLocale: string) => {
     document.cookie = `${LOCALE_COOKIE}=${nextLocale}; path=/; max-age=31536000; samesite=lax`
@@ -137,20 +163,60 @@ export default function TopNav({
       <div className="hidden items-center justify-between gap-4 border-b border-gray-200 bg-[#F2F2F7] pb-3 px-4 pt-2 text-lg font-semibold sm:flex sm:px-0">
         <div className="flex min-w-0 items-center gap-6">
           <BrandLogo className="shrink-0" compact />
-          <nav className="hide-scrollbar flex min-w-0 space-x-6 overflow-x-auto whitespace-nowrap">
-          {desktopNavItems.map((item) => {
-            const isActive = isPathActive(item.href)
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`relative pb-1 transition-colors ${isActive ? 'border-b-2 border-[#007AFF] text-[#007AFF]' : 'text-gray-500 hover:text-gray-800'}`}
-              >
-                {item.name}
-                <CountBadge count={item.count} />
-              </Link>
-            )
-          })}
+          <nav className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 whitespace-nowrap">
+            {primaryNavItems.map((item) => {
+              const isActive = isPathActive(item.href)
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`relative pb-1 transition-colors ${isActive ? 'border-b-2 border-[#007AFF] text-[#007AFF]' : 'text-gray-500 hover:text-gray-800'}`}
+                >
+                  {item.name}
+                  <CountBadge count={item.count} />
+                </Link>
+              )
+            })}
+            {secondaryNavItems.length > 0 ? (
+              <div className="relative" ref={desktopMoreRef}>
+                <button
+                  type="button"
+                  aria-expanded={isDesktopMoreOpen}
+                  aria-haspopup="menu"
+                  onClick={() => setIsDesktopMoreOpen((open) => !open)}
+                  className={`relative pb-1 transition-colors ${isMoreActive || isDesktopMoreOpen ? 'border-b-2 border-[#007AFF] text-[#007AFF]' : 'text-gray-500 hover:text-gray-800'}`}
+                >
+                  {t('more')}
+                  <CountBadge count={moreBadgeCount} />
+                </button>
+                {isDesktopMoreOpen ? (
+                  <div
+                    role="menu"
+                    className="absolute left-0 top-full z-40 mt-2 min-w-[12rem] rounded-2xl border border-gray-200 bg-white py-2 shadow-lg"
+                  >
+                    {secondaryNavItems.map((item) => {
+                      const isActive = isPathActive(item.href)
+                      return (
+                        <Link
+                          key={item.href}
+                          href={item.href}
+                          role="menuitem"
+                          onClick={() => setIsDesktopMoreOpen(false)}
+                          className={`flex items-center justify-between gap-4 px-4 py-2.5 text-sm font-semibold transition-colors ${isActive ? 'bg-[#007AFF]/12 text-[#007AFF]' : 'text-gray-700 hover:bg-[#F2F2F7]'}`}
+                        >
+                          <span>{item.name}</span>
+                          {item.count ? (
+                            <span className="min-w-[18px] rounded-full bg-[#FF3B30] px-1.5 py-0.5 text-center text-[10px] font-bold leading-none text-white">
+                              {item.count > 99 ? '99+' : item.count}
+                            </span>
+                          ) : null}
+                        </Link>
+                      )
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </nav>
         </div>
         <div className="flex shrink-0 items-center gap-3">
