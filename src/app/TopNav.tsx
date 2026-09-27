@@ -104,10 +104,6 @@ export default function TopNav({
     (pathname === '/login' ? t('login') : t('home'))
 
   useEffect(() => {
-    setIsDesktopMoreOpen(false)
-  }, [pathname])
-
-  useEffect(() => {
     if (!isDesktopMoreOpen) return
 
     const handlePointerDown = (event: MouseEvent) => {
