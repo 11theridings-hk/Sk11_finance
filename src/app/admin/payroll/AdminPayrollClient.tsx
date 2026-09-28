@@ -5,24 +5,29 @@ import { Download, Filter, PlusCircle, Search, Send, CheckCircle, XCircle, FileT
 import {
   adminListPayrolls,
   batchCreatePayrolls,
-  batchSubmitPayrolls,
+  batchApprovePayrolls,
   batchDownloadPdfZip,
-  confirmPayroll,
   createSalaryCycle,
   deletePayroll,
   exportPayrollsCsv,
   markPayrollPaid,
-  rejectPayroll,
-  submitPayrollForConfirmation,
+  approvePayroll,
+  adminRejectPayroll,
   withdrawPayroll,
   updatePayrollAmounts,
   updateSalaryCycle,
   downloadPayrollPdf,
   getMyProfile,
   adminUpdateUserProfile,
+  createSalaryIou,
+  listSalaryIous,
+  addAdminPayrollLine,
+  removePayrollClaimLine,
+  syncIouIntoPayroll,
   type PayrollStatus,
 } from '@/app/actions/payroll';
-import type { PayrollAmountsInput, UserProfileSnapshotInput } from '@/lib/payroll/calc';
+import type { PayrollAmountsInput, PayrollItemInput, UserProfileSnapshotInput } from '@/lib/payroll/calc';
+import { ITEM_CODE_META } from '@/lib/payroll/calc';
 import { createTranslator, normalizeLocale, type Locale } from '@/lib/i18n';
 
 type PdfLocale = 'bilingual' | 'zh' | 'en';
@@ -97,7 +102,27 @@ type PayrollRow = {
     itemName: string;
     amountHkd: number;
     sourceText?: string | null;
+    origin?: string | null;
+    occurredOn?: string | null;
+    unitCount?: number | null;
   }[];
+  remark?: string | null;
+};
+
+type IouRow = {
+  id: string;
+  userId: string;
+  totalAmountHkd: number;
+  startDate: string;
+  status: string;
+  splitMode: string;
+  note?: string | null;
+  user?: {
+    id: string;
+    roleName?: string | null;
+    profile?: { legalNameZh?: string | null; legalNameEn?: string | null } | null;
+  };
+  installments?: { id: string; periodIndex: number; amountHkd: number; status: string; dueDate: string }[];
 };
 
 const fmtHkd = (n: number) =>
@@ -160,12 +185,31 @@ export default function AdminPayrollClient(props: Props) {
 
   // Row action modal
   const [actionModal, setActionModal] = useState<null | { mode: 'edit' | 'markPaid' | 'viewReject' | 'profile'; payrollId: string; userId?: string }>(null);
-  const [editForm, setEditForm] = useState<PayrollAmountsInput & { adminNote?: string | null }>({
+  const [editForm, setEditForm] = useState<PayrollAmountsInput & { adminNote?: string | null; remark?: string | null }>({
     baseSalaryHkd: 0,
+    lines: [],
+  });
+  const [newEditLine, setNewEditLine] = useState<{ itemCode: string; amountHkd: number; note: string }>({
+    itemCode: 'OVERTIME',
+    amountHkd: 0,
+    note: '',
   });
   const [markPaidForm, setMarkPaidForm] = useState<{ paidAt: string; paidReference: string }>(
     { paidAt: new Date().toISOString().slice(0, 10), paidReference: '' },
   );
+
+  // IOU panel
+  const [iouRows, setIouRows] = useState<IouRow[]>([]);
+  const [iouForm, setIouForm] = useState({
+    userId: '',
+    totalAmountHkd: 0,
+    startDate: new Date().toISOString().slice(0, 10),
+    splitMode: 'EVEN' as 'EVEN' | 'CUSTOM',
+    periodCount: 3,
+    customAmountsCsv: '',
+    note: '',
+  });
+  const [iouBusy, setIouBusy] = useState(false);
   type FullProfileForm = UserProfileSnapshotInput & { emergencyName?: string | null; emergencyPhone?: string | null };
   const [profileForm, setProfileForm] = useState<FullProfileForm>({ legalNameEn: '', defaultBaseSalaryHkd: 0 });
   const [profileLoading, setProfileLoading] = useState(false);
@@ -183,10 +227,14 @@ export default function AdminPayrollClient(props: Props) {
   const statusChip = (s: string) => {
     const map: Record<string, { label: string; cls: string }> = {
       DRAFT: { label: t('statusDraft'), cls: 'bg-slate-100 text-slate-700 border border-slate-300' },
-      SUBMITTED: { label: t('statusSubmitted'), cls: 'bg-amber-100 text-amber-800 border border-amber-300' },
-      CONFIRMED: { label: t('statusConfirmed'), cls: 'bg-blue-100 text-blue-800 border border-blue-300' },
+      PENDING_APPROVAL: { label: t('statusPendingApproval'), cls: 'bg-orange-100 text-orange-800 border border-orange-300' },
+      PENDING_CONFIRM: { label: t('statusPendingConfirm'), cls: 'bg-amber-100 text-amber-800 border border-amber-300' },
+      PENDING_PAYMENT: { label: t('statusPendingPayment'), cls: 'bg-blue-100 text-blue-800 border border-blue-300' },
       PAID: { label: t('statusPaid'), cls: 'bg-emerald-100 text-emerald-800 border border-emerald-300' },
       REJECTED: { label: t('statusRejected'), cls: 'bg-rose-100 text-rose-800 border border-rose-300' },
+      // legacy → new labels
+      SUBMITTED: { label: t('statusPendingConfirm'), cls: 'bg-amber-100 text-amber-800 border border-amber-300' },
+      CONFIRMED: { label: t('statusPendingPayment'), cls: 'bg-blue-100 text-blue-800 border border-blue-300' },
       OPEN: { label: t('cycleStatusOpen'), cls: 'bg-sky-50 text-sky-700 border border-sky-200' },
       LOCKED: { label: t('cycleStatusLocked'), cls: 'bg-slate-200 text-slate-700 border border-slate-400' },
       SETTLED: { label: t('cycleStatusSettled'), cls: 'bg-violet-100 text-violet-800 border border-violet-300' },
@@ -195,6 +243,15 @@ export default function AdminPayrollClient(props: Props) {
     return (
       <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${o.cls}`}>{o.label}</span>
     );
+  };
+
+  const loadIous = async () => {
+    try {
+      const rows = (await listSalaryIous()) as unknown as IouRow[];
+      setIouRows(rows);
+    } catch {
+      /* non-fatal */
+    }
   };
 
   const loadRows = async () => {
@@ -221,6 +278,10 @@ export default function AdminPayrollClient(props: Props) {
     loadRows();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCycleId, statusFilter, deptFilter, titleFilter, periodGte, periodLte]);
+
+  useEffect(() => {
+    void loadIous();
+  }, []);
 
   const userDisplayName = (u: UserRow) => {
     const zh = u.profile?.legalNameZh;
@@ -269,8 +330,43 @@ export default function AdminPayrollClient(props: Props) {
 
   const handleBatchSubmit = async () => {
     if (selectedIds.size === 0) return;
-    await batchSubmitPayrolls(Array.from(selectedIds));
+    await batchApprovePayrolls(Array.from(selectedIds));
     await loadRows();
+  };
+
+  const handleCreateIou = async () => {
+    if (!iouForm.userId || !iouForm.totalAmountHkd) {
+      alert('請選擇員工並填寫金額');
+      return;
+    }
+    setIouBusy(true);
+    try {
+      const customAmounts =
+        iouForm.splitMode === 'CUSTOM'
+          ? iouForm.customAmountsCsv
+              .split(/[,，\s]+/)
+              .map((s) => s.trim())
+              .filter(Boolean)
+              .map(Number)
+              .filter((n) => Number.isFinite(n) && n > 0)
+          : undefined;
+      await createSalaryIou({
+        userId: iouForm.userId,
+        totalAmountHkd: iouForm.totalAmountHkd,
+        startDate: iouForm.startDate,
+        note: iouForm.note || undefined,
+        splitMode: iouForm.splitMode,
+        periodCount: iouForm.splitMode === 'EVEN' ? iouForm.periodCount : undefined,
+        customAmounts,
+      });
+      setIouForm((f) => ({ ...f, totalAmountHkd: 0, customAmountsCsv: '', note: '' }));
+      await loadIous();
+      await loadRows();
+    } catch (e) {
+      alert(String(e));
+    } finally {
+      setIouBusy(false);
+    }
   };
 
   const handleBatchZip = async (locale: PdfLocale = 'bilingual') => {
@@ -295,29 +391,54 @@ export default function AdminPayrollClient(props: Props) {
   };
 
   const openEdit = (row: PayrollRow) => {
-    const allowanceItems = row.items.filter((it) => it.itemType === 'EARNING' && !['BASE_SALARY','OVERTIME','BONUS_ANNUAL','COMMISSION'].includes(it.itemCode));
-    const deductionItems = row.items.filter((it) => it.itemType === 'DEDUCTION');
+    const lines: PayrollItemInput[] = row.items
+      .filter((it) => it.itemCode !== 'BASE_SALARY')
+      .map((it) => ({
+        id: it.id,
+        itemType: (it.itemType === 'DEDUCTION' ? 'DEDUCTION' : 'EARNING') as 'EARNING' | 'DEDUCTION',
+        itemCode: it.itemCode,
+        itemName: it.itemName,
+        sourceText: it.sourceText,
+        origin: (it.origin as 'ADMIN' | 'MEMBER' | 'IOU_AUTO') || 'ADMIN',
+        occurredOn: it.occurredOn,
+        unitCount: it.unitCount,
+        amountHkd: it.amountHkd,
+      }));
     setEditForm({
       baseSalaryHkd: row.baseSalaryHkd,
-      overtimeHkd: row.overtimeHkd,
-      bonusHkd: row.bonusHkd,
-      commissionHkd: row.commissionHkd,
-      allowanceItems: allowanceItems.map((it) => ({
-        itemType: 'EARNING', itemCode: it.itemCode, itemName: it.itemName, sourceText: it.sourceText, amountHkd: it.amountHkd,
-      })),
-      deductionItems: deductionItems.map((it) => ({
-        itemType: 'DEDUCTION', itemCode: it.itemCode, itemName: it.itemName, sourceText: it.sourceText, amountHkd: it.amountHkd,
-      })),
+      lines,
       adminNote: row.adminNote ?? null,
+      remark: row.remark ?? null,
     });
+    setNewEditLine({ itemCode: 'OVERTIME', amountHkd: 0, note: '' });
     setActionModal({ mode: 'edit', payrollId: row.id });
   };
 
   const handleEditSave = async () => {
     if (!actionModal || actionModal.mode !== 'edit') return;
-    await updatePayrollAmounts(actionModal.payrollId, editForm);
+    await updatePayrollAmounts(actionModal.payrollId, {
+      baseSalaryHkd: editForm.baseSalaryHkd,
+      lines: editForm.lines ?? [],
+      adminNote: editForm.adminNote ?? null,
+      remark: editForm.remark ?? null,
+    });
     setActionModal(null);
     await loadRows();
+  };
+
+  const handleAddEditLineLocal = () => {
+    if (!newEditLine.amountHkd) return;
+    const meta = ITEM_CODE_META[newEditLine.itemCode] || { itemType: 'EARNING' as const, defaultName: newEditLine.itemCode };
+    const line: PayrollItemInput = {
+      itemType: meta.itemType,
+      itemCode: newEditLine.itemCode,
+      itemName: newEditLine.note || meta.defaultName,
+      sourceText: newEditLine.note || null,
+      origin: 'ADMIN',
+      amountHkd: newEditLine.amountHkd,
+    };
+    setEditForm((f) => ({ ...f, lines: [...(f.lines ?? []), line] }));
+    setNewEditLine({ itemCode: 'OVERTIME', amountHkd: 0, note: '' });
   };
 
   const handleMarkPaid = async () => {
@@ -520,7 +641,7 @@ export default function AdminPayrollClient(props: Props) {
         </div>
         <div className="flex flex-wrap gap-2 items-center">
           <span className="text-xs font-medium text-slate-500">{t('statusColon')}</span>
-          {(['DRAFT','SUBMITTED','CONFIRMED','PAID','REJECTED'] as PayrollStatus[]).map((s) => {
+          {(['DRAFT', 'PENDING_APPROVAL', 'PENDING_CONFIRM', 'PENDING_PAYMENT', 'PAID', 'REJECTED'] as PayrollStatus[]).map((s) => {
             const active = statusFilter.includes(s);
             return (
               <button key={s} onClick={() => toggleStatus(s)}
@@ -535,6 +656,109 @@ export default function AdminPayrollClient(props: Props) {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* IOU panel */}
+      <div className="bg-white border border-slate-200 rounded-lg p-4 mb-5 shadow-sm">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-slate-700 font-medium">{t('iouPanelTitle')}</div>
+          <button onClick={() => void loadIous()} className="text-xs text-slate-500 hover:text-slate-800 inline-flex items-center gap-1">
+            <RefreshCw className="w-3 h-3" /> {t('refreshBtnLabel')}
+          </button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3 mb-3 text-sm">
+          <div>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">{t('thUser')}</label>
+            <select
+              className="w-full border border-slate-300 rounded px-2 py-1.5"
+              value={iouForm.userId}
+              onChange={(e) => setIouForm({ ...iouForm, userId: e.target.value })}
+            >
+              <option value="">—</option>
+              {props.allUsers.map((u) => (
+                <option key={u.id} value={u.id}>{userDisplayName(u)}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">總額 HKD</label>
+            <input
+              type="number"
+              step="0.01"
+              className="w-full border border-slate-300 rounded px-2 py-1.5"
+              value={iouForm.totalAmountHkd || ''}
+              onChange={(e) => setIouForm({ ...iouForm, totalAmountHkd: Number(e.target.value) || 0 })}
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">{t('claimDate')}</label>
+            <input
+              type="date"
+              className="w-full border border-slate-300 rounded px-2 py-1.5"
+              value={iouForm.startDate}
+              onChange={(e) => setIouForm({ ...iouForm, startDate: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">分期方式</label>
+            <select
+              className="w-full border border-slate-300 rounded px-2 py-1.5"
+              value={iouForm.splitMode}
+              onChange={(e) => setIouForm({ ...iouForm, splitMode: e.target.value as 'EVEN' | 'CUSTOM' })}
+            >
+              <option value="EVEN">平均 EVEN</option>
+              <option value="CUSTOM">自訂 CSV</option>
+            </select>
+          </div>
+          {iouForm.splitMode === 'EVEN' ? (
+            <div>
+              <label className="text-xs font-medium text-slate-500 mb-1 block">期數</label>
+              <input
+                type="number"
+                min={1}
+                className="w-full border border-slate-300 rounded px-2 py-1.5"
+                value={iouForm.periodCount}
+                onChange={(e) => setIouForm({ ...iouForm, periodCount: Number(e.target.value) || 1 })}
+              />
+            </div>
+          ) : (
+            <div>
+              <label className="text-xs font-medium text-slate-500 mb-1 block">金額 CSV</label>
+              <input
+                className="w-full border border-slate-300 rounded px-2 py-1.5"
+                placeholder="1000,1000,500"
+                value={iouForm.customAmountsCsv}
+                onChange={(e) => setIouForm({ ...iouForm, customAmountsCsv: e.target.value })}
+              />
+            </div>
+          )}
+          <div className="flex items-end">
+            <button
+              onClick={handleCreateIou}
+              disabled={iouBusy}
+              className="w-full inline-flex items-center justify-center gap-1.5 text-sm bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white px-3 py-1.5 rounded"
+            >
+              {iouBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlusCircle className="w-4 h-4" />}
+              {t('createBtn')}
+            </button>
+          </div>
+        </div>
+        {iouRows.length > 0 && (
+          <div className="max-h-40 overflow-y-auto border border-slate-100 rounded divide-y divide-slate-100 text-xs">
+            {iouRows.slice(0, 20).map((iou) => {
+              const who = iou.user?.profile?.legalNameZh || iou.user?.profile?.legalNameEn || iou.user?.roleName || iou.userId.slice(-6);
+              return (
+                <div key={iou.id} className="px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="font-medium text-slate-800">{who}</span>
+                  <span className="tabular-nums text-slate-700">{fmtHkd(iou.totalAmountHkd)}</span>
+                  <span className="text-slate-500">{shortDate(iou.startDate)}</span>
+                  <span className="text-slate-400">{iou.splitMode} · {iou.status}</span>
+                  <span className="text-slate-400">{iou.installments?.length ?? 0} 期</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* KPI Block B */}
@@ -662,26 +886,49 @@ export default function AdminPayrollClient(props: Props) {
                         >
                           {t('profileBtnLabel')}
                         </button>
-                        {(r.status === 'DRAFT' || r.status === 'REJECTED') && (
+                        {(r.status === 'DRAFT' || r.status === 'REJECTED' || r.status === 'PENDING_APPROVAL') && (
                           <>
                             <button title="編輯" onClick={() => openEdit(r)} className="text-xs px-2 py-1 border border-slate-300 rounded hover:bg-white">{t('editBtnLabel')}</button>
-                            <button title="送出確認" onClick={async () => { await submitPayrollForConfirmation(r.id); await loadRows(); }} className="text-xs px-2 py-1 border border-amber-300 bg-amber-50 text-amber-800 rounded hover:bg-amber-100">{t('submitBtnLabel')}</button>
-                            <button title="刪除" onClick={async () => { if (!confirm(t('deleteBtnConfirm'))) return; await deletePayroll(r.id); await loadRows(); }} className="text-xs px-2 py-1 border border-rose-200 text-rose-700 rounded hover:bg-rose-50">🗑️</button>
+                            <button
+                              title={t('approveBtn')}
+                              onClick={async () => { await approvePayroll(r.id); await loadRows(); }}
+                              className="text-xs px-2 py-1 border border-amber-300 bg-amber-50 text-amber-800 rounded hover:bg-amber-100"
+                            >
+                              {t('approveBtn')}
+                            </button>
+                            {r.status === 'PENDING_APPROVAL' && (
+                              <button
+                                title={t('quickRejectBtnLabel')}
+                                onClick={async () => {
+                                  const reason = window.prompt('駁回理由（至少 2 字）', '請修改後再上交');
+                                  if (!reason || reason.trim().length < 2) return;
+                                  await adminRejectPayroll(r.id, reason.trim());
+                                  await loadRows();
+                                }}
+                                className="text-xs px-2 py-1 border border-rose-200 text-rose-700 rounded hover:bg-rose-50"
+                              >
+                                {t('quickRejectBtnLabel')}
+                              </button>
+                            )}
+                            {(r.status === 'DRAFT' || r.status === 'REJECTED') && (
+                              <button title="刪除" onClick={async () => { if (!confirm(t('deleteBtnConfirm'))) return; await deletePayroll(r.id); await loadRows(); }} className="text-xs px-2 py-1 border border-rose-200 text-rose-700 rounded hover:bg-rose-50">🗑️</button>
+                            )}
+                            <button
+                              title={t('syncIou')}
+                              onClick={async () => { await syncIouIntoPayroll(r.id); await loadRows(); }}
+                              className="text-xs px-2 py-1 border border-slate-300 rounded hover:bg-white"
+                            >
+                              {t('syncIou')}
+                            </button>
                           </>
                         )}
-                        {r.status === 'SUBMITTED' && (
-                          <>
-                            <button title="撤回" onClick={async () => { await withdrawPayroll(r.id); await loadRows(); }} className="text-xs px-2 py-1 border border-slate-300 rounded hover:bg-white">{t('withdrawBtnLabel')}</button>
-                            <button title="模擬確認(admin測試)" onClick={async () => { await confirmPayroll(r.id, '管理員快速確認'); await loadRows(); }} className="text-xs px-2 py-1 border border-blue-300 bg-blue-50 text-blue-800 rounded hover:bg-blue-100">{t('quickConfirmBtnLabel')}</button>
-                            <button title="模擬拒絕(admin測試)" onClick={async () => { await rejectPayroll(r.id, '管理員測試拒絕'); await loadRows(); }} className="text-xs px-2 py-1 border border-rose-200 text-rose-700 rounded hover:bg-rose-50">{t('quickRejectBtnLabel')}</button>
-                          </>
+                        {(r.status === 'PENDING_CONFIRM' || r.status === 'SUBMITTED') && (
+                          <button title="撤回" onClick={async () => { await withdrawPayroll(r.id); await loadRows(); }} className="text-xs px-2 py-1 border border-slate-300 rounded hover:bg-white">{t('withdrawBtnLabel')}</button>
                         )}
-                        {r.status === 'CONFIRMED' && (
+                        {(r.status === 'PENDING_PAYMENT' || r.status === 'CONFIRMED') && (
                           <button title="標註已發薪" onClick={() => setActionModal({ mode: 'markPaid', payrollId: r.id })} className="text-xs px-2 py-1 border border-emerald-300 bg-emerald-50 text-emerald-800 rounded hover:bg-emerald-100">{t('markPaidBtnLabel')}</button>
                         )}
-                        {(r.status !== 'DRAFT' && r.status !== 'REJECTED') && (
-                          <PdfDropdown payrollId={r.id} />
-                        )}
+                        <PdfDropdown payrollId={r.id} />
                         {r.status === 'PAID' && r.paidReference && (
                           <span className="text-[11px] text-slate-500">{t('refLabelPrefix')}<b className="tabular-nums">{r.paidReference}</b></span>
                         )}
@@ -771,10 +1018,107 @@ export default function AdminPayrollClient(props: Props) {
         <Modal title={t('editModalTitle')} onClose={() => setActionModal(null)}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
             <NumberField label={t('nfBaseSalary')} value={editForm.baseSalaryHkd} onChange={(v) => setEditForm({ ...editForm, baseSalaryHkd: v })}/>
-            <NumberField label={t('nfOvertime')} value={editForm.overtimeHkd ?? 0} onChange={(v) => setEditForm({ ...editForm, overtimeHkd: v })}/>
-            <NumberField label={t('nfBonus')} value={editForm.bonusHkd ?? 0} onChange={(v) => setEditForm({ ...editForm, bonusHkd: v })}/>
-            <NumberField label={t('nfCommission')} value={editForm.commissionHkd ?? 0} onChange={(v) => setEditForm({ ...editForm, commissionHkd: v })}/>
+            <div>
+              <label className="text-xs font-medium text-slate-500 mb-1 block">{t('remarkLine')}</label>
+              <input
+                className="w-full border border-slate-300 rounded px-2 py-1.5"
+                value={editForm.remark ?? ''}
+                onChange={(e) => setEditForm({ ...editForm, remark: e.target.value })}
+              />
+            </div>
           </div>
+
+          <div className="mt-4">
+            <div className="text-xs font-medium text-slate-600 mb-2">明細行（非底薪）</div>
+            <div className="border border-slate-200 rounded-md divide-y divide-slate-100 max-h-48 overflow-y-auto mb-3">
+              {(editForm.lines ?? []).length === 0 && (
+                <div className="px-3 py-2 text-xs text-slate-400">尚無明細</div>
+              )}
+              {(editForm.lines ?? []).map((line, idx) => (
+                <div key={`${line.itemCode}-${idx}`} className="px-3 py-2 flex items-center justify-between gap-2 text-xs">
+                  <div className="min-w-0">
+                    <span className="font-medium text-slate-800">{line.itemName}</span>
+                    <span className="ml-1.5 text-slate-400">[{line.itemCode}]</span>
+                    {line.origin && <span className="ml-1.5 text-slate-400">{line.origin}</span>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="tabular-nums font-medium">{fmtHkd(line.amountHkd)}</span>
+                    <button
+                      type="button"
+                      className="text-rose-600 hover:text-rose-800"
+                      onClick={() => {
+                        const payrollId = actionModal.payrollId;
+                        const itemId = (line as any).id as string | undefined;
+                        setEditForm((f) => ({
+                          ...f,
+                          lines: (f.lines ?? []).filter((_, i) => i !== idx),
+                        }));
+                        if (itemId) {
+                          void removePayrollClaimLine(payrollId, itemId).catch(() => {/* local-only ok */});
+                        }
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-sm">
+              <select
+                className="border border-slate-300 rounded px-2 py-1.5"
+                value={newEditLine.itemCode}
+                onChange={(e) => setNewEditLine({ ...newEditLine, itemCode: e.target.value })}
+              >
+                {['OVERTIME', 'COMP_LEAVE', 'LEAVE', 'BONUS', 'IOU_REPAY', 'STATUTORY_HOLIDAY', 'ANNUAL_LEAVE'].map((c) => (
+                  <option key={c} value={c}>{ITEM_CODE_META[c]?.defaultName || c} ({c})</option>
+                ))}
+              </select>
+              <input
+                type="number"
+                step="0.01"
+                placeholder="金額"
+                className="border border-slate-300 rounded px-2 py-1.5"
+                value={newEditLine.amountHkd || ''}
+                onChange={(e) => setNewEditLine({ ...newEditLine, amountHkd: Number(e.target.value) || 0 })}
+              />
+              <input
+                placeholder={t('bonusLine') + ' / ' + t('remarkLine')}
+                className="border border-slate-300 rounded px-2 py-1.5"
+                value={newEditLine.note}
+                onChange={(e) => setNewEditLine({ ...newEditLine, note: e.target.value })}
+              />
+              <button
+                type="button"
+                onClick={handleAddEditLineLocal}
+                className="text-xs px-2 py-1.5 border border-indigo-300 bg-indigo-50 text-indigo-800 rounded hover:bg-indigo-100"
+              >
+                + {t('addClaim')}
+              </button>
+            </div>
+            <button
+              type="button"
+              className="mt-2 text-xs text-slate-500 hover:text-slate-800 underline"
+              onClick={async () => {
+                if (!actionModal) return;
+                if (!newEditLine.amountHkd) return;
+                const payrollId = actionModal.payrollId;
+                await addAdminPayrollLine(payrollId, {
+                  itemCode: newEditLine.itemCode,
+                  amountHkd: newEditLine.amountHkd,
+                  note: newEditLine.note || null,
+                });
+                setNewEditLine({ itemCode: 'OVERTIME', amountHkd: 0, note: '' });
+                await loadRows();
+                const result = await adminListPayrolls({ salaryCycleId: selectedCycleId });
+                const found = (result.rows as unknown as PayrollRow[]).find((x) => x.id === payrollId);
+                if (found) openEdit(found);
+              }}
+            >
+              立即寫入伺服器（addAdminPayrollLine）
+            </button>
+          </div>
+
           <div className="mt-4">
             <label className="text-xs font-medium text-slate-500 mb-1 block">{t('editAdminNoteLabel')}</label>
             <textarea className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" rows={2} value={editForm.adminNote ?? ''} onChange={(e) => setEditForm({ ...editForm, adminNote: e.target.value })}/>

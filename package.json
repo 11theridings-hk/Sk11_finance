@@ -6,10 +6,12 @@
     "dev": "next dev",
     "build": "prisma generate && next build",
     "start": "next start -H 0.0.0.0 -p $PORT",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "verify:salary": "tsx scripts/verify-salary-settlement.ts"
   },
   "dependencies": {
     "@fontsource/noto-sans-sc": "^5.3.0",
+    "@napi-rs/canvas": "^1.0.9",
     "@prisma/client": "^6.19.3",
     "@react-pdf/renderer": "^4.6.0",
     "browser-image-compression": "^2.0.2",
@@ -35,6 +37,7 @@
     "eslint-config-next": "16.3.0",
     "prisma": "^6.19.3",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }

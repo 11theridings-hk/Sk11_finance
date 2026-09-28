@@ -9,12 +9,18 @@ import {
   Download,
   AlertTriangle,
   RefreshCw,
+  Plus,
+  Send,
+  Trash2,
 } from 'lucide-react';
 import {
   listMyPayrolls,
   confirmPayroll,
   rejectPayroll,
   downloadPayrollPdf,
+  addPayrollClaimLine,
+  removePayrollClaimLine,
+  submitPayrollForApproval,
   type PayrollStatus,
 } from '@/app/actions/payroll';
 import { createTranslator, normalizeLocale, type Locale } from '@/lib/i18n';
@@ -39,6 +45,9 @@ type PayrollItemRow = {
   itemName: string;
   amountHkd: number;
   sourceText?: string | null;
+  origin?: string | null;
+  occurredOn?: string | null;
+  unitCount?: number | null;
 };
 
 type CycleRow = {
@@ -48,6 +57,21 @@ type CycleRow = {
   periodEnd: string;
   payrollDate: string;
   status: string;
+};
+
+type AuditLogRow = {
+  id: string;
+  action: string;
+  summary: string;
+  createdAt: string;
+};
+
+type PdfAttachmentRow = {
+  id: string;
+  fileUrl: string;
+  size?: number | null;
+  note?: string | null;
+  createdAt: string;
 };
 
 type PayrollRow = {
@@ -72,6 +96,24 @@ type PayrollRow = {
   paidAt?: string | null;
   cycle: CycleRow;
   items: PayrollItemRow[];
+  auditLogs?: AuditLogRow[];
+  pdfAttachments?: PdfAttachmentRow[];
+};
+
+const MEMBER_CLAIM_CODES = [
+  'OVERTIME',
+  'COMP_LEAVE',
+  'LEAVE',
+  'STATUTORY_HOLIDAY',
+  'ANNUAL_LEAVE',
+] as const;
+
+const CLAIM_CODE_LABELS: Record<string, string> = {
+  OVERTIME: '加班 OVERTIME',
+  COMP_LEAVE: '補假 COMP_LEAVE',
+  LEAVE: '請假 LEAVE',
+  STATUTORY_HOLIDAY: '例假 STATUTORY_HOLIDAY',
+  ANNUAL_LEAVE: '大假 ANNUAL_LEAVE',
 };
 
 const fmtHkd = (n: number) =>
@@ -89,7 +131,21 @@ function toIsoDay(s: unknown): string {
 }
 const shortDate = toIsoDay;
 
-type TabKey = 'ALL' | 'PENDING' | 'CONFIRMED' | 'PAID';
+type TabKey = 'ALL' | 'PENDING_APPROVAL' | 'PENDING_CONFIRM' | 'PENDING_PAYMENT' | 'PAID';
+
+function statusLabelMap(t: (k: any) => string): Record<string, { label: string; cls: string }> {
+  return {
+    DRAFT: { label: t('statusDraft'), cls: 'bg-slate-100 text-slate-700 border border-slate-300' },
+    PENDING_APPROVAL: { label: t('statusPendingApproval'), cls: 'bg-orange-100 text-orange-800 border border-orange-300' },
+    PENDING_CONFIRM: { label: t('statusPendingConfirm'), cls: 'bg-amber-100 text-amber-800 border border-amber-300' },
+    PENDING_PAYMENT: { label: t('statusPendingPayment'), cls: 'bg-blue-100 text-blue-800 border border-blue-300' },
+    PAID: { label: t('statusPaid'), cls: 'bg-emerald-100 text-emerald-800 border border-emerald-300' },
+    REJECTED: { label: t('statusRejected'), cls: 'bg-rose-100 text-rose-800 border border-rose-300' },
+    // legacy
+    SUBMITTED: { label: t('statusPendingConfirm'), cls: 'bg-amber-100 text-amber-800 border border-amber-300' },
+    CONFIRMED: { label: t('statusPendingPayment'), cls: 'bg-blue-100 text-blue-800 border border-blue-300' },
+  };
+}
 
 export default function PayrollTab(props: Props) {
   const [rows, setRows] = useState<PayrollRow[]>([]);
@@ -103,6 +159,8 @@ export default function PayrollTab(props: Props) {
   const [rejectReason, setRejectReason] = useState('');
   const [rejectBusy, setRejectBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState<string | null>(null);
+  const [claimBusy, setClaimBusy] = useState<string | null>(null);
+  const [submitBusy, setSubmitBusy] = useState<string | null>(null);
 
   const [browserLocale, setBrowserLocale] = useState<Locale>(() => getBrowserLocaleFromCookieOrFallback());
   useEffect(() => {
@@ -115,13 +173,7 @@ export default function PayrollTab(props: Props) {
   const t = useMemo(() => createTranslator(browserLocale), [browserLocale]);
 
   const statusChip = (s: string) => {
-    const map: Record<string, { label: string; cls: string }> = {
-      DRAFT: { label: t('statusDraft'), cls: 'bg-slate-100 text-slate-700 border border-slate-300' },
-      SUBMITTED: { label: t('statusSubmitted'), cls: 'bg-amber-100 text-amber-800 border border-amber-300' },
-      CONFIRMED: { label: t('statusConfirmed'), cls: 'bg-blue-100 text-blue-800 border border-blue-300' },
-      PAID: { label: t('statusPaid'), cls: 'bg-emerald-100 text-emerald-800 border border-emerald-300' },
-      REJECTED: { label: t('statusRejected'), cls: 'bg-rose-100 text-rose-800 border border-rose-300' },
-    };
+    const map = statusLabelMap(t);
     const o = map[s] ?? { label: s, cls: 'bg-gray-100 text-gray-700 border border-gray-300' };
     return (
       <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold ${o.cls}`}>
@@ -143,8 +195,21 @@ export default function PayrollTab(props: Props) {
 
   const TAB_DEFS = useMemo<{ key: TabKey; label: string; filter?: (p: PayrollRow) => boolean }[]>(() => [
     { key: 'ALL', label: t('tabAll') },
-    { key: 'PENDING', label: t('tabPending'), filter: (p) => p.status === 'SUBMITTED' },
-    { key: 'CONFIRMED', label: t('tabConfirmed'), filter: (p) => p.status === 'CONFIRMED' },
+    {
+      key: 'PENDING_APPROVAL',
+      label: t('tabPendingApproval'),
+      filter: (p) => p.status === 'PENDING_APPROVAL',
+    },
+    {
+      key: 'PENDING_CONFIRM',
+      label: t('tabPendingConfirm'),
+      filter: (p) => p.status === 'PENDING_CONFIRM' || p.status === 'SUBMITTED',
+    },
+    {
+      key: 'PENDING_PAYMENT',
+      label: t('tabPendingPayment'),
+      filter: (p) => p.status === 'PENDING_PAYMENT' || p.status === 'CONFIRMED',
+    },
     { key: 'PAID', label: t('tabPaid'), filter: (p) => p.status === 'PAID' },
     // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [browserLocale]);
@@ -180,7 +245,7 @@ export default function PayrollTab(props: Props) {
       s.grossTotal += p.grossTotalHkd || 0;
       s.netTotal += p.netPayableHkd || 0;
       if (p.status === 'PAID') s.paidCount += 1;
-      if (p.status === 'SUBMITTED') s.pendingCount += 1;
+      if (p.status === 'PENDING_CONFIRM' || p.status === 'SUBMITTED') s.pendingCount += 1;
     });
     return s;
   }, [filtered]);
@@ -237,6 +302,50 @@ export default function PayrollTab(props: Props) {
       alert(e instanceof Error ? e.message : String(e));
     } finally {
       setPdfBusy(null);
+    }
+  };
+
+  const handleAddClaim = async (
+    p: PayrollRow,
+    form: { itemCode: string; occurredOn: string; unitCount: number; amountHkd: number },
+  ) => {
+    setClaimBusy(p.id);
+    try {
+      await addPayrollClaimLine(p.id, {
+        itemCode: form.itemCode,
+        occurredOn: form.occurredOn,
+        unitCount: form.unitCount || null,
+        amountHkd: form.amountHkd,
+      });
+      await load(true);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : String(e));
+    } finally {
+      setClaimBusy(null);
+    }
+  };
+
+  const handleRemoveClaim = async (p: PayrollRow, itemId: string) => {
+    setClaimBusy(p.id);
+    try {
+      await removePayrollClaimLine(p.id, itemId);
+      await load(true);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : String(e));
+    } finally {
+      setClaimBusy(null);
+    }
+  };
+
+  const handleSubmitApproval = async (p: PayrollRow) => {
+    setSubmitBusy(p.id);
+    try {
+      await submitPayrollForApproval(p.id);
+      await load(true);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitBusy(null);
     }
   };
 
@@ -345,13 +454,20 @@ export default function PayrollTab(props: Props) {
               key={p.id}
               p={p}
               canAct={canAct}
+              isSelf={props.isSelf}
               confirmBusy={confirmBusy === p.id}
               pdfBusy={pdfBusy === p.id}
+              claimBusy={claimBusy === p.id}
+              submitBusy={submitBusy === p.id}
               onConfirm={() => handleConfirm(p)}
               onReject={() => openReject(p)}
               onDownloadPdfLocale={(lc) => handleDownloadPdf(p, lc)}
+              onAddClaim={(form) => handleAddClaim(p, form)}
+              onRemoveClaim={(itemId) => handleRemoveClaim(p, itemId)}
+              onSubmitApproval={() => handleSubmitApproval(p)}
               t={t}
               cycleTypeLabel={cycleTypeLabel}
+              statusChip={statusChip}
             />
           ))}
         </div>
@@ -419,24 +535,51 @@ export default function PayrollTab(props: Props) {
 function PayrollCard(props: {
   p: PayrollRow;
   canAct: boolean;
+  isSelf: boolean;
   confirmBusy: boolean;
   pdfBusy: boolean;
+  claimBusy: boolean;
+  submitBusy: boolean;
   onConfirm: () => void;
   onReject: () => void;
   onDownloadPdfLocale: (locale: PdfLocale) => void;
+  onAddClaim: (form: { itemCode: string; occurredOn: string; unitCount: number; amountHkd: number }) => void;
+  onRemoveClaim: (itemId: string) => void;
+  onSubmitApproval: () => void;
   t: (k: any) => string;
   cycleTypeLabel: (type: string) => string;
+  statusChip: (s: string) => React.ReactNode;
 }) {
   const { p, t } = props;
   const [expanded, setExpanded] = useState(false);
+  const [auditOpen, setAuditOpen] = useState(false);
   const [pdfDropdownOpen, setPdfDropdownOpen] = useState(false);
+  const [claimForm, setClaimForm] = useState({
+    itemCode: 'OVERTIME' as string,
+    occurredOn: new Date().toISOString().slice(0, 10),
+    unitCount: 0,
+    amountHkd: 0,
+  });
 
-  const showConfirmReject = p.status === 'SUBMITTED' && props.canAct;
-  const showDownload = (p.status === 'CONFIRMED' || p.status === 'PAID') && props.canAct;
-  const isPreviewable = (p.status === 'DRAFT' || p.status === 'REJECTED') && props.canAct;
+  const showConfirmReject = (p.status === 'PENDING_CONFIRM' || p.status === 'SUBMITTED') && props.canAct;
+  const hasPdfAttachments = (p.pdfAttachments?.length ?? 0) > 0;
+  const showDownload =
+    props.canAct &&
+    (p.status === 'PENDING_PAYMENT' ||
+      p.status === 'CONFIRMED' ||
+      p.status === 'PAID' ||
+      hasPdfAttachments);
+  const canClaim = (p.status === 'DRAFT' || p.status === 'REJECTED') && props.isSelf;
+  const isPreviewable = (p.status === 'DRAFT' || p.status === 'REJECTED') && props.canAct && !props.isSelf;
 
   const earnings = p.items.filter((i) => i.itemType === 'EARNING');
   const deductions = p.items.filter((i) => i.itemType === 'DEDUCTION');
+  const memberRemovable = p.items.filter(
+    (i) => i.itemCode !== 'BASE_SALARY' && i.origin !== 'ADMIN' && i.origin !== 'IOU_AUTO',
+  );
+
+  const unitLabel =
+    claimForm.itemCode === 'OVERTIME' ? t('overtimeHours') : t('leaveDays');
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm hover:shadow-md transition-shadow">
@@ -447,8 +590,7 @@ function PayrollCard(props: {
             <h3 className="text-base md:text-lg font-bold text-slate-900">
               {t('cardTitleFormat').replace('{cycleType}', props.cycleTypeLabel(p.cycle.cycleType))}
             </h3>
-            {/* Re-use status chip from parent; but we don't have access; recreate */}
-            <StatusChipInline status={p.status} t={t} />
+            {props.statusChip(p.status)}
           </div>
           <div className="mt-1.5 text-xs md:text-sm text-slate-600 flex flex-wrap items-center gap-x-4 gap-y-1">
             <span>
@@ -504,6 +646,99 @@ function PayrollCard(props: {
         </div>
       )}
 
+      {/* Member claim form */}
+      {canClaim && (
+        <div className="mx-4 md:mx-5 mb-4 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3 space-y-3">
+          <div className="text-sm font-semibold text-indigo-900">{t('addClaim')}</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+            <div>
+              <label className="text-[11px] text-slate-500 block mb-1">項目</label>
+              <select
+                className="w-full border border-slate-300 rounded px-2 py-1.5 bg-white"
+                value={claimForm.itemCode}
+                onChange={(e) => setClaimForm({ ...claimForm, itemCode: e.target.value })}
+              >
+                {MEMBER_CLAIM_CODES.map((c) => (
+                  <option key={c} value={c}>{CLAIM_CODE_LABELS[c] || c}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] text-slate-500 block mb-1">{t('claimDate')}</label>
+              <input
+                type="date"
+                className="w-full border border-slate-300 rounded px-2 py-1.5 bg-white"
+                value={claimForm.occurredOn}
+                onChange={(e) => setClaimForm({ ...claimForm, occurredOn: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="text-[11px] text-slate-500 block mb-1">{unitLabel}</label>
+              <input
+                type="number"
+                step="0.5"
+                className="w-full border border-slate-300 rounded px-2 py-1.5 bg-white"
+                value={claimForm.unitCount || ''}
+                onChange={(e) => setClaimForm({ ...claimForm, unitCount: Number(e.target.value) || 0 })}
+              />
+            </div>
+            <div>
+              <label className="text-[11px] text-slate-500 block mb-1">金額 HKD</label>
+              <input
+                type="number"
+                step="0.01"
+                className="w-full border border-slate-300 rounded px-2 py-1.5 bg-white"
+                value={claimForm.amountHkd || ''}
+                onChange={(e) => setClaimForm({ ...claimForm, amountHkd: Number(e.target.value) || 0 })}
+              />
+            </div>
+          </div>
+          {memberRemovable.length > 0 && (
+            <div className="space-y-1">
+              {memberRemovable.map((it) => (
+                <div key={it.id} className="flex items-center justify-between text-xs bg-white border border-slate-200 rounded px-2 py-1.5">
+                  <span>
+                    {it.itemName}
+                    {it.occurredOn ? ` · ${shortDate(it.occurredOn)}` : ''}
+                    {it.unitCount != null ? ` · ${it.unitCount}` : ''}
+                    {' · '}
+                    {fmtHkd(it.amountHkd)}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={props.claimBusy}
+                    onClick={() => props.onRemoveClaim(it.id)}
+                    className="text-rose-600 hover:text-rose-800 inline-flex items-center gap-1"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={props.claimBusy || !claimForm.occurredOn || !claimForm.amountHkd}
+              onClick={() => props.onAddClaim(claimForm)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {props.claimBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              {t('addClaim')}
+            </button>
+            <button
+              type="button"
+              disabled={props.submitBusy}
+              onClick={props.onSubmitApproval}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
+            >
+              {props.submitBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              {t('claimSubmit')}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Itemized expand */}
       <div className="px-4 md:px-5 pb-3">
         <button
@@ -527,6 +762,11 @@ function PayrollCard(props: {
                         <div className="font-medium text-slate-800 text-sm">
                           {it.itemName}
                           <span className="ml-1.5 text-xs text-slate-400">[{it.itemCode}]</span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          {it.occurredOn ? shortDate(it.occurredOn) : ''}
+                          {it.unitCount != null ? ` · ${it.unitCount}` : ''}
+                          {it.origin ? ` · ${it.origin}` : ''}
                         </div>
                         {it.sourceText && (
                           <div className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">
@@ -555,6 +795,11 @@ function PayrollCard(props: {
                           {it.itemName}
                           <span className="ml-1.5 text-xs text-slate-400">[{it.itemCode}]</span>
                         </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          {it.occurredOn ? shortDate(it.occurredOn) : ''}
+                          {it.unitCount != null ? ` · ${it.unitCount}` : ''}
+                          {it.origin ? ` · ${it.origin}` : ''}
+                        </div>
                         {it.sourceText && (
                           <div className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">
                             {it.sourceText}
@@ -572,6 +817,30 @@ function PayrollCard(props: {
           </div>
         )}
       </div>
+
+      {/* Audit log */}
+      {p.auditLogs && p.auditLogs.length > 0 && (
+        <div className="px-4 md:px-5 pb-3">
+          <button
+            type="button"
+            onClick={() => setAuditOpen((v) => !v)}
+            className="text-xs text-slate-600 hover:text-slate-900 font-medium"
+          >
+            {auditOpen ? '▾' : '▸'} {t('auditLog')} ({p.auditLogs.length})
+          </button>
+          {auditOpen && (
+            <ul className="mt-2 space-y-1.5 text-xs text-slate-600 border border-slate-200 rounded-md bg-slate-50 p-2 max-h-40 overflow-y-auto">
+              {p.auditLogs.map((log) => (
+                <li key={log.id} className="flex gap-2">
+                  <span className="text-slate-400 whitespace-nowrap tabular-nums">{shortDate(log.createdAt)}</span>
+                  <span className="font-medium text-slate-700">{log.action}</span>
+                  <span className="flex-1">{log.summary}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* Actions */}
       <div className="px-4 md:px-5 py-3 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
@@ -651,28 +920,12 @@ function PayrollCard(props: {
               </button>
             </>
           )}
-          {p.status === 'DRAFT' && !props.canAct === false && !isPreviewable && (
+          {p.status === 'DRAFT' && !canClaim && (
             <span className="text-xs text-slate-400 italic">{t('draftNotSubmitted')}</span>
           )}
         </div>
       </div>
     </div>
-  );
-}
-
-function StatusChipInline({ status, t }: { status: string; t: (k: any) => string }) {
-  const map: Record<string, { label: string; cls: string }> = {
-    DRAFT: { label: t('statusDraft'), cls: 'bg-slate-100 text-slate-700 border border-slate-300' },
-    SUBMITTED: { label: t('statusSubmitted'), cls: 'bg-amber-100 text-amber-800 border border-amber-300' },
-    CONFIRMED: { label: t('statusConfirmed'), cls: 'bg-blue-100 text-blue-800 border border-blue-300' },
-    PAID: { label: t('statusPaid'), cls: 'bg-emerald-100 text-emerald-800 border border-emerald-300' },
-    REJECTED: { label: t('statusRejected'), cls: 'bg-rose-100 text-rose-800 border border-rose-300' },
-  };
-  const o = map[status] ?? { label: status, cls: 'bg-gray-100 text-gray-700 border border-gray-300' };
-  return (
-    <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold ${o.cls}`}>
-      {o.label}
-    </span>
   );
 }
 

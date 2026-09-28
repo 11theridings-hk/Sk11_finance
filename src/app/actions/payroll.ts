@@ -5,7 +5,10 @@ import prisma from '@/lib/prisma';
 import {
   computePayroll,
   snapshotProfile,
+  MEMBER_CLAIM_CODES,
+  ITEM_CODE_META,
   type PayrollAmountsInput,
+  type PayrollItemInput,
   type UserProfileSnapshotInput,
 } from '@/lib/payroll/calc';
 import {
@@ -14,6 +17,9 @@ import {
   type SystemSettingMap,
   type FontPack,
 } from '@/lib/payroll/pdf';
+import { appendPayrollAudit, summarizeItemChange } from '@/lib/payroll/audit';
+import { buildIouInstallmentDrafts, dueDateInPeriod, iouInstallmentToPayrollLine } from '@/lib/payroll/iou';
+import { pdfBytesToDataUrl, pdfBytesToPageImages } from '@/lib/payroll/pdfAttach';
 import JSZip from 'jszip';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,9 +28,25 @@ import {
   syncWhatsAppBindingForUser,
 } from '@/lib/whatsapp/phoneSync';
 
-export type PayrollStatus = 'DRAFT' | 'SUBMITTED' | 'CONFIRMED' | 'PAID' | 'REJECTED';
+export type PayrollStatus =
+  | 'DRAFT'
+  | 'SUBMITTED'
+  | 'PENDING_APPROVAL'
+  | 'PENDING_CONFIRM'
+  | 'CONFIRMED'
+  | 'PENDING_PAYMENT'
+  | 'PAID'
+  | 'REJECTED';
+
 export type SalaryCycleStatus = 'OPEN' | 'LOCKED' | 'SETTLED';
 export type SalaryCycleType = 'MONTHLY' | 'SEMI_MONTHLY' | 'WEEKLY' | 'BI_WEEKLY' | 'ONE_OFF';
+
+/** 正規化舊狀態 → 新流程狀態 */
+export function normalizePayrollStatus(s: string): PayrollStatus {
+  if (s === 'SUBMITTED') return 'PENDING_CONFIRM';
+  if (s === 'CONFIRMED') return 'PENDING_PAYMENT';
+  return s as PayrollStatus;
+}
 
 async function requireAdmin() {
   const s = await getSession();
@@ -65,6 +87,153 @@ function toYmd(s: unknown): string {
   return prim;
 }
 
+function profileFromDb(u: {
+  id: string;
+  profile: UserProfileSnapshotInput | null;
+}): UserProfileSnapshotInput {
+  const baseSalary = u.profile?.defaultBaseSalaryHkd ?? 0;
+  return {
+    legalNameEn: u.profile?.legalNameEn ?? `User ${u.id.slice(-6)}`,
+    legalNameZh: u.profile?.legalNameZh ?? null,
+    hkid: u.profile?.hkid ?? null,
+    passportNo: u.profile?.passportNo ?? null,
+    dateOfBirth: u.profile?.dateOfBirth ?? null,
+    jobTitle: u.profile?.jobTitle ?? null,
+    department: u.profile?.department ?? null,
+    dateJoined: u.profile?.dateJoined ?? null,
+    bankName: u.profile?.bankName ?? null,
+    bankAccountNo: u.profile?.bankAccountNo ?? null,
+    mpfAccountNo: u.profile?.mpfAccountNo ?? null,
+    addressLine1: u.profile?.addressLine1 ?? null,
+    addressLine2: u.profile?.addressLine2 ?? null,
+    contactPhone: u.profile?.contactPhone ?? null,
+    contactEmail: u.profile?.contactEmail ?? null,
+    defaultBaseSalaryHkd: baseSalary,
+  };
+}
+
+function itemCreateData(it: PayrollItemInput) {
+  return {
+    itemType: it.itemType,
+    itemCode: it.itemCode,
+    itemName: it.itemName,
+    sourceText: it.sourceText || null,
+    origin: it.origin || 'ADMIN',
+    occurredOn: it.occurredOn ? new Date(String(it.occurredOn)) : null,
+    unitCount: it.unitCount ?? null,
+    unitRateHkd: it.unitRateHkd ?? null,
+    amountHkd: it.amountHkd,
+    sortOrder: it.sortOrder ?? 0,
+  };
+}
+
+async function persistComputed(
+  payrollId: string,
+  computed: ReturnType<typeof computePayroll>,
+  extra: Record<string, unknown> = {},
+) {
+  await prisma.$transaction(async (tx) => {
+    await tx.payrollItem.deleteMany({ where: { payrollId } });
+    await tx.payroll.update({
+      where: { id: payrollId },
+      data: {
+        baseSalaryHkd: computed.baseSalaryHkd,
+        overtimeHkd: computed.overtimeHkd,
+        bonusHkd: computed.bonusHkd,
+        commissionHkd: computed.commissionHkd,
+        allowanceTotalHkd: computed.allowanceTotalHkd,
+        deductionTotalHkd: computed.deductionTotalHkd,
+        grossTotalHkd: computed.grossTotalHkd,
+        netPayableHkd: computed.netPayableHkd,
+        items: { create: computed.items.map(itemCreateData) },
+        ...extra,
+      },
+    });
+  });
+}
+
+async function applyPendingIouToPayroll(payrollId: string, actorUserId: string) {
+  const p = await prisma.payroll.findUnique({
+    where: { id: payrollId },
+    include: {
+      cycle: true,
+      items: true,
+    },
+  });
+  if (!p) return { applied: 0 };
+  if (p.status !== 'DRAFT' && p.status !== 'REJECTED' && p.status !== 'PENDING_APPROVAL') {
+    return { applied: 0 };
+  }
+
+  const pending = await prisma.salaryIouInstallment.findMany({
+    where: {
+      status: 'PENDING',
+      iou: { userId: p.userId, status: 'ACTIVE' },
+      dueDate: { gte: p.cycle.periodStart, lte: p.cycle.periodEnd },
+    },
+  });
+  if (pending.length === 0) return { applied: 0 };
+
+  const existingIouSources = new Set(
+    p.items
+      .filter((it) => it.itemCode === 'IOU_REPAY' && it.sourceText)
+      .map((it) => it.sourceText as string),
+  );
+
+  const newLines: PayrollItemInput[] = [];
+  const appliedIds: string[] = [];
+  for (const inst of pending) {
+    const line = iouInstallmentToPayrollLine(inst);
+    if (line.sourceText && existingIouSources.has(line.sourceText)) continue;
+    newLines.push(line);
+    appliedIds.push(inst.id);
+  }
+  if (newLines.length === 0) return { applied: 0 };
+
+  const keepLines: PayrollItemInput[] = p.items
+    .filter((it) => it.itemCode !== 'BASE_SALARY')
+    .map((it) => ({
+      itemType: (it.itemType === 'DEDUCTION' ? 'DEDUCTION' : 'EARNING') as 'EARNING' | 'DEDUCTION',
+      itemCode: it.itemCode,
+      itemName: it.itemName,
+      sourceText: it.sourceText,
+      origin: (it.origin as 'ADMIN' | 'MEMBER' | 'IOU_AUTO') || 'ADMIN',
+      occurredOn: it.occurredOn,
+      unitCount: it.unitCount,
+      unitRateHkd: it.unitRateHkd,
+      amountHkd: it.amountHkd,
+      sortOrder: it.sortOrder,
+    }));
+
+  const computed = computePayroll({
+    baseSalaryHkd: p.baseSalaryHkd,
+    remark: p.remark,
+    lines: [...keepLines, ...newLines],
+  });
+  await persistComputed(payrollId, computed, { revisedAt: new Date() });
+
+  await prisma.salaryIouInstallment.updateMany({
+    where: { id: { in: appliedIds } },
+    data: { status: 'APPLIED', payrollId, appliedAt: new Date() },
+  });
+
+  // 若所有分期已套用，標記 IOU SETTLED
+  const iouIds = [...new Set(pending.map((x) => x.iouId))];
+  for (const iouId of iouIds) {
+    const left = await prisma.salaryIouInstallment.count({
+      where: { iouId, status: 'PENDING' },
+    });
+    if (left === 0) {
+      await prisma.salaryIou.update({ where: { id: iouId }, data: { status: 'SETTLED' } });
+    }
+  }
+
+  await appendPayrollAudit(payrollId, actorUserId, 'IOU_APPLY', `自動帶入 ${appliedIds.length} 期預支／借款還款`, {
+    installmentIds: appliedIds,
+  });
+  return { applied: appliedIds.length };
+}
+
 // ---------- Salary Cycle (Admin) ----------
 export async function createSalaryCycle(input: {
   cycleType: SalaryCycleType;
@@ -76,7 +245,7 @@ export async function createSalaryCycle(input: {
   const s = await requireAdmin();
   const cycle = await prisma.salaryCycle.create({
     data: {
-      cycleType: input.cycleType,
+      cycleType: input.cycleType || 'MONTHLY',
       periodStart: new Date(input.periodStart),
       periodEnd: new Date(input.periodEnd),
       payrollDate: new Date(input.payrollDate),
@@ -153,9 +322,12 @@ export async function refreshCycleStats(cycleId: string) {
     amountPaidTotalHkd: 0,
   };
   for (const r of agg) {
+    const st = normalizePayrollStatus(r.status);
     totals.headcountTotal += r._count._all;
-    if (r.status === 'CONFIRMED' || r.status === 'PAID') totals.headcountConfirmed += r._count._all;
-    if (r.status === 'PAID') {
+    if (st === 'PENDING_PAYMENT' || st === 'PAID' || st === 'CONFIRMED') {
+      totals.headcountConfirmed += r._count._all;
+    }
+    if (st === 'PAID') {
       totals.headcountPaid += r._count._all;
       totals.amountPaidTotalHkd += r._sum.netPayableHkd ?? 0;
     }
@@ -189,153 +361,66 @@ export async function saveMyProfile(userId: string, profile: UserProfileSnapshot
   if (!phoneNorm.ok) throw new Error(phoneNorm.error);
   const contactPhone = phoneNorm.phoneE164;
 
+  const data = {
+    legalNameEn: profile.legalNameEn,
+    legalNameZh: profile.legalNameZh || null,
+    hkid: profile.hkid || null,
+    passportNo: profile.passportNo || null,
+    dateOfBirth: profile.dateOfBirth ? new Date(profile.dateOfBirth as string) : null,
+    jobTitle: profile.jobTitle || null,
+    department: profile.department || null,
+    dateJoined: profile.dateJoined ? new Date(profile.dateJoined as string) : null,
+    defaultBaseSalaryHkd: profile.defaultBaseSalaryHkd ?? 0,
+    bankName: profile.bankName || null,
+    bankAccountNo: profile.bankAccountNo || null,
+    mpfAccountNo: profile.mpfAccountNo || null,
+    addressLine1: profile.addressLine1 || null,
+    addressLine2: profile.addressLine2 || null,
+    contactPhone,
+    contactEmail: profile.contactEmail || null,
+    emergencyName: profile.emergencyName || null,
+    emergencyPhone: profile.emergencyPhone || null,
+  };
+
   const saved = await prisma.userProfile.upsert({
     where: { userId },
-    create: {
-      userId,
-      legalNameEn: profile.legalNameEn,
-      legalNameZh: profile.legalNameZh || null,
-      hkid: profile.hkid || null,
-      passportNo: profile.passportNo || null,
-      dateOfBirth: profile.dateOfBirth ? new Date(profile.dateOfBirth as string) : null,
-      jobTitle: profile.jobTitle || null,
-      department: profile.department || null,
-      dateJoined: profile.dateJoined ? new Date(profile.dateJoined as string) : null,
-      defaultBaseSalaryHkd: profile.defaultBaseSalaryHkd ?? 0,
-      bankName: profile.bankName || null,
-      bankAccountNo: profile.bankAccountNo || null,
-      mpfAccountNo: profile.mpfAccountNo || null,
-      addressLine1: profile.addressLine1 || null,
-      addressLine2: profile.addressLine2 || null,
-      contactPhone,
-      contactEmail: profile.contactEmail || null,
-      emergencyName: profile.emergencyName || null,
-      emergencyPhone: profile.emergencyPhone || null,
-    },
-    update: {
-      legalNameEn: profile.legalNameEn,
-      legalNameZh: profile.legalNameZh || null,
-      hkid: profile.hkid || null,
-      passportNo: profile.passportNo || null,
-      dateOfBirth: profile.dateOfBirth ? new Date(profile.dateOfBirth as string) : null,
-      jobTitle: profile.jobTitle || null,
-      department: profile.department || null,
-      dateJoined: profile.dateJoined ? new Date(profile.dateJoined as string) : null,
-      defaultBaseSalaryHkd: profile.defaultBaseSalaryHkd ?? 0,
-      bankName: profile.bankName || null,
-      bankAccountNo: profile.bankAccountNo || null,
-      mpfAccountNo: profile.mpfAccountNo || null,
-      addressLine1: profile.addressLine1 || null,
-      addressLine2: profile.addressLine2 || null,
-      contactPhone,
-      contactEmail: profile.contactEmail || null,
-      emergencyName: profile.emergencyName || null,
-      emergencyPhone: profile.emergencyPhone || null,
-    },
+    create: { userId, ...data },
+    update: data,
   });
-
-  // 聯絡電話即 WhatsApp 身份：同步綁定表
   await syncWhatsAppBindingForUser(userId, contactPhone);
-
   return ser(saved);
 }
 
 export async function adminUpdateUserProfile(userId: string, profile: UserProfileSnapshotInput & { emergencyName?: string | null; emergencyPhone?: string | null }) {
   await requireAdmin();
-  if (!profile.legalNameEn || !profile.legalNameEn.trim()) {
-    throw new Error('legalNameEn 為必填');
-  }
-
-  const phoneNorm = normalizeContactPhoneInput(profile.contactPhone);
-  if (!phoneNorm.ok) throw new Error(phoneNorm.error);
-  const contactPhone = phoneNorm.phoneE164;
-
-  const saved = await prisma.userProfile.upsert({
-    where: { userId },
-    create: {
-      userId,
-      legalNameEn: profile.legalNameEn,
-      legalNameZh: profile.legalNameZh || null,
-      hkid: profile.hkid || null,
-      passportNo: profile.passportNo || null,
-      dateOfBirth: profile.dateOfBirth ? new Date(profile.dateOfBirth as string) : null,
-      jobTitle: profile.jobTitle || null,
-      department: profile.department || null,
-      dateJoined: profile.dateJoined ? new Date(profile.dateJoined as string) : null,
-      defaultBaseSalaryHkd: profile.defaultBaseSalaryHkd ?? 0,
-      bankName: profile.bankName || null,
-      bankAccountNo: profile.bankAccountNo || null,
-      mpfAccountNo: profile.mpfAccountNo || null,
-      addressLine1: profile.addressLine1 || null,
-      addressLine2: profile.addressLine2 || null,
-      contactPhone,
-      contactEmail: profile.contactEmail || null,
-      emergencyName: profile.emergencyName || null,
-      emergencyPhone: profile.emergencyPhone || null,
-    },
-    update: {
-      legalNameEn: profile.legalNameEn,
-      legalNameZh: profile.legalNameZh || null,
-      hkid: profile.hkid || null,
-      passportNo: profile.passportNo || null,
-      dateOfBirth: profile.dateOfBirth ? new Date(profile.dateOfBirth as string) : null,
-      jobTitle: profile.jobTitle || null,
-      department: profile.department || null,
-      dateJoined: profile.dateJoined ? new Date(profile.dateJoined as string) : null,
-      defaultBaseSalaryHkd: profile.defaultBaseSalaryHkd ?? 0,
-      bankName: profile.bankName || null,
-      bankAccountNo: profile.bankAccountNo || null,
-      mpfAccountNo: profile.mpfAccountNo || null,
-      addressLine1: profile.addressLine1 || null,
-      addressLine2: profile.addressLine2 || null,
-      contactPhone,
-      contactEmail: profile.contactEmail || null,
-      emergencyName: profile.emergencyName || null,
-      emergencyPhone: profile.emergencyPhone || null,
-    },
-  });
-
-  await syncWhatsAppBindingForUser(userId, contactPhone);
-
-  return ser(saved);
+  return saveMyProfile(userId, profile);
 }
 
-// ---------- Payroll (Admin core) ----------
+// ---------- Payroll core ----------
 export async function batchCreatePayrolls(cycleId: string, userIds: string[]) {
   const s = await requireAdmin();
+  const cycle = await prisma.salaryCycle.findUnique({ where: { id: cycleId } });
+  if (!cycle) throw new Error('Cycle not found');
+
   const usersWithProfile = await prisma.user.findMany({
     where: { id: { in: userIds } },
-    select: {
-      id: true,
-      profile: true,
-    },
+    select: { id: true, profile: true },
   });
   if (usersWithProfile.length === 0) throw new Error('No users');
 
+  const existing = await prisma.payroll.findMany({
+    where: { salaryCycleId: cycleId, userId: { in: userIds } },
+    select: { userId: true },
+  });
+  const existingSet = new Set(existing.map((e) => e.userId));
+
   const createdIds: string[] = [];
   for (const u of usersWithProfile) {
-    const baseSalary = u.profile?.defaultBaseSalaryHkd ?? 0;
-    const profileSnapInput: UserProfileSnapshotInput = {
-      legalNameEn: u.profile?.legalNameEn ?? `User ${u.id.slice(-6)}`,
-      legalNameZh: u.profile?.legalNameZh ?? null,
-      hkid: u.profile?.hkid ?? null,
-      passportNo: u.profile?.passportNo ?? null,
-      dateOfBirth: u.profile?.dateOfBirth ?? null,
-      jobTitle: u.profile?.jobTitle ?? null,
-      department: u.profile?.department ?? null,
-      dateJoined: u.profile?.dateJoined ?? null,
-      bankName: u.profile?.bankName ?? null,
-      bankAccountNo: u.profile?.bankAccountNo ?? null,
-      mpfAccountNo: u.profile?.mpfAccountNo ?? null,
-      addressLine1: u.profile?.addressLine1 ?? null,
-      addressLine2: u.profile?.addressLine2 ?? null,
-      contactPhone: u.profile?.contactPhone ?? null,
-      contactEmail: u.profile?.contactEmail ?? null,
-      defaultBaseSalaryHkd: baseSalary,
-    };
+    if (existingSet.has(u.id)) continue;
+    const profileSnapInput = profileFromDb(u);
     const snap = snapshotProfile(profileSnapInput);
-    const amounts: PayrollAmountsInput = { baseSalaryHkd: baseSalary };
-    const computed = computePayroll(amounts);
+    const baseSalary = profileSnapInput.defaultBaseSalaryHkd ?? 0;
+    const computed = computePayroll({ baseSalaryHkd: baseSalary });
 
     const result = await prisma.payroll.create({
       data: {
@@ -351,115 +436,275 @@ export async function batchCreatePayrolls(cycleId: string, userIds: string[]) {
         grossTotalHkd: computed.grossTotalHkd,
         netPayableHkd: computed.netPayableHkd,
         status: 'DRAFT',
-        items: {
-          create: computed.items.map((it) => ({
-            itemType: it.itemType,
-            itemCode: it.itemCode,
-            itemName: it.itemName,
-            sourceText: it.sourceText || null,
-            unitCount: it.unitCount ?? null,
-            unitRateHkd: it.unitRateHkd ?? null,
-            amountHkd: it.amountHkd,
-            sortOrder: it.sortOrder ?? 0,
-          })),
-        },
+        items: { create: computed.items.map(itemCreateData) },
       },
     });
     createdIds.push(result.id);
+    await appendPayrollAudit(result.id, s.userId, 'CREATE', '建立月度薪金單（草稿）', {
+      baseSalaryHkd: baseSalary,
+    });
+    await applyPendingIouToPayroll(result.id, s.userId);
   }
   await refreshCycleStats(cycleId);
   return { created: createdIds, adminId: s.userId };
 }
 
-export async function updatePayrollAmounts(payrollId: string, amountsInput: PayrollAmountsInput & { adminNote?: string | null }) {
-  await requireAdmin();
-  const existing = await prisma.payroll.findUnique({ where: { id: payrollId }, select: { status: true, userId: true } });
-  if (!existing) throw new Error('Payroll not found');
-  if (existing.status !== 'DRAFT' && existing.status !== 'REJECTED') {
-    throw new Error('Only DRAFT / REJECTED payroll can be updated');
-  }
-  const computed = computePayroll(amountsInput);
-  await prisma.$transaction(async (tx) => {
-    await tx.payrollItem.deleteMany({ where: { payrollId } });
-    await tx.payroll.update({
-      where: { id: payrollId },
-      data: {
-        baseSalaryHkd: computed.baseSalaryHkd,
-        overtimeHkd: computed.overtimeHkd,
-        bonusHkd: computed.bonusHkd,
-        commissionHkd: computed.commissionHkd,
-        allowanceTotalHkd: computed.allowanceTotalHkd,
-        deductionTotalHkd: computed.deductionTotalHkd,
-        grossTotalHkd: computed.grossTotalHkd,
-        netPayableHkd: computed.netPayableHkd,
-        status: 'DRAFT',
-        revisedAt: new Date(),
-        employeeNote: null,
-        rejectedAt: null,
-        adminNote: amountsInput.adminNote ?? undefined,
-        items: {
-          create: computed.items.map((it) => ({
-            itemType: it.itemType,
-            itemCode: it.itemCode,
-            itemName: it.itemName,
-            sourceText: it.sourceText || null,
-            unitCount: it.unitCount ?? null,
-            unitRateHkd: it.unitRateHkd ?? null,
-            amountHkd: it.amountHkd,
-            sortOrder: it.sortOrder ?? 0,
-          })),
-        },
-      },
-    });
+export async function updatePayrollAmounts(
+  payrollId: string,
+  amountsInput: PayrollAmountsInput & { adminNote?: string | null; remark?: string | null },
+) {
+  const s = await requireAdmin();
+  const existing = await prisma.payroll.findUnique({
+    where: { id: payrollId },
+    include: { items: true },
   });
+  if (!existing) throw new Error('Payroll not found');
+  const st = normalizePayrollStatus(existing.status);
+  if (st !== 'DRAFT' && st !== 'REJECTED' && st !== 'PENDING_APPROVAL') {
+    throw new Error('僅草稿／待審批／已駁回可編輯');
+  }
+
+  const beforeItems = existing.items.map((it) => ({
+    itemCode: it.itemCode,
+    itemName: it.itemName,
+    amountHkd: it.amountHkd,
+  }));
+
+  const computed = computePayroll(amountsInput);
+  await persistComputed(payrollId, computed, {
+    status: st === 'PENDING_APPROVAL' ? 'PENDING_APPROVAL' : 'DRAFT',
+    revisedAt: new Date(),
+    employeeNote: st === 'REJECTED' ? null : existing.employeeNote,
+    rejectedAt: st === 'REJECTED' ? null : existing.rejectedAt,
+    adminNote: amountsInput.adminNote ?? existing.adminNote,
+    remark: amountsInput.remark ?? existing.remark,
+  });
+
+  await appendPayrollAudit(payrollId, s.userId, 'EDIT_CHANGE', '管理員更新薪金明細', {
+    before: beforeItems,
+    after: computed.items.map((it) => ({
+      itemCode: it.itemCode,
+      itemName: it.itemName,
+      amountHkd: it.amountHkd,
+    })),
+  });
+
   const p = await prisma.payroll.findUnique({ where: { id: payrollId }, select: { salaryCycleId: true } });
   if (p?.salaryCycleId) await refreshCycleStats(p.salaryCycleId);
   return computed;
 }
 
-export async function submitPayrollForConfirmation(payrollId: string) {
-  const s = await requireAdmin();
-  const p = await prisma.payroll.findUnique({ where: { id: payrollId }, select: { status: true, salaryCycleId: true } });
+/** 成員上交申報 → 待審批 */
+export async function submitPayrollForApproval(payrollId: string) {
+  const s = await requireSession();
+  const p = await prisma.payroll.findUnique({
+    where: { id: payrollId },
+    select: { status: true, salaryCycleId: true, userId: true },
+  });
   if (!p) throw new Error('Payroll not found');
-  if (p.status !== 'DRAFT' && p.status !== 'REJECTED') throw new Error('Only DRAFT/REJECTED can be submitted');
+  if (!s.isAdmin && p.userId !== s.userId) throw new Error('Forbidden');
+  const st = normalizePayrollStatus(p.status);
+  if (st !== 'DRAFT' && st !== 'REJECTED') throw new Error('僅草稿／已駁回可上交');
+
+  await applyPendingIouToPayroll(payrollId, s.userId);
+
   const updated = await prisma.payroll.update({
     where: { id: payrollId },
-    data: { status: 'SUBMITTED', submittedAt: new Date(), submittedByUserId: s.userId, rejectedAt: null, employeeNote: null },
+    data: {
+      status: 'PENDING_APPROVAL',
+      submittedAt: new Date(),
+      submittedByUserId: s.userId,
+      rejectedAt: null,
+    },
   });
+  await appendPayrollAudit(payrollId, s.userId, 'SUBMIT', '上交薪金申報（待審批）');
   if (p.salaryCycleId) await refreshCycleStats(p.salaryCycleId);
   return ser(updated);
+}
+
+/** 管理員審批通過 → 待確認（可同時帶入編輯後金額） */
+export async function approvePayroll(
+  payrollId: string,
+  opts?: { amounts?: PayrollAmountsInput & { adminNote?: string | null; remark?: string | null } },
+) {
+  const s = await requireAdmin();
+  const p = await prisma.payroll.findUnique({ where: { id: payrollId } });
+  if (!p) throw new Error('Payroll not found');
+  const st = normalizePayrollStatus(p.status);
+  if (st !== 'PENDING_APPROVAL' && st !== 'DRAFT') {
+    throw new Error('僅待審批／草稿可審批送出');
+  }
+
+  if (opts?.amounts) {
+    const computed = computePayroll(opts.amounts);
+    await persistComputed(payrollId, computed, {
+      adminNote: opts.amounts.adminNote ?? p.adminNote,
+      remark: opts.amounts.remark ?? p.remark,
+      revisedAt: new Date(),
+    });
+    await appendPayrollAudit(payrollId, s.userId, 'EDIT_CHANGE', '審批前調整明細', {
+      netPayableHkd: computed.netPayableHkd,
+    });
+  }
+
+  const updated = await prisma.payroll.update({
+    where: { id: payrollId },
+    data: {
+      status: 'PENDING_CONFIRM',
+      approvedAt: new Date(),
+      approvedByUserId: s.userId,
+      submittedAt: p.submittedAt || new Date(),
+      submittedByUserId: p.submittedByUserId || s.userId,
+      rejectedAt: null,
+      employeeNote: null,
+    },
+  });
+  await appendPayrollAudit(payrollId, s.userId, 'APPROVE', '審批通過（待成員確認）');
+  if (p.salaryCycleId) await refreshCycleStats(p.salaryCycleId);
+  return ser(updated);
+}
+
+/** @deprecated 相容舊 UI：改呼叫 approvePayroll */
+export async function submitPayrollForConfirmation(payrollId: string) {
+  return approvePayroll(payrollId);
 }
 
 export async function batchSubmitPayrolls(payrollIds: string[]) {
   for (const id of payrollIds) {
-    try { await submitPayrollForConfirmation(id); } catch (_e) { /* non-fatal for batch */ }
+    try { await approvePayroll(id); } catch (_e) { /* non-fatal */ }
   }
   return { ok: true };
 }
 
+export async function batchApprovePayrolls(payrollIds: string[]) {
+  return batchSubmitPayrolls(payrollIds);
+}
+
 export async function withdrawPayroll(payrollId: string) {
-  await requireAdmin();
+  const s = await requireAdmin();
   const p = await prisma.payroll.findUnique({ where: { id: payrollId }, select: { status: true, salaryCycleId: true } });
   if (!p) throw new Error('Payroll not found');
-  if (p.status !== 'SUBMITTED') throw new Error('Only SUBMITTED can be withdrawn');
+  const st = normalizePayrollStatus(p.status);
+  if (st !== 'PENDING_APPROVAL' && st !== 'PENDING_CONFIRM') {
+    throw new Error('僅待審批／待確認可撤回');
+  }
   const updated = await prisma.payroll.update({
     where: { id: payrollId },
-    data: { status: 'DRAFT', submittedAt: null, submittedByUserId: null, revisedAt: new Date() },
+    data: {
+      status: 'DRAFT',
+      submittedAt: null,
+      submittedByUserId: null,
+      approvedAt: null,
+      approvedByUserId: null,
+      revisedAt: new Date(),
+    },
   });
+  await appendPayrollAudit(payrollId, s.userId, 'WITHDRAW', '撤回至草稿');
   if (p.salaryCycleId) await refreshCycleStats(p.salaryCycleId);
   return ser(updated);
 }
 
-export async function confirmPayroll(payrollId: string, employeeNote?: string) {
-  const s = await requireSession();
-  const p = await prisma.payroll.findUnique({ where: { id: payrollId }, select: { userId: true, status: true, salaryCycleId: true } });
+export async function adminRejectPayroll(payrollId: string, reason: string) {
+  const s = await requireAdmin();
+  if (!reason || reason.trim().length < 2) throw new Error('駁回理由至少 2 字');
+  const p = await prisma.payroll.findUnique({ where: { id: payrollId }, select: { status: true, salaryCycleId: true } });
   if (!p) throw new Error('Payroll not found');
-  if (p.userId !== s.userId) throw new Error('Forbidden (not owner)');
-  if (p.status !== 'SUBMITTED') throw new Error('Only SUBMITTED can be confirmed');
+  const st = normalizePayrollStatus(p.status);
+  if (st !== 'PENDING_APPROVAL' && st !== 'PENDING_CONFIRM') {
+    throw new Error('僅待審批／待確認可駁回');
+  }
   const updated = await prisma.payroll.update({
     where: { id: payrollId },
-    data: { status: 'CONFIRMED', confirmedAt: new Date(), employeeNote: employeeNote || null },
+    data: {
+      status: 'REJECTED',
+      rejectedAt: new Date(),
+      adminNote: reason.trim(),
+      approvedAt: null,
+      approvedByUserId: null,
+    },
   });
+  await appendPayrollAudit(payrollId, s.userId, 'REJECT', `管理員駁回：${reason.trim()}`);
+  if (p.salaryCycleId) await refreshCycleStats(p.salaryCycleId);
+  return ser(updated);
+}
+
+async function attachPayslipPdfAndImages(payrollId: string, actorUserId: string) {
+  const { pdf } = await buildPdfForPayroll(payrollId, {
+    isAdmin: true,
+    sessionUserId: actorUserId,
+    locale: 'zh',
+  });
+
+  // 清掉舊 PDF 頁面附件
+  await prisma.attachment.deleteMany({ where: { payrollPdfId: payrollId } });
+
+  const pdfAtt = pdfBytesToDataUrl(pdf);
+  await prisma.attachment.create({
+    data: {
+      fileUrl: pdfAtt.dataUrl,
+      size: pdfAtt.size,
+      note: '薪金單 PDF',
+      uploaderId: actorUserId,
+      payrollPdfId: payrollId,
+    },
+  });
+
+  let pageCount = 0;
+  try {
+    const rendered = await pdfBytesToPageImages(pdf);
+    for (const page of rendered.pages) {
+      await prisma.attachment.create({
+        data: {
+          fileUrl: page.dataUrl,
+          size: page.size,
+          note: page.note,
+          uploaderId: actorUserId,
+          payrollPdfId: payrollId,
+        },
+      });
+      pageCount += 1;
+    }
+  } catch (e) {
+    console.error('[attachPayslipPdfAndImages] PDF→image failed:', String(e));
+  }
+
+  await prisma.payroll.update({
+    where: { id: payrollId },
+    data: { pdfGeneratedAt: new Date() },
+  });
+
+  return { pageCount, pdfSize: pdfAtt.size };
+}
+
+export async function confirmPayroll(payrollId: string, employeeNote?: string) {
+  const s = await requireSession();
+  const p = await prisma.payroll.findUnique({
+    where: { id: payrollId },
+    select: { userId: true, status: true, salaryCycleId: true },
+  });
+  if (!p) throw new Error('Payroll not found');
+  if (p.userId !== s.userId) throw new Error('Forbidden (not owner)');
+  const st = normalizePayrollStatus(p.status);
+  if (st !== 'PENDING_CONFIRM') throw new Error('僅待確認狀態可確認');
+
+  const updated = await prisma.payroll.update({
+    where: { id: payrollId },
+    data: {
+      status: 'PENDING_PAYMENT',
+      confirmedAt: new Date(),
+      employeeNote: employeeNote || null,
+    },
+  });
+  await appendPayrollAudit(payrollId, s.userId, 'CONFIRM', '成員確認薪金單（待付款）');
+
+  try {
+    const att = await attachPayslipPdfAndImages(payrollId, s.userId);
+    await appendPayrollAudit(payrollId, s.userId, 'CONFIRM', `已附加薪金 PDF／頁面圖（${att.pageCount} 頁）`, att);
+  } catch (e) {
+    console.error('[confirmPayroll] attach pdf failed:', String(e));
+    await appendPayrollAudit(payrollId, s.userId, 'CONFIRM', `PDF 附件失敗：${String(e).slice(0, 200)}`);
+  }
+
   if (p.salaryCycleId) await refreshCycleStats(p.salaryCycleId);
   return ser(updated);
 }
@@ -467,14 +712,19 @@ export async function confirmPayroll(payrollId: string, employeeNote?: string) {
 export async function rejectPayroll(payrollId: string, reason: string) {
   const s = await requireSession();
   if (!reason || reason.trim().length < 3) throw new Error('拒絕理由必須至少 3 字');
-  const p = await prisma.payroll.findUnique({ where: { id: payrollId }, select: { userId: true, status: true, salaryCycleId: true } });
+  const p = await prisma.payroll.findUnique({
+    where: { id: payrollId },
+    select: { userId: true, status: true, salaryCycleId: true },
+  });
   if (!p) throw new Error('Payroll not found');
   if (p.userId !== s.userId) throw new Error('Forbidden');
-  if (p.status !== 'SUBMITTED') throw new Error('Only SUBMITTED can be rejected');
+  const st = normalizePayrollStatus(p.status);
+  if (st !== 'PENDING_CONFIRM') throw new Error('僅待確認可拒絕');
   const updated = await prisma.payroll.update({
     where: { id: payrollId },
     data: { status: 'REJECTED', rejectedAt: new Date(), employeeNote: reason.trim() },
   });
+  await appendPayrollAudit(payrollId, s.userId, 'REJECT', `成員拒絕：${reason.trim()}`);
   if (p.salaryCycleId) await refreshCycleStats(p.salaryCycleId);
   return ser(updated);
 }
@@ -483,7 +733,10 @@ export async function markPayrollPaid(payrollId: string, info: { paidAt?: string
   const s = await requireAdmin();
   const p = await prisma.payroll.findUnique({ where: { id: payrollId }, select: { status: true, salaryCycleId: true } });
   if (!p) throw new Error('Payroll not found');
-  if (p.status !== 'CONFIRMED' && p.status !== 'PAID') throw new Error('Only CONFIRMED can be marked paid');
+  const st = normalizePayrollStatus(p.status);
+  if (st !== 'PENDING_PAYMENT' && st !== 'PAID' && st !== 'CONFIRMED') {
+    throw new Error('僅待付款可標記完成');
+  }
   const updated = await prisma.payroll.update({
     where: { id: payrollId },
     data: {
@@ -493,6 +746,9 @@ export async function markPayrollPaid(payrollId: string, info: { paidAt?: string
       paidReference: info.paidReference || null,
       paidAttachmentId: info.paidAttachmentId || null,
     },
+  });
+  await appendPayrollAudit(payrollId, s.userId, 'MARK_PAID', '標記已付款（完成）', {
+    paidReference: info.paidReference || null,
   });
   if (p.salaryCycleId) await refreshCycleStats(p.salaryCycleId);
   return ser(updated);
@@ -505,12 +761,263 @@ export async function deletePayroll(payrollId: string) {
     select: { status: true, salaryCycleId: true },
   });
   if (!p) return {};
-  if (p.status === 'SUBMITTED' || p.status === 'CONFIRMED' || p.status === 'PAID') {
-    throw new Error('Only DRAFT / REJECTED can be deleted');
+  const st = normalizePayrollStatus(p.status);
+  if (st !== 'DRAFT' && st !== 'REJECTED') {
+    throw new Error('僅草稿／已駁回可刪除');
   }
+  // 解除 IOU 分期綁定
+  await prisma.salaryIouInstallment.updateMany({
+    where: { payrollId },
+    data: { status: 'PENDING', payrollId: null, appliedAt: null },
+  });
   await prisma.payroll.delete({ where: { id: payrollId } });
   if (p.salaryCycleId) await refreshCycleStats(p.salaryCycleId);
   return { deleted: payrollId };
+}
+
+// ---------- Member self-report lines ----------
+export async function addPayrollClaimLine(
+  payrollId: string,
+  line: {
+    itemCode: string;
+    occurredOn: string;
+    unitCount?: number | null;
+    unitRateHkd?: number | null;
+    amountHkd: number;
+    note?: string | null;
+  },
+) {
+  const s = await requireSession();
+  const p = await prisma.payroll.findUnique({
+    where: { id: payrollId },
+    include: { items: true },
+  });
+  if (!p) throw new Error('Payroll not found');
+  if (!s.isAdmin && p.userId !== s.userId) throw new Error('Forbidden');
+  const st = normalizePayrollStatus(p.status);
+  const adminCanEditPending = s.isAdmin && st === 'PENDING_APPROVAL';
+  if (st !== 'DRAFT' && st !== 'REJECTED' && !adminCanEditPending) {
+    throw new Error('僅草稿／已駁回可新增申報');
+  }
+
+  const code = line.itemCode;
+  if (!s.isAdmin && !(MEMBER_CLAIM_CODES as readonly string[]).includes(code)) {
+    throw new Error('成員不可申報此項目類型');
+  }
+  const meta = ITEM_CODE_META[code] || { itemType: 'EARNING' as const, defaultName: code };
+
+  const newLine: PayrollItemInput = {
+    itemType: meta.itemType,
+    itemCode: code,
+    itemName: meta.defaultName,
+    sourceText: line.note || undefined,
+    origin: s.isAdmin ? 'ADMIN' : 'MEMBER',
+    occurredOn: line.occurredOn,
+    unitCount: line.unitCount ?? null,
+    unitRateHkd: line.unitRateHkd ?? null,
+    amountHkd: line.amountHkd,
+    sortOrder: 50 + p.items.length,
+  };
+
+  const keep = p.items
+    .filter((it) => it.itemCode !== 'BASE_SALARY')
+    .map((it) => ({
+      itemType: (it.itemType === 'DEDUCTION' ? 'DEDUCTION' : 'EARNING') as 'EARNING' | 'DEDUCTION',
+      itemCode: it.itemCode,
+      itemName: it.itemName,
+      sourceText: it.sourceText,
+      origin: (it.origin as 'ADMIN' | 'MEMBER' | 'IOU_AUTO') || 'ADMIN',
+      occurredOn: it.occurredOn,
+      unitCount: it.unitCount,
+      unitRateHkd: it.unitRateHkd,
+      amountHkd: it.amountHkd,
+      sortOrder: it.sortOrder,
+    }));
+
+  const computed = computePayroll({
+    baseSalaryHkd: p.baseSalaryHkd,
+    remark: p.remark,
+    lines: [...keep, newLine],
+  });
+  await persistComputed(payrollId, computed, {
+    revisedAt: new Date(),
+    status: adminCanEditPending ? 'PENDING_APPROVAL' : 'DRAFT',
+  });
+  await appendPayrollAudit(
+    payrollId,
+    s.userId,
+    'EDIT_ADD',
+    summarizeItemChange(null, { itemCode: newLine.itemCode, itemName: newLine.itemName, amountHkd: newLine.amountHkd }),
+    { line: newLine },
+  );
+  return computed;
+}
+
+export async function removePayrollClaimLine(payrollId: string, itemId: string) {
+  const s = await requireSession();
+  const p = await prisma.payroll.findUnique({
+    where: { id: payrollId },
+    include: { items: true },
+  });
+  if (!p) throw new Error('Payroll not found');
+  if (!s.isAdmin && p.userId !== s.userId) throw new Error('Forbidden');
+  const st = normalizePayrollStatus(p.status);
+  if (st !== 'DRAFT' && st !== 'REJECTED' && !(s.isAdmin && st === 'PENDING_APPROVAL')) {
+    throw new Error('目前狀態不可刪除項目');
+  }
+
+  const target = p.items.find((it) => it.id === itemId);
+  if (!target) throw new Error('項目不存在');
+  if (target.itemCode === 'BASE_SALARY') throw new Error('不可刪除底薪');
+  if (!s.isAdmin && target.origin === 'IOU_AUTO') throw new Error('不可刪除自動還款項');
+  if (!s.isAdmin && target.origin === 'ADMIN') throw new Error('不可刪除管理員項目');
+
+  const keep = p.items
+    .filter((it) => it.id !== itemId && it.itemCode !== 'BASE_SALARY')
+    .map((it) => ({
+      itemType: (it.itemType === 'DEDUCTION' ? 'DEDUCTION' : 'EARNING') as 'EARNING' | 'DEDUCTION',
+      itemCode: it.itemCode,
+      itemName: it.itemName,
+      sourceText: it.sourceText,
+      origin: (it.origin as 'ADMIN' | 'MEMBER' | 'IOU_AUTO') || 'ADMIN',
+      occurredOn: it.occurredOn,
+      unitCount: it.unitCount,
+      unitRateHkd: it.unitRateHkd,
+      amountHkd: it.amountHkd,
+      sortOrder: it.sortOrder,
+    }));
+
+  const computed = computePayroll({
+    baseSalaryHkd: p.baseSalaryHkd,
+    remark: p.remark,
+    lines: keep,
+  });
+  await persistComputed(payrollId, computed, { revisedAt: new Date() });
+  await appendPayrollAudit(
+    payrollId,
+    s.userId,
+    'EDIT_REMOVE',
+    summarizeItemChange(
+      { itemCode: target.itemCode, itemName: target.itemName, amountHkd: target.amountHkd },
+      null,
+    ),
+  );
+  return computed;
+}
+
+export async function addAdminPayrollLine(
+  payrollId: string,
+  line: {
+    itemCode: string;
+    occurredOn?: string | null;
+    unitCount?: number | null;
+    amountHkd: number;
+    note?: string | null;
+    itemName?: string | null;
+  },
+) {
+  await requireAdmin();
+  const meta = ITEM_CODE_META[line.itemCode] || { itemType: 'EARNING' as const, defaultName: line.itemCode };
+  return addPayrollClaimLine(payrollId, {
+    itemCode: line.itemCode,
+    occurredOn: line.occurredOn || new Date().toISOString().slice(0, 10),
+    unitCount: line.unitCount,
+    amountHkd: line.amountHkd,
+    note: line.note || line.itemName || meta.defaultName,
+  });
+}
+
+// ---------- IOU ----------
+export async function createSalaryIou(input: {
+  userId: string;
+  totalAmountHkd: number;
+  startDate: string;
+  note?: string;
+  splitMode: 'EVEN' | 'CUSTOM';
+  periodCount?: number;
+  customAmounts?: number[];
+}) {
+  const s = await requireAdmin();
+  const drafts = buildIouInstallmentDrafts(input);
+  const iou = await prisma.salaryIou.create({
+    data: {
+      userId: input.userId,
+      totalAmountHkd: input.totalAmountHkd,
+      startDate: new Date(input.startDate),
+      note: input.note || null,
+      splitMode: input.splitMode,
+      createdByUserId: s.userId,
+      installments: {
+        create: drafts.map((d) => ({
+          periodIndex: d.periodIndex,
+          dueDate: d.dueDate,
+          amountHkd: d.amountHkd,
+          status: 'PENDING',
+        })),
+      },
+    },
+    include: { installments: { orderBy: { periodIndex: 'asc' } } },
+  });
+
+  // 若已有涵蓋 dueDate 的草稿／待審批薪金單，立即帶入
+  const openPayrolls = await prisma.payroll.findMany({
+    where: {
+      userId: input.userId,
+      status: { in: ['DRAFT', 'REJECTED', 'PENDING_APPROVAL'] },
+    },
+    include: { cycle: true },
+  });
+  for (const p of openPayrolls) {
+    const hit = drafts.some((d) => dueDateInPeriod(d.dueDate, p.cycle.periodStart, p.cycle.periodEnd));
+    if (hit) await applyPendingIouToPayroll(p.id, s.userId);
+  }
+
+  return ser(iou);
+}
+
+export async function listSalaryIous(userId?: string) {
+  await requireAdmin();
+  const rows = await prisma.salaryIou.findMany({
+    where: userId ? { userId } : undefined,
+    orderBy: [{ createdAt: 'desc' }],
+    include: {
+      user: { select: { id: true, roleName: true, profile: { select: { legalNameZh: true, legalNameEn: true } } } },
+      installments: { orderBy: { periodIndex: 'asc' } },
+    },
+    take: 200,
+  });
+  return ser(rows);
+}
+
+export async function cancelSalaryIou(iouId: string) {
+  const s = await requireAdmin();
+  const iou = await prisma.salaryIou.findUnique({
+    where: { id: iouId },
+    include: { installments: true },
+  });
+  if (!iou) throw new Error('IOU not found');
+  const applied = iou.installments.filter((i) => i.status === 'APPLIED');
+  if (applied.length > 0) {
+    throw new Error('已有分期套入薪金單，無法取消（請改略過未套用期）');
+  }
+  await prisma.salaryIouInstallment.updateMany({
+    where: { iouId, status: 'PENDING' },
+    data: { status: 'SKIPPED' },
+  });
+  const updated = await prisma.salaryIou.update({
+    where: { id: iouId },
+    data: { status: 'CANCELLED' },
+  });
+  void s;
+  return ser(updated);
+}
+
+export async function syncIouIntoPayroll(payrollId: string) {
+  const s = await requireAdmin();
+  const result = await applyPendingIouToPayroll(payrollId, s.userId);
+  const p = await prisma.payroll.findUnique({ where: { id: payrollId }, select: { salaryCycleId: true } });
+  if (p?.salaryCycleId) await refreshCycleStats(p.salaryCycleId);
+  return result;
 }
 
 // ---------- Queries ----------
@@ -525,24 +1032,31 @@ export type AdminPayrollQuery = {
   searchKeyword?: string;
 };
 
+function expandStatusFilter(statuses?: PayrollStatus[]): string[] | undefined {
+  if (!statuses || statuses.length === 0) return undefined;
+  const set = new Set<string>();
+  for (const s of statuses) {
+    set.add(s);
+    if (s === 'PENDING_CONFIRM') set.add('SUBMITTED');
+    if (s === 'PENDING_PAYMENT') set.add('CONFIRMED');
+    if (s === 'SUBMITTED') set.add('PENDING_CONFIRM');
+    if (s === 'CONFIRMED') set.add('PENDING_PAYMENT');
+  }
+  return [...set];
+}
+
 export async function adminListPayrolls(q: AdminPayrollQuery) {
   const s = await requireAdmin();
   void s;
   const where: Record<string, unknown> = {};
   if (q.salaryCycleId) where.salaryCycleId = q.salaryCycleId;
   if (q.userId) where.userId = q.userId;
-  if (q.status && q.status.length) where.status = { in: q.status };
+  const statusIn = expandStatusFilter(q.status);
+  if (statusIn) where.status = { in: statusIn };
   if (q.periodStartGte || q.periodEndLte) {
     where.cycle = {} as Record<string, unknown>;
     if (q.periodStartGte) (where.cycle as Record<string, unknown>).periodStart = { gte: new Date(q.periodStartGte) };
     if (q.periodEndLte) (where.cycle as Record<string, unknown>).periodEnd = { lte: new Date(q.periodEndLte) };
-  }
-  if (q.department || q.jobTitle) {
-    // Use snapshotProfileJson path
-    const snapshotFilter: Record<string, unknown> = {};
-    if (q.department) snapshotFilter['department'] = q.department;
-    if (q.jobTitle) snapshotFilter['jobTitle'] = q.jobTitle;
-    where.snapshotProfileJson = { equals: snapshotFilter };
   }
   const rows = await prisma.payroll.findMany({
     where,
@@ -552,9 +1066,13 @@ export async function adminListPayrolls(q: AdminPayrollQuery) {
       user: { select: { id: true, roleName: true } },
       cycle: { select: { id: true, cycleType: true, periodStart: true, periodEnd: true, payrollDate: true, status: true } },
       items: { orderBy: { sortOrder: 'asc' } },
+      auditLogs: {
+        orderBy: { createdAt: 'asc' },
+        include: { actor: { select: { roleName: true, profile: { select: { legalNameZh: true, legalNameEn: true } } } } },
+      },
+      pdfAttachments: { select: { id: true, fileUrl: true, size: true, note: true, createdAt: true } },
     },
   });
-  // keyword search (in-memory after retrieval)
   const kw = q.searchKeyword?.trim().toLowerCase();
   const filtered = kw
     ? rows.filter((r) => {
@@ -566,16 +1084,25 @@ export async function adminListPayrolls(q: AdminPayrollQuery) {
         return hay.includes(kw);
       })
     : rows;
+
+  const normRows = filtered.map((r) => ({
+    ...r,
+    status: normalizePayrollStatus(r.status),
+  }));
+
   const stats = {
-    count: filtered.length,
-    grossTotalHkd: filtered.reduce((s, r) => s + r.grossTotalHkd, 0),
-    deductionTotalHkd: filtered.reduce((s, r) => s + r.deductionTotalHkd, 0),
-    netTotalHkd: filtered.reduce((s, r) => s + r.netPayableHkd, 0),
-    countConfirmed: filtered.filter((r) => r.status === 'CONFIRMED' || r.status === 'PAID').length,
-    countPaid: filtered.filter((r) => r.status === 'PAID').length,
-    amountPaidHkd: filtered.filter((r) => r.status === 'PAID').reduce((s, r) => s + r.netPayableHkd, 0),
+    count: normRows.length,
+    grossTotalHkd: normRows.reduce((sum, r) => sum + r.grossTotalHkd, 0),
+    deductionTotalHkd: normRows.reduce((sum, r) => sum + r.deductionTotalHkd, 0),
+    netTotalHkd: normRows.reduce((sum, r) => sum + r.netPayableHkd, 0),
+    countConfirmed: normRows.filter((r) => r.status === 'PENDING_PAYMENT' || r.status === 'PAID').length,
+    countPaid: normRows.filter((r) => r.status === 'PAID').length,
+    amountPaidHkd: normRows.filter((r) => r.status === 'PAID').reduce((sum, r) => sum + r.netPayableHkd, 0),
+    countPendingApproval: normRows.filter((r) => r.status === 'PENDING_APPROVAL').length,
+    countPendingConfirm: normRows.filter((r) => r.status === 'PENDING_CONFIRM').length,
+    countPendingPayment: normRows.filter((r) => r.status === 'PENDING_PAYMENT').length,
   };
-  return JSON.parse(JSON.stringify({ rows: filtered, stats }));
+  return JSON.parse(JSON.stringify({ rows: normRows, stats }));
 }
 
 export async function listMyPayrolls(userId: string) {
@@ -587,15 +1114,31 @@ export async function listMyPayrolls(userId: string) {
     include: {
       cycle: { select: { id: true, cycleType: true, periodStart: true, periodEnd: true, payrollDate: true, status: true } },
       items: { orderBy: { sortOrder: 'asc' } },
+      auditLogs: { orderBy: { createdAt: 'asc' }, take: 100 },
+      pdfAttachments: { select: { id: true, fileUrl: true, size: true, note: true, createdAt: true } },
     },
     take: 200,
   });
-  return JSON.parse(JSON.stringify(rows));
+  return JSON.parse(JSON.stringify(rows.map((r) => ({ ...r, status: normalizePayrollStatus(r.status) }))));
+}
+
+export async function getPayrollAuditLogs(payrollId: string) {
+  const s = await requireSession();
+  const p = await prisma.payroll.findUnique({ where: { id: payrollId }, select: { userId: true } });
+  if (!p) throw new Error('Payroll not found');
+  if (!s.isAdmin && p.userId !== s.userId) throw new Error('Forbidden');
+  const logs = await prisma.payrollAuditLog.findMany({
+    where: { payrollId },
+    orderBy: { createdAt: 'asc' },
+    include: {
+      actor: { select: { roleName: true, profile: { select: { legalNameZh: true, legalNameEn: true } } } },
+    },
+  });
+  return ser(logs);
 }
 
 // ---------- PDF ----------
 async function loadCJKFontPackRailwaySafe(): Promise<FontPack> {
-  // Try 1: local fs (dev / bundled standalone correctly)
   const candidates = [
     join(process.cwd(), 'public', 'fonts'),
     join(process.cwd(), '.next', 'standalone', 'public', 'fonts'),
@@ -621,7 +1164,6 @@ async function loadCJKFontPackRailwaySafe(): Promise<FontPack> {
       cjkAvailable: true,
     };
   }
-  // Try 2: HTTP self-fetch (Railway serves /fonts/*.ttf as static files)
   const baseUrls = [
     process.env.NEXT_PUBLIC_SITE_URL,
     process.env.RAILWAY_STATIC_URL,
@@ -632,7 +1174,7 @@ async function loadCJKFontPackRailwaySafe(): Promise<FontPack> {
       const u = base.endsWith('/') ? base.slice(0, -1) : base;
       const resp = await fetch(`${u}/fonts/NotoSansSC-Regular.ttf`, {
         cache: 'force-cache',
-        headers: { 'Accept': 'font/ttf' },
+        headers: { Accept: 'font/ttf' },
       });
       if (resp.ok && resp.body) {
         const buf = new Uint8Array(await resp.arrayBuffer());
@@ -671,7 +1213,8 @@ async function buildPdfForPayroll(payrollId: string, { isAdmin, sessionUserId, l
   }
   if (!p) throw new Error('Payroll not found');
   if (!isAdmin && p.userId !== sessionUserId) throw new Error('Forbidden');
-  if (p.status === 'DRAFT' || p.status === 'REJECTED') {
+  const st = normalizePayrollStatus(p.status);
+  if (st === 'DRAFT' || st === 'REJECTED') {
     if (!isAdmin) throw new Error('Payroll not available yet (DRAFT/REJECTED)');
   }
   try {
@@ -718,7 +1261,7 @@ async function buildPdfForPayroll(payrollId: string, { isAdmin, sessionUserId, l
       confirmedAt: p.confirmedAt ? (p.confirmedAt instanceof Date ? p.confirmedAt : new Date(String(p.confirmedAt))) : null,
       paidAt: p.paidAt ? (p.paidAt instanceof Date ? p.paidAt : new Date(String(p.paidAt))) : null,
       pdfGeneratedAt,
-      adminNote: p.adminNote ?? null,
+      adminNote: p.adminNote ?? p.remark ?? null,
     },
     items: (p.items ?? []).map((it: any) => ({
       itemType: (it.itemType as any) === 'DEDUCTION' ? 'DEDUCTION' : 'EARNING',
@@ -777,9 +1320,7 @@ export async function batchDownloadPdfZip(payrollIds: string[], locale: 'bilingu
     try {
       const { filename, bytes } = await downloadPayrollPdf(id, locale);
       zip.file(filename, bytes);
-    } catch (_e) {
-      /* skip individually failed */
-    }
+    } catch (_e) { /* skip */ }
   }
   const content = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
   const stamp = new Date().toISOString().slice(0, 10);
@@ -799,9 +1340,9 @@ export async function exportPayrollsCsv(q: AdminPayrollQuery): Promise<{ filenam
     'ConfirmedAt', 'PaidAt', 'PaidRef', 'AdminNote',
   ];
   const esc = (x: unknown) => {
-    const s = x == null ? '' : String(x);
-    if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
-    return s;
+    const str = x == null ? '' : String(x);
+    if (/[",\n]/.test(str)) return '"' + str.replace(/"/g, '""') + '"';
+    return str;
   };
   const safeFix = (n: unknown) => (Number.isFinite(n as number) ? Number(n) : 0).toFixed(2);
   const lines = [header.join(',')];

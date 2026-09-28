@@ -1,9 +1,31 @@
+/** 簡化薪金計算：底薪 + 明細加減項（加班／補假／請假／獎金／IOU 等） */
+
+export type PayrollLineOrigin = 'ADMIN' | 'MEMBER' | 'IOU_AUTO';
+
+export type PayrollItemCode =
+  | 'BASE_SALARY'
+  | 'OVERTIME'
+  | 'COMP_LEAVE'
+  | 'LEAVE'
+  | 'STATUTORY_HOLIDAY'
+  | 'ANNUAL_LEAVE'
+  | 'BONUS'
+  | 'BONUS_ANNUAL'
+  | 'COMMISSION'
+  | 'ALLOWANCE'
+  | 'IOU_REPAY'
+  | 'REMARK'
+  | 'OTHER_EARNING'
+  | 'OTHER_DEDUCTION';
+
 export type PayrollItemInput = {
   id?: string;
   itemType: 'EARNING' | 'DEDUCTION';
   itemCode: string;
   itemName: string;
   sourceText?: string | null;
+  origin?: PayrollLineOrigin;
+  occurredOn?: string | Date | null;
   unitCount?: number | null;
   unitRateHkd?: number | null;
   amountHkd: number;
@@ -12,9 +34,12 @@ export type PayrollItemInput = {
 
 export type PayrollAmountsInput = {
   baseSalaryHkd: number;
+  /** @deprecated 相容舊呼叫；改由 lines 承載 */
   overtimeHkd?: number;
   bonusHkd?: number;
   commissionHkd?: number;
+  remark?: string | null;
+  lines?: PayrollItemInput[];
   allowanceItems?: PayrollItemInput[];
   deductionItems?: PayrollItemInput[];
 };
@@ -28,140 +53,180 @@ export type ComputedPayroll = {
   deductionTotalHkd: number;
   grossTotalHkd: number;
   netPayableHkd: number;
-  /** HEADROOM applied amount (before cap) used for allowance total */
   allowanceTotalBeforeCapHkd: number;
-  /** whether allowance cap rule was actually triggered */
   allowanceCapHit: boolean;
-  /** whether net payable floor was hit (applied max(0, net)) */
   netFloorHit: boolean;
   items: PayrollItemInput[];
 };
 
-export const RULE_ALLOWANCE_CAP_RATIO = 0.3;
+export const ITEM_CODE_META: Record<
+  string,
+  { itemType: 'EARNING' | 'DEDUCTION'; defaultName: string; unitLabel?: 'hours' | 'days' }
+> = {
+  BASE_SALARY: { itemType: 'EARNING', defaultName: '基本底薪' },
+  OVERTIME: { itemType: 'EARNING', defaultName: '加班', unitLabel: 'hours' },
+  COMP_LEAVE: { itemType: 'EARNING', defaultName: '補假', unitLabel: 'days' },
+  LEAVE: { itemType: 'DEDUCTION', defaultName: '請假', unitLabel: 'days' },
+  STATUTORY_HOLIDAY: { itemType: 'EARNING', defaultName: '例假', unitLabel: 'days' },
+  ANNUAL_LEAVE: { itemType: 'EARNING', defaultName: '大假', unitLabel: 'days' },
+  BONUS: { itemType: 'EARNING', defaultName: '獎金' },
+  BONUS_ANNUAL: { itemType: 'EARNING', defaultName: '獎金 / 花紅' },
+  COMMISSION: { itemType: 'EARNING', defaultName: '佣金' },
+  ALLOWANCE: { itemType: 'EARNING', defaultName: '津貼' },
+  IOU_REPAY: { itemType: 'DEDUCTION', defaultName: '預支／借款還款' },
+  REMARK: { itemType: 'EARNING', defaultName: '備註' },
+  OTHER_EARNING: { itemType: 'EARNING', defaultName: '其他收入' },
+  OTHER_DEDUCTION: { itemType: 'DEDUCTION', defaultName: '其他扣除' },
+};
+
+/** 成員可自助申報的項目代碼 */
+export const MEMBER_CLAIM_CODES = [
+  'OVERTIME',
+  'COMP_LEAVE',
+  'LEAVE',
+  'STATUTORY_HOLIDAY',
+  'ANNUAL_LEAVE',
+] as const;
 
 export function roundHkd(value: number): number {
-  // HKD 小數到兩位
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+function toIsoDay(d: string | Date | null | undefined): string | null {
+  if (!d) return null;
+  if (d instanceof Date) return d.toISOString().slice(0, 10);
+  const s = String(d);
+  return s.length >= 10 ? s.slice(0, 10) : s;
+}
+
+function normalizeLine(it: PayrollItemInput, fallbackSort: number): PayrollItemInput {
+  const meta = ITEM_CODE_META[it.itemCode];
+  const itemType = it.itemType || meta?.itemType || 'EARNING';
+  return {
+    ...it,
+    itemType,
+    itemName: it.itemName || meta?.defaultName || it.itemCode,
+    origin: it.origin || 'ADMIN',
+    occurredOn: toIsoDay(it.occurredOn as string | Date | null) || null,
+    amountHkd: roundHkd(it.amountHkd || 0),
+    unitCount: it.unitCount == null ? null : Number(it.unitCount),
+    unitRateHkd: it.unitRateHkd == null ? null : roundHkd(Number(it.unitRateHkd)),
+    sortOrder: it.sortOrder ?? fallbackSort,
+  };
+}
+
 /**
- * Headroom / Cap 規則（對應設計偏好）：
- *   applied = base_delta * (100 - base_score) / 100 的精神：
- *   津貼合計不可超過底薪 × 30% (RULE_ALLOWANCE_CAP_RATIO)。
- *   超出時，等比例縮減每一項津貼 applied amount。
- *   最後 netPayable = max(0, gross - deduction) 下限保護，避免負數
+ * 由底薪 + 明細行計算應發淨額。
+ * 不再套用津貼 30% cap；淨額下限仍為 max(0, net)。
  */
 export function computePayroll(input: PayrollAmountsInput): ComputedPayroll {
   const baseSalaryHkd = roundHkd(input.baseSalaryHkd || 0);
-  const overtimeHkd = roundHkd(input.overtimeHkd || 0);
-  const bonusHkd = roundHkd(input.bonusHkd || 0);
-  const commissionHkd = roundHkd(input.commissionHkd || 0);
 
-  const allowanceItems: PayrollItemInput[] = (input.allowanceItems || []).map((it, i) => ({
-    ...it,
-    itemType: 'EARNING',
-    amountHkd: roundHkd(it.amountHkd || 0),
-    sortOrder: it.sortOrder ?? (100 + i),
-  }));
-  const deductionItems: PayrollItemInput[] = (input.deductionItems || []).map((it, i) => ({
-    ...it,
-    itemType: 'DEDUCTION',
-    amountHkd: roundHkd(it.amountHkd || 0),
-    sortOrder: it.sortOrder ?? (300 + i),
-  }));
+  const fromLines = (input.lines || []).map((it, i) => normalizeLine(it, 10 + i));
+  const legacyAllow = (input.allowanceItems || []).map((it, i) =>
+    normalizeLine({ ...it, itemType: 'EARNING' }, 100 + i),
+  );
+  const legacyDeduct = (input.deductionItems || []).map((it, i) =>
+    normalizeLine({ ...it, itemType: 'DEDUCTION' }, 300 + i),
+  );
 
-  const allowanceRawTotal = allowanceItems.reduce((s, it) => s + it.amountHkd, 0);
-  const allowanceCap = roundHkd(baseSalaryHkd * RULE_ALLOWANCE_CAP_RATIO);
-  const allowanceTotalBeforeCapHkd = roundHkd(allowanceRawTotal);
-  let allowanceCapHit = false;
-
-  const finalAllowanceItems: PayrollItemInput[] = allowanceItems.map((it) => ({ ...it }));
-  let appliedAllowanceTotal = allowanceTotalBeforeCapHkd;
-  if (allowanceTotalBeforeCapHkd > allowanceCap && allowanceCap >= 0) {
-    allowanceCapHit = true;
-    const scale =
-      allowanceTotalBeforeCapHkd === 0 ? 0 : allowanceCap / allowanceTotalBeforeCapHkd;
-    // 每一項津貼按比例縮減（Headroom 縮放）
-    let remaining = allowanceCap;
-    for (let i = 0; i < finalAllowanceItems.length; i++) {
-      const orig = finalAllowanceItems[i].amountHkd;
-      const scaled = i === finalAllowanceItems.length - 1
-        ? remaining
-        : roundHkd(orig * scale);
-      finalAllowanceItems[i] = {
-        ...finalAllowanceItems[i],
-        amountHkd: scaled,
-        sourceText: [
-          finalAllowanceItems[i].sourceText,
-          `(allowance cap rule: applied = base × 30% headroom × scale_factor=${scale.toFixed(4)}; original=${orig}, applied=${scaled})`,
-        ]
-          .filter(Boolean)
-          .join(' | '),
-      };
-      remaining = roundHkd(remaining - scaled);
-    }
-    appliedAllowanceTotal = roundHkd(allowanceCap);
+  // 相容舊 scalar 欄位
+  const legacyScalars: PayrollItemInput[] = [];
+  if ((input.overtimeHkd || 0) > 0 && !fromLines.some((l) => l.itemCode === 'OVERTIME')) {
+    legacyScalars.push(
+      normalizeLine(
+        {
+          itemType: 'EARNING',
+          itemCode: 'OVERTIME',
+          itemName: '加班',
+          amountHkd: input.overtimeHkd || 0,
+          origin: 'ADMIN',
+        },
+        1,
+      ),
+    );
+  }
+  if ((input.bonusHkd || 0) > 0 && !fromLines.some((l) => l.itemCode === 'BONUS' || l.itemCode === 'BONUS_ANNUAL')) {
+    legacyScalars.push(
+      normalizeLine(
+        {
+          itemType: 'EARNING',
+          itemCode: 'BONUS',
+          itemName: '獎金',
+          amountHkd: input.bonusHkd || 0,
+          origin: 'ADMIN',
+        },
+        2,
+      ),
+    );
+  }
+  if ((input.commissionHkd || 0) > 0 && !fromLines.some((l) => l.itemCode === 'COMMISSION')) {
+    legacyScalars.push(
+      normalizeLine(
+        {
+          itemType: 'EARNING',
+          itemCode: 'COMMISSION',
+          itemName: '佣金',
+          amountHkd: input.commissionHkd || 0,
+          origin: 'ADMIN',
+        },
+        3,
+      ),
+    );
   }
 
-  const allowanceTotalHkd = roundHkd(appliedAllowanceTotal);
-  const deductionTotalHkd = roundHkd(
-    deductionItems.reduce((s, it) => s + it.amountHkd, 0),
+  const detailLines = [...fromLines, ...legacyScalars, ...legacyAllow, ...legacyDeduct].filter(
+    (l) => l.itemCode !== 'BASE_SALARY' && l.itemCode !== 'REMARK',
   );
 
-  const grossTotalHkd = roundHkd(
-    baseSalaryHkd + overtimeHkd + bonusHkd + commissionHkd + allowanceTotalHkd,
+  const overtimeHkd = roundHkd(
+    detailLines.filter((l) => l.itemCode === 'OVERTIME').reduce((s, l) => s + l.amountHkd, 0),
   );
+  const bonusHkd = roundHkd(
+    detailLines
+      .filter((l) => l.itemCode === 'BONUS' || l.itemCode === 'BONUS_ANNUAL')
+      .reduce((s, l) => s + l.amountHkd, 0),
+  );
+  const commissionHkd = roundHkd(
+    detailLines.filter((l) => l.itemCode === 'COMMISSION').reduce((s, l) => s + l.amountHkd, 0),
+  );
+
+  const earningExtra = roundHkd(
+    detailLines.filter((l) => l.itemType === 'EARNING').reduce((s, l) => s + l.amountHkd, 0),
+  );
+  const deductionTotalHkd = roundHkd(
+    detailLines.filter((l) => l.itemType === 'DEDUCTION').reduce((s, l) => s + l.amountHkd, 0),
+  );
+
+  // allowanceTotal = 非 OT/bonus/commission 的 earning 明細（兼容舊欄位語意）
+  const allowanceTotalHkd = roundHkd(
+    detailLines
+      .filter(
+        (l) =>
+          l.itemType === 'EARNING' &&
+          !['OVERTIME', 'BONUS', 'BONUS_ANNUAL', 'COMMISSION'].includes(l.itemCode),
+      )
+      .reduce((s, l) => s + l.amountHkd, 0),
+  );
+
+  const grossTotalHkd = roundHkd(baseSalaryHkd + earningExtra);
   const netBeforeFloor = roundHkd(grossTotalHkd - deductionTotalHkd);
   const netFloorHit = netBeforeFloor < 0;
   const netPayableHkd = Math.max(0, netBeforeFloor);
 
-  // 彙總 items：將 base / overtime / bonus / commission 也合成為 PayrollItem 方便追溯
-  const summaryItems: PayrollItemInput[] = [
-    {
-      itemType: 'EARNING',
-      itemCode: 'BASE_SALARY',
-      itemName: '基本薪金',
-      sourceText: baseSalaryHkd > 0
-        ? `rule: FULL_MONTH_BASE (HKD ${baseSalaryHkd.toFixed(2)})`
-        : undefined,
-      amountHkd: baseSalaryHkd,
-      sortOrder: 0,
-    },
-    ...(overtimeHkd > 0
-      ? [{
-          itemType: 'EARNING' as const,
-          itemCode: 'OVERTIME',
-          itemName: '加班費',
-          sourceText: `加班費合計 (rule: sum of overtime items × 倍率)`,
-          amountHkd: overtimeHkd,
-          sortOrder: 1,
-        }]
-      : []),
-    ...(bonusHkd > 0
-      ? [{
-          itemType: 'EARNING' as const,
-          itemCode: 'BONUS_ANNUAL',
-          itemName: '獎金 / 花紅',
-          sourceText: `獎金/花紅發放 (rule: admin-discretionary / KPI)`,
-          amountHkd: bonusHkd,
-          sortOrder: 2,
-        }]
-      : []),
-    ...(commissionHkd > 0
-      ? [{
-          itemType: 'EARNING' as const,
-          itemCode: 'COMMISSION',
-          itemName: '佣金',
-          sourceText: `佣金 (rule: performance × rate)`,
-          amountHkd: commissionHkd,
-          sortOrder: 3,
-        }]
-      : []),
-  ];
+  const baseItem: PayrollItemInput = {
+    itemType: 'EARNING',
+    itemCode: 'BASE_SALARY',
+    itemName: '基本底薪',
+    sourceText: baseSalaryHkd > 0 ? `基本底薪 HKD ${baseSalaryHkd.toFixed(2)}` : undefined,
+    origin: 'ADMIN',
+    amountHkd: baseSalaryHkd,
+    sortOrder: 0,
+  };
 
-  const items = [...summaryItems, ...finalAllowanceItems, ...deductionItems].sort(
-    (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0),
-  );
+  const items = [baseItem, ...detailLines]
+    .map((it, i) => ({ ...it, sortOrder: it.sortOrder ?? i }))
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
 
   return {
     baseSalaryHkd,
@@ -172,12 +237,15 @@ export function computePayroll(input: PayrollAmountsInput): ComputedPayroll {
     deductionTotalHkd,
     grossTotalHkd,
     netPayableHkd,
-    allowanceTotalBeforeCapHkd,
-    allowanceCapHit,
+    allowanceTotalBeforeCapHkd: allowanceTotalHkd,
+    allowanceCapHit: false,
     netFloorHit,
     items,
   };
 }
+
+/** @deprecated 已取消津貼 cap；保留常數以免舊引用炸掉 */
+export const RULE_ALLOWANCE_CAP_RATIO = 0.3;
 
 export type UserProfileSnapshotInput = {
   legalNameEn: string;
@@ -228,3 +296,38 @@ export function snapshotProfile(p: UserProfileSnapshotInput) {
 }
 
 export type SnapshotProfile = ReturnType<typeof snapshotProfile>;
+
+/** 平均拆期：回傳每期金額（最後一期吃尾差） */
+export function splitEvenInstallments(totalAmountHkd: number, periods: number): number[] {
+  const n = Math.max(1, Math.floor(periods));
+  const total = roundHkd(totalAmountHkd);
+  const each = roundHkd(total / n);
+  const amounts: number[] = [];
+  let allocated = 0;
+  for (let i = 0; i < n; i++) {
+    if (i === n - 1) {
+      amounts.push(roundHkd(total - allocated));
+    } else {
+      amounts.push(each);
+      allocated = roundHkd(allocated + each);
+    }
+  }
+  return amounts;
+}
+
+/** 由起始日產生每月 dueDate（當月同日，不足則月底） */
+export function buildMonthlyDueDates(startDate: Date | string, periods: number): Date[] {
+  const start = typeof startDate === 'string' ? new Date(startDate) : new Date(startDate.getTime());
+  const n = Math.max(1, Math.floor(periods));
+  const dates: Date[] = [];
+  const day = start.getUTCDate();
+  for (let i = 0; i < n; i++) {
+    const y = start.getUTCFullYear();
+    const m = start.getUTCMonth() + i;
+    const year = y + Math.floor(m / 12);
+    const month = m % 12;
+    const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    dates.push(new Date(Date.UTC(year, month, Math.min(day, lastDay))));
+  }
+  return dates;
+}

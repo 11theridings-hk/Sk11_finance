@@ -39,7 +39,11 @@ model User {
   payrolls       Payroll[]       @relation("UserPayrolls")
   payrollsSubmitted Payroll[]    @relation("AdminSubmittedPayrolls")
   payrollsPaid   Payroll[]       @relation("AdminPaidPayrolls")
+  payrollsApproved Payroll[]     @relation("AdminApprovedPayrolls")
   salaryCyclesCreated SalaryCycle[] @relation("AdminCreatedCycles")
+  salaryIous     SalaryIou[]     @relation("UserSalaryIous")
+  salaryIousCreated SalaryIou[]  @relation("AdminCreatedSalaryIous")
+  payrollAuditLogs PayrollAuditLog[] @relation("UserPayrollAuditLogs")
   recurringTemplates RecurringTemplate[] @relation("UserRecurringTemplates")
   recurringInstances RecurringInstance[] @relation("UserRecurringInstances")
   whatsappBindings   WhatsAppBinding[]   @relation("UserWhatsAppBindings")
@@ -224,7 +228,8 @@ model Attachment {
   contractId String?
   activityId String?
   payrollPaidId String? @unique
-  payrollPdfId  String? @unique
+  /// 薪金單 PDF／頁面圖（可多筆；不再 1:1）
+  payrollPdfId  String?
   recurringInstanceId String?
 
   // 关系
@@ -237,6 +242,8 @@ model Attachment {
   payrollPaid   Payroll?      @relation("PaidReceiptAttachments", fields: [payrollPaidId], references: [id])
   payrollPdf    Payroll?      @relation("PdfPayrollAttachments", fields: [payrollPdfId], references: [id])
   recurringInstance RecurringInstance? @relation("RecurringInstanceAttachments", fields: [recurringInstanceId], references: [id])
+
+  @@index([payrollPdfId])
 }
 
 model Memo {
@@ -386,8 +393,13 @@ model SalaryCycle {
 
 enum PayrollStatus {
   DRAFT
+  /// @deprecated 遷移後改用 PENDING_CONFIRM；保留以免 PG 刪 enum
   SUBMITTED
+  PENDING_APPROVAL
+  PENDING_CONFIRM
+  /// @deprecated 遷移後改用 PENDING_PAYMENT
   CONFIRMED
+  PENDING_PAYMENT
   PAID
   REJECTED
 }
@@ -409,12 +421,15 @@ model Payroll {
   status               PayrollStatus    @default(DRAFT)
   adminNote            String?
   employeeNote         String?
+  remark               String?
   submittedAt          DateTime?
+  approvedAt           DateTime?
   confirmedAt          DateTime?
   rejectedAt           DateTime?
   revisedAt            DateTime?
   paidAt               DateTime?
   submittedByUserId    String?
+  approvedByUserId     String?
   paidByUserId         String?
   paidReference        String?
   paidAttachmentId     String?
@@ -426,26 +441,102 @@ model Payroll {
   cycle           SalaryCycle  @relation(fields: [salaryCycleId], references: [id], onDelete: Cascade)
   user            User         @relation("UserPayrolls", fields: [userId], references: [id], onDelete: Cascade)
   submittedBy     User?        @relation("AdminSubmittedPayrolls", fields: [submittedByUserId], references: [id])
+  approvedBy      User?        @relation("AdminApprovedPayrolls", fields: [approvedByUserId], references: [id])
   paidBy          User?        @relation("AdminPaidPayrolls", fields: [paidByUserId], references: [id])
   paidAttachment  Attachment?  @relation("PaidReceiptAttachments")
-  pdfAttachment   Attachment?  @relation("PdfPayrollAttachments")
+  pdfAttachments  Attachment[] @relation("PdfPayrollAttachments")
   items           PayrollItem[]
+  auditLogs       PayrollAuditLog[]
+  iouInstallments SalaryIouInstallment[]
 }
 
 model PayrollItem {
   id          String   @id @default(uuid())
   payrollId   String
   itemType    String // "EARNING" | "DEDUCTION"
-  itemCode    String // "BASE_SALARY" | "OVERTIME" | "BONUS_ANNUAL" | ...
+  itemCode    String // "BASE_SALARY" | "OVERTIME" | "COMP_LEAVE" | "LEAVE" | "BONUS" | "IOU_REPAY" | ...
   itemName    String // 顯示給使用者 / PDF 抬頭
   sourceText  String?  // 可追溯 source_text
-  unitCount   Float?   // 數量 (e.g. 12 小時加班)
-  unitRateHkd Float?   // 單價 (e.g. 時薪 140)
+  /// ADMIN | MEMBER | IOU_AUTO
+  origin      String   @default("ADMIN")
+  occurredOn  DateTime?
+  unitCount   Float?   // 數量 (e.g. 12 小時加班 / 1 日補假)
+  unitRateHkd Float?   // 單價
   amountHkd   Float    // 正數; DEDUCTION 存正數, 彙總時減
   sortOrder   Int      @default(0)
   createdAt   DateTime @default(now())
 
   payroll Payroll @relation(fields: [payrollId], references: [id], onDelete: Cascade)
+
+  @@index([payrollId, itemCode])
+}
+
+model PayrollAuditLog {
+  id          String   @id @default(uuid())
+  payrollId   String
+  actorUserId String
+  /// SUBMIT | APPROVE | REJECT | EDIT_ADD | EDIT_REMOVE | EDIT_CHANGE | CONFIRM | MARK_PAID | WITHDRAW | CREATE | IOU_APPLY
+  action      String
+  summary     String
+  detailJson  Json?
+  createdAt   DateTime @default(now())
+
+  payroll Payroll @relation(fields: [payrollId], references: [id], onDelete: Cascade)
+  actor   User    @relation("UserPayrollAuditLogs", fields: [actorUserId], references: [id])
+
+  @@index([payrollId, createdAt])
+}
+
+enum SalaryIouStatus {
+  ACTIVE
+  SETTLED
+  CANCELLED
+}
+
+model SalaryIou {
+  id              String          @id @default(uuid())
+  userId          String
+  totalAmountHkd  Float
+  startDate       DateTime
+  note            String?
+  status          SalaryIouStatus @default(ACTIVE)
+  /// EVEN | CUSTOM
+  splitMode       String          @default("EVEN")
+  createdByUserId String
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  user        User                   @relation("UserSalaryIous", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy   User                   @relation("AdminCreatedSalaryIous", fields: [createdByUserId], references: [id])
+  installments SalaryIouInstallment[]
+
+  @@index([userId, status])
+}
+
+enum SalaryIouInstallmentStatus {
+  PENDING
+  APPLIED
+  SKIPPED
+}
+
+model SalaryIouInstallment {
+  id          String                      @id @default(uuid())
+  iouId       String
+  periodIndex Int
+  dueDate     DateTime
+  amountHkd   Float
+  status      SalaryIouInstallmentStatus  @default(PENDING)
+  payrollId   String?
+  appliedAt   DateTime?
+  createdAt   DateTime                    @default(now())
+  updatedAt   DateTime                    @updatedAt
+
+  iou     SalaryIou @relation(fields: [iouId], references: [id], onDelete: Cascade)
+  payroll Payroll?  @relation(fields: [payrollId], references: [id], onDelete: SetNull)
+
+  @@index([iouId, status])
+  @@index([dueDate, status])
+  @@index([payrollId])
 }
 
 
