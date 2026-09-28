@@ -29,6 +29,7 @@ import {
   resolvePageOrientation,
   savePageOrientationPreference,
   sortReportRows,
+  summaryBarColumnCenters,
 } from '@/lib/reportLayout'
 
 function categoryPath(item: any) {
@@ -528,15 +529,33 @@ export default function ReportClient({ categories, users, pools, locale }: Props
 
     doc.setDrawColor(220, 225, 235)
     doc.setFillColor(250, 251, 253)
-    doc.roundedRect(marginX, 38, pageW - marginX * 2, 22, 2, 2, 'FD')
+    const summaryBarX = marginX
+    const summaryBarW = pageW - marginX * 2
+    doc.roundedRect(summaryBarX, 38, summaryBarW, 22, 2, 2, 'FD')
     if (fontBase64) doc.setFont('NotoSansSC', 'bold')
-    doc.setFontSize(11)
-    doc.setTextColor(52, 199, 89)
-    doc.text(`${t('totalIncome')}: ${totalIncome.toFixed(2)}`, marginX + 8, 51)
-    doc.setTextColor(255, 59, 48)
-    doc.text(`${t('totalExpense')}: ${totalExpense.toFixed(2)}`, marginX + 90, 51)
-    doc.setTextColor(30, 30, 40)
-    doc.text(`${t('balance')}: ${balance >= 0 ? '+' : ''}${balance.toFixed(2)}`, marginX + 175, 51)
+    const summaryItems: { text: string; color: [number, number, number] }[] = [
+      { text: `${t('totalIncome')}: ${totalIncome.toFixed(2)}`, color: [52, 199, 89] },
+      { text: `${t('totalExpense')}: ${totalExpense.toFixed(2)}`, color: [255, 59, 48] },
+      {
+        text: `${t('balance')}: ${balance >= 0 ? '+' : ''}${balance.toFixed(2)}`,
+        color: [30, 30, 40],
+      },
+    ]
+    const summaryCenters = summaryBarColumnCenters(summaryBarX, summaryBarW, summaryItems.length)
+    const summaryColW = summaryBarW / summaryItems.length
+    const summaryPad = 4
+    let summaryFontSize = orientation === 'portrait' ? 10 : 11
+    doc.setFontSize(summaryFontSize)
+    for (const item of summaryItems) {
+      while (summaryFontSize > 7.5 && doc.getTextWidth(item.text) > summaryColW - summaryPad * 2) {
+        summaryFontSize -= 0.5
+        doc.setFontSize(summaryFontSize)
+      }
+    }
+    summaryItems.forEach((item, i) => {
+      doc.setTextColor(item.color[0], item.color[1], item.color[2])
+      doc.text(item.text, summaryCenters[i], 51, { align: 'center' })
+    })
 
     const categoryStats: Record<string, number> = {}
     let totalExpenseMerged = 0
