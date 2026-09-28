@@ -129,6 +129,8 @@ export default function ProfileTab(props: Props) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const readonly = !props.isSelf && !props.isAdmin;
+  /** 受僱資料僅管理員可改（成員可檢視） */
+  const employmentLocked = !props.isAdmin;
 
   const onChange = <K extends keyof ProfileRow>(key: K, value: ProfileRow[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
@@ -206,14 +208,19 @@ export default function ProfileTab(props: Props) {
           </Field>
         </Section>
         <Section title="受僱資料 Employment">
+          {employmentLocked && (
+            <div className="sm:col-span-2 text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5">
+              職稱、部門、入職日與預設底薪僅管理員可修改；如需更正請聯絡管理員。
+            </div>
+          )}
           <Field label="職稱 Job Title">
-            <input className="w-full border border-slate-300 rounded px-2 py-1.5 disabled:bg-slate-50" disabled={readonly} value={form.jobTitle ?? ''} onChange={(e) => onChange('jobTitle', e.target.value)} placeholder="Administrative Officer"/>
+            <input className="w-full border border-slate-300 rounded px-2 py-1.5 disabled:bg-slate-50" disabled={readonly || employmentLocked} value={form.jobTitle ?? ''} onChange={(e) => onChange('jobTitle', e.target.value)} placeholder="Administrative Officer"/>
           </Field>
           <Field label="部門 Department">
-            <input className="w-full border border-slate-300 rounded px-2 py-1.5 disabled:bg-slate-50" disabled={readonly} value={form.department ?? ''} onChange={(e) => onChange('department', e.target.value)} placeholder="Admin"/>
+            <input className="w-full border border-slate-300 rounded px-2 py-1.5 disabled:bg-slate-50" disabled={readonly || employmentLocked} value={form.department ?? ''} onChange={(e) => onChange('department', e.target.value)} placeholder="Admin"/>
           </Field>
           <Field label="入職日期 Date Joined">
-            <input type="date" className="w-full border border-slate-300 rounded px-2 py-1.5 disabled:bg-slate-50" disabled={readonly} value={toInputDate(form.dateJoined)} onChange={(e) => onChange('dateJoined', e.target.value || null)}/>
+            <input type="date" className="w-full border border-slate-300 rounded px-2 py-1.5 disabled:bg-slate-50" disabled={readonly || employmentLocked} value={toInputDate(form.dateJoined)} onChange={(e) => onChange('dateJoined', e.target.value || null)}/>
           </Field>
           {props.isAdmin && (
             <Field label="離職日期 Date of Termination (僅管理員可見/修改)">

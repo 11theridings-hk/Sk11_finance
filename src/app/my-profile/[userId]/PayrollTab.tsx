@@ -363,6 +363,11 @@ export default function PayrollTab(props: Props) {
           <p className="text-xs text-slate-500 mt-1">
             {t('headerRowCount').replace('{total}', String(rows.length)).replace('{shown}', String(filtered.length))}
           </p>
+          {props.isSelf && (
+            <p className="text-xs text-slate-700 mt-2 max-w-2xl bg-indigo-50 border border-indigo-200 rounded-md px-3 py-2">
+              {t('memberPayrollHint')}
+            </p>
+          )}
         </div>
         <button
           onClick={() => load(true)}
@@ -443,7 +448,7 @@ export default function PayrollTab(props: Props) {
         <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center">
           <FileText className="w-10 h-10 mx-auto text-slate-300" />
           <div className="mt-2 text-slate-600 font-medium">{t('emptyPayslipTitle')}</div>
-          <div className="text-xs text-slate-400 mt-1">
+          <div className="text-xs text-slate-500 mt-1 max-w-md mx-auto whitespace-pre-line">
             {t('emptyPayslipHint')}
           </div>
         </div>
@@ -617,39 +622,21 @@ function PayrollCard(props: {
         </div>
       </div>
 
-      {/* Amount grid */}
-      <div className="px-4 md:px-5 py-4 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-        <AmountItem label={t('amountLabelBase')} value={p.baseSalaryHkd} tone="slate" />
-        <AmountItem label={t('amountLabelOvertime')} value={p.overtimeHkd} tone="indigo" />
-        <AmountItem label={t('amountLabelBonus')} value={p.bonusHkd} tone="violet" />
-        <AmountItem label={t('amountLabelCommission')} value={p.commissionHkd} tone="sky" />
-        <AmountItem label={t('amountLabelAllowance')} value={p.allowanceTotalHkd} tone="teal" />
-        <AmountItem label={t('amountLabelDeduction')} value={-p.deductionTotalHkd} tone="rose" />
-        <AmountItem label={t('amountLabelGross')} value={p.grossTotalHkd} tone="blue" highlight />
-        <AmountItem label={t('amountLabelNet')} value={p.netPayableHkd} tone="emerald" highlight />
-      </div>
-
-      {/* Notes / Rejected reason */}
-      {p.status === 'REJECTED' && p.employeeNote && (
-        <div className="mx-4 md:mx-5 mb-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm flex items-start gap-2">
-          <XCircle className="w-4 h-4 text-rose-600 mt-0.5 flex-shrink-0" />
-          <div>
-            <div className="font-semibold text-rose-800">{t('rejectReasonChipLabel')}</div>
-            <div className="text-rose-700 mt-0.5 whitespace-pre-wrap">{p.employeeNote}</div>
-          </div>
-        </div>
-      )}
-      {p.adminNote && (
-        <div className="mx-4 md:mx-5 mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-          <div className="font-semibold text-slate-700 text-xs">{t('adminNoteMiniLabel')}</div>
-          <div className="text-slate-600 mt-0.5 whitespace-pre-wrap">{p.adminNote}</div>
+      {/* Pending approval banner */}
+      {p.status === 'PENDING_APPROVAL' && props.isSelf && (
+        <div className="mx-4 md:mx-5 mt-3 rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-orange-600 mt-0.5 flex-shrink-0" />
+          <div className="text-orange-900 font-medium">{t('waitingAdminApprovalBanner')}</div>
         </div>
       )}
 
-      {/* Member claim form */}
+      {/* Member claim form — pinned near top for discovery */}
       {canClaim && (
-        <div className="mx-4 md:mx-5 mb-4 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3 space-y-3">
-          <div className="text-sm font-semibold text-indigo-900">{t('addClaim')}</div>
+        <div className="mx-4 md:mx-5 mt-3 mb-1 rounded-lg border-2 border-indigo-300 bg-indigo-50/60 p-3 space-y-3">
+          <div>
+            <div className="text-sm font-bold text-indigo-950">{t('memberClaimSectionTitle')}</div>
+            <p className="text-[11px] text-indigo-800/80 mt-0.5">{t('memberClaimSectionHint')}</p>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-sm">
             <div>
               <label className="text-[11px] text-slate-500 block mb-1">項目</label>
@@ -730,12 +717,41 @@ function PayrollCard(props: {
               type="button"
               disabled={props.submitBusy}
               onClick={props.onSubmitApproval}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700 disabled:opacity-50"
             >
               {props.submitBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
               {t('claimSubmit')}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Amount grid */}
+      <div className="px-4 md:px-5 py-4 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+        <AmountItem label={t('amountLabelBase')} value={p.baseSalaryHkd} tone="slate" />
+        <AmountItem label={t('amountLabelOvertime')} value={p.overtimeHkd} tone="indigo" />
+        <AmountItem label={t('amountLabelBonus')} value={p.bonusHkd} tone="violet" />
+        <AmountItem label={t('amountLabelCommission')} value={p.commissionHkd} tone="sky" />
+        <AmountItem label={t('amountLabelAllowance')} value={p.allowanceTotalHkd} tone="teal" />
+        <AmountItem label={t('amountLabelDeduction')} value={-p.deductionTotalHkd} tone="rose" />
+        <AmountItem label={t('amountLabelGross')} value={p.grossTotalHkd} tone="blue" highlight />
+        <AmountItem label={t('amountLabelNet')} value={p.netPayableHkd} tone="emerald" highlight />
+      </div>
+
+      {/* Notes / Rejected reason */}
+      {p.status === 'REJECTED' && p.employeeNote && (
+        <div className="mx-4 md:mx-5 mb-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm flex items-start gap-2">
+          <XCircle className="w-4 h-4 text-rose-600 mt-0.5 flex-shrink-0" />
+          <div>
+            <div className="font-semibold text-rose-800">{t('rejectReasonChipLabel')}</div>
+            <div className="text-rose-700 mt-0.5 whitespace-pre-wrap">{p.employeeNote}</div>
+          </div>
+        </div>
+      )}
+      {p.adminNote && (
+        <div className="mx-4 md:mx-5 mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+          <div className="font-semibold text-slate-700 text-xs">{t('adminNoteMiniLabel')}</div>
+          <div className="text-slate-600 mt-0.5 whitespace-pre-wrap">{p.adminNote}</div>
         </div>
       )}
 

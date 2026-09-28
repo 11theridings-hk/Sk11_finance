@@ -336,7 +336,13 @@ export async function getMyProfile(userId: string) {
   return ser(profile);
 }
 
-export async function saveMyProfile(userId: string, profile: UserProfileSnapshotInput & { emergencyName?: string | null; emergencyPhone?: string | null }) {
+export type UserProfileSaveInput = UserProfileSnapshotInput & {
+  emergencyName?: string | null;
+  emergencyPhone?: string | null;
+  dateOfTermination?: Date | string | null;
+};
+
+export async function saveMyProfile(userId: string, profile: UserProfileSaveInput) {
   const s = await requireSession();
   if (!s.isAdmin && s.userId !== userId) throw new Error('Forbidden');
   if (!profile.legalNameEn || !profile.legalNameEn.trim()) {
@@ -347,16 +353,34 @@ export async function saveMyProfile(userId: string, profile: UserProfileSnapshot
   if (!phoneNorm.ok) throw new Error(phoneNorm.error);
   const contactPhone = phoneNorm.phoneE164;
 
+  const existing = await prisma.userProfile.findUnique({ where: { userId } });
+
+  // 受僱資料（職稱／部門／入職／離職／預設底薪）僅管理員可改；成員儲存時保留原值
+  const employment = s.isAdmin
+    ? {
+        jobTitle: profile.jobTitle || null,
+        department: profile.department || null,
+        dateJoined: profile.dateJoined ? new Date(profile.dateJoined as string) : null,
+        dateOfTermination: profile.dateOfTermination
+          ? new Date(profile.dateOfTermination as string)
+          : null,
+        defaultBaseSalaryHkd: profile.defaultBaseSalaryHkd ?? 0,
+      }
+    : {
+        jobTitle: existing?.jobTitle ?? null,
+        department: existing?.department ?? null,
+        dateJoined: existing?.dateJoined ?? null,
+        dateOfTermination: existing?.dateOfTermination ?? null,
+        defaultBaseSalaryHkd: existing?.defaultBaseSalaryHkd ?? 0,
+      };
+
   const data = {
     legalNameEn: profile.legalNameEn,
     legalNameZh: profile.legalNameZh || null,
     hkid: profile.hkid || null,
     passportNo: profile.passportNo || null,
     dateOfBirth: profile.dateOfBirth ? new Date(profile.dateOfBirth as string) : null,
-    jobTitle: profile.jobTitle || null,
-    department: profile.department || null,
-    dateJoined: profile.dateJoined ? new Date(profile.dateJoined as string) : null,
-    defaultBaseSalaryHkd: profile.defaultBaseSalaryHkd ?? 0,
+    ...employment,
     bankName: profile.bankName || null,
     bankAccountNo: profile.bankAccountNo || null,
     mpfAccountNo: profile.mpfAccountNo || null,
@@ -377,7 +401,7 @@ export async function saveMyProfile(userId: string, profile: UserProfileSnapshot
   return ser(saved);
 }
 
-export async function adminUpdateUserProfile(userId: string, profile: UserProfileSnapshotInput & { emergencyName?: string | null; emergencyPhone?: string | null }) {
+export async function adminUpdateUserProfile(userId: string, profile: UserProfileSaveInput) {
   await requireAdmin();
   return saveMyProfile(userId, profile);
 }
@@ -517,8 +541,8 @@ export async function approvePayroll(
   const p = await prisma.payroll.findUnique({ where: { id: payrollId } });
   if (!p) throw new Error('Payroll not found');
   const st = normalizePayrollStatus(p.status);
-  if (st !== 'PENDING_APPROVAL' && st !== 'DRAFT') {
-    throw new Error('僅待審批／草稿可審批送出');
+  if (st !== 'PENDING_APPROVAL' && st !== 'DRAFT' && st !== 'REJECTED') {
+    throw new Error('僅待審批／草稿／已駁回可審批送出');
   }
 
   if (opts?.amounts) {

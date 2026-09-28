@@ -21,7 +21,6 @@ import {
   adminUpdateUserProfile,
   createSalaryIou,
   listSalaryIous,
-  addAdminPayrollLine,
   removePayrollClaimLine,
   syncIouIntoPayroll,
   type PayrollStatus,
@@ -426,6 +425,20 @@ export default function AdminPayrollClient(props: Props) {
     await loadRows();
   };
 
+  const handleEditSaveAndApprove = async () => {
+    if (!actionModal || actionModal.mode !== 'edit') return;
+    await approvePayroll(actionModal.payrollId, {
+      amounts: {
+        baseSalaryHkd: editForm.baseSalaryHkd,
+        lines: editForm.lines ?? [],
+        adminNote: editForm.adminNote ?? null,
+        remark: editForm.remark ?? null,
+      },
+    });
+    setActionModal(null);
+    await loadRows();
+  };
+
   const handleAddEditLineLocal = () => {
     if (!newEditLine.amountHkd) return;
     const meta = ITEM_CODE_META[newEditLine.itemCode] || { itemType: 'EARNING' as const, defaultName: newEditLine.itemCode };
@@ -580,6 +593,9 @@ export default function AdminPayrollClient(props: Props) {
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-slate-900">{t('payrollPage')}</h1>
           <p className="text-slate-500 mt-1 text-sm">{t('payrollPageHint')}</p>
+          <p className="text-slate-600 mt-2 text-sm bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+            {t('adminPerEmployeeHint')}
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => setShowNewCycle(true)} className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white rounded-md px-3 py-2 text-sm font-medium">
@@ -888,7 +904,13 @@ export default function AdminPayrollClient(props: Props) {
                         </button>
                         {(r.status === 'DRAFT' || r.status === 'REJECTED' || r.status === 'PENDING_APPROVAL') && (
                           <>
-                            <button title="編輯" onClick={() => openEdit(r)} className="text-xs px-2 py-1 border border-slate-300 rounded hover:bg-white">{t('editBtnLabel')}</button>
+                            <button
+                              title={t('editEmployeeSlipBtn')}
+                              onClick={() => openEdit(r)}
+                              className="text-xs px-2.5 py-1 border border-slate-800 bg-slate-900 text-white rounded hover:bg-slate-800 font-medium"
+                            >
+                              {t('editEmployeeSlipBtn')}
+                            </button>
                             <button
                               title={t('approveBtn')}
                               onClick={async () => { await approvePayroll(r.id); await loadRows(); }}
@@ -1016,6 +1038,9 @@ export default function AdminPayrollClient(props: Props) {
       {/* Edit / MarkPaid modals */}
       {actionModal?.mode === 'edit' && (
         <Modal title={t('editModalTitle')} onClose={() => setActionModal(null)}>
+          <p className="text-xs text-slate-600 mb-3 bg-slate-50 border border-slate-200 rounded px-2.5 py-2">
+            {t('editModalPerEmployeeHint')}
+          </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
             <NumberField label={t('nfBaseSalary')} value={editForm.baseSalaryHkd} onChange={(v) => setEditForm({ ...editForm, baseSalaryHkd: v })}/>
             <div>
@@ -1096,27 +1121,6 @@ export default function AdminPayrollClient(props: Props) {
                 + {t('addClaim')}
               </button>
             </div>
-            <button
-              type="button"
-              className="mt-2 text-xs text-slate-500 hover:text-slate-800 underline"
-              onClick={async () => {
-                if (!actionModal) return;
-                if (!newEditLine.amountHkd) return;
-                const payrollId = actionModal.payrollId;
-                await addAdminPayrollLine(payrollId, {
-                  itemCode: newEditLine.itemCode,
-                  amountHkd: newEditLine.amountHkd,
-                  note: newEditLine.note || null,
-                });
-                setNewEditLine({ itemCode: 'OVERTIME', amountHkd: 0, note: '' });
-                await loadRows();
-                const result = await adminListPayrolls({ salaryCycleId: selectedCycleId });
-                const found = (result.rows as unknown as PayrollRow[]).find((x) => x.id === payrollId);
-                if (found) openEdit(found);
-              }}
-            >
-              立即寫入伺服器（addAdminPayrollLine）
-            </button>
           </div>
 
           <div className="mt-4">
@@ -1126,10 +1130,13 @@ export default function AdminPayrollClient(props: Props) {
           <div className="mt-3 text-xs text-slate-500">
             {t('editHeadroomHint')}
           </div>
-          <div className="flex justify-end gap-2 mt-5">
+          <div className="flex flex-wrap justify-end gap-2 mt-5">
             <button onClick={() => setActionModal(null)} className="text-sm px-3 py-1.5 rounded border border-slate-300 text-slate-600 hover:bg-slate-50">{t('cancelBtn')}</button>
-            <button onClick={handleEditSave} className="text-sm px-3 py-1.5 rounded bg-slate-900 text-white hover:bg-slate-800 inline-flex items-center gap-1.5">
+            <button onClick={handleEditSave} className="text-sm px-3 py-1.5 rounded border border-slate-300 bg-white text-slate-800 hover:bg-slate-50 inline-flex items-center gap-1.5">
               <CheckCircle className="w-4 h-4" /> {t('editSaveBtn')}
+            </button>
+            <button onClick={handleEditSaveAndApprove} className="text-sm px-3 py-1.5 rounded bg-amber-600 text-white hover:bg-amber-700 inline-flex items-center gap-1.5">
+              <Send className="w-4 h-4" /> {t('editSaveAndApproveBtn')}
             </button>
           </div>
         </Modal>
