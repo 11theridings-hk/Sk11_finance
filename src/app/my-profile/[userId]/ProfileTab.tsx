@@ -16,6 +16,7 @@ export type ProfileRow = {
   dateJoined: string | null;
   dateOfTermination: string | null;
   defaultBaseSalaryHkd: number | null;
+  annualLeaveDaysPerYear: number | null;
   bankName: string | null;
   bankAccountNo: string | null;
   mpfAccountNo: string | null;
@@ -115,6 +116,7 @@ export default function ProfileTab(props: Props) {
       dateJoined: null,
       dateOfTermination: null,
       defaultBaseSalaryHkd: 0,
+      annualLeaveDaysPerYear: 0,
       bankName: '',
       bankAccountNo: '',
       mpfAccountNo: '',
@@ -210,7 +212,7 @@ export default function ProfileTab(props: Props) {
         <Section title="受僱資料 Employment">
           {employmentLocked && (
             <div className="sm:col-span-2 text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5">
-              職稱、部門、入職日與預設底薪僅管理員可修改；如需更正請聯絡管理員。
+              職稱、部門、入職日、預設底薪與年假額度僅管理員可修改；如需更正請聯絡管理員。
             </div>
           )}
           <Field label="職稱 Job Title">
@@ -235,6 +237,15 @@ export default function ProfileTab(props: Props) {
               className="w-full border border-slate-300 rounded px-2 py-1.5 disabled:bg-slate-50"
             />
             {!props.isAdmin && <p className="text-[11px] text-slate-500 mt-1">由管理員設定；開薪資週期時自動帶入。</p>}
+          </Field>
+          <Field label="每年年假日數 Annual Leave (days/year)">
+            <ZeroFriendlyNumberInput
+              value={form.annualLeaveDaysPerYear ?? 0}
+              onChange={(value) => onChange('annualLeaveDaysPerYear', value)}
+              disabled={!props.isAdmin}
+              className="w-full border border-slate-300 rounded px-2 py-1.5 disabled:bg-slate-50"
+            />
+            {!props.isAdmin && <p className="text-[11px] text-slate-500 mt-1">由管理員設定；薪金單會顯示已用／餘額。</p>}
           </Field>
         </Section>
         <Section title="收款與福利">

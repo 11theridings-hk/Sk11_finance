@@ -339,6 +339,8 @@ model UserProfile {
   dateJoined           DateTime?
   dateOfTermination    DateTime?
   defaultBaseSalaryHkd Float?   @default(0)
+  /// 每年年假日數額度（管理員設定）
+  annualLeaveDaysPerYear Float? @default(0)
   bankName             String?
   bankAccountNo        String?
   mpfAccountNo         String?

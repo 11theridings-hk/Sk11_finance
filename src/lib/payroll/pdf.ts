@@ -26,6 +26,8 @@ export type PdfPayrollItemRow = {
   itemName: string;
   amountHkd: number;
   sourceText?: string | null;
+  unitCount?: number | null;
+  occurredOn?: string | null;
 };
 
 export type GeneratePayslipPdfInput = {
@@ -52,6 +54,20 @@ export type GeneratePayslipPdfInput = {
     adminNote?: string | null;
   };
   items: PdfPayrollItemRow[];
+  quantitySummary?: {
+    overtimeHours: number;
+    leaveDays: number;
+    compLeaveDays: number;
+    statutoryHolidayDays: number;
+    annualLeaveDays: number;
+    totalLeaveRelatedDays: number;
+  };
+  annualLeaveBalance?: {
+    year: number;
+    entitlementDays: number;
+    usedDays: number;
+    remainingDays: number;
+  };
   submittedBy?: { legalNameZh?: string | null; legalNameEn?: string } | null;
   cycleNote?: string | null;
 };
@@ -116,7 +132,25 @@ const T = {
     bilingual: '此支薪證明為電腦簽發，毋須蓋章。This payslip is computer-generated, no stamp required.',
   } as L,
   note: { zh: '備註', en: 'Note', bilingual: 'Note / 備註' } as L,
+  qty: { zh: '數量', en: 'Qty', bilingual: 'Qty / 數量' } as L,
+  leaveSummary: { zh: '本月數量摘要', en: 'Period Quantity Summary', bilingual: 'Period Qty / 本月數量摘要' } as L,
+  annualLeaveBlock: { zh: '年假結餘', en: 'Annual Leave Balance', bilingual: 'Annual Leave / 年假結餘' } as L,
 };
+
+function formatQtyCell(it: PdfPayrollItemRow): string {
+  if (it.unitCount == null || !Number.isFinite(Number(it.unitCount))) return '';
+  const n = Number(it.unitCount);
+  const unit =
+    it.itemCode === 'OVERTIME' ? (n === 1 ? 'hr' : 'hrs') : n === 1 ? 'day' : 'days';
+  const datePart = it.occurredOn ? ` · ${shortDate(it.occurredOn)}` : '';
+  return `${n} ${unit}${datePart}`;
+}
+
+function formatItemLabel(it: PdfPayrollItemRow): string {
+  const name =
+    it.itemCode === 'ANNUAL_LEAVE' || it.itemName === '大假' ? '年假' : it.itemName || it.itemCode;
+  return name;
+}
 
 function numberToEnglishWords(n: number): string {
   // HKD amount in English, pragmatic for common salary ranges
@@ -218,10 +252,14 @@ export function generateFallbackEnPdf(input: GeneratePayslipPdfInput, errorMsg?:
     doc.text(`HKID/Passport: ${snap.hkidMasked || snap.passportNoMasked || '—'}`, margin, y); y += 13;
     doc.text(`Department: ${snap.department || '—'}     Job Title: ${snap.jobTitle || '—'}`, margin, y); y += 13;
     y += 6;
-    const body = input.items.map((it) => [it.itemName || it.itemCode, it.itemCode || '', formatHkd(it.amountHkd)]);
+    const body = input.items.map((it) => [
+      formatItemLabel(it),
+      formatQtyCell(it) || it.itemCode || '',
+      formatHkd(it.amountHkd),
+    ]);
     autoTable(doc, {
       startY: y,
-      head: [['Item', 'Code', 'Amount (HKD)']],
+      head: [['Item', 'Qty / Date', 'Amount (HKD)']],
       body,
       margin: { left: margin, right: margin },
       styles: { fontSize: 9, font: 'helvetica', fontStyle: 'normal' },
@@ -420,21 +458,21 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput, fontPack?: Fo
   const dedPad = pad(deductions, minRows);
 
   const leftBody: (string | number)[][] = earnPad.map((it) => [
-    it.itemName,
-    it.itemCode,
+    formatItemLabel(it),
+    formatQtyCell(it),
     it.amountHkd ? formatHkd(it.amountHkd) : '',
   ]);
   const rightBody: (string | number)[][] = dedPad.map((it) => [
-    it.itemName,
-    it.itemCode,
+    formatItemLabel(it),
+    formatQtyCell(it),
     it.amountHkd ? formatHkd(it.amountHkd) : '',
   ]);
 
   const totalEarning = earnings.reduce((s, it) => s + it.amountHkd, 0);
   const totalDeduct = deductions.reduce((s, it) => s + it.amountHkd, 0);
 
-  const leftHead = [[L(T.incomeTableHead), L(T.code), L(T.amount)]];
-  const rightHead = [[L(T.deductionTableHead), L(T.code), L(T.amount)]];
+  const leftHead = [[L(T.incomeTableHead), L(T.qty), L(T.amount)]];
+  const rightHead = [[L(T.deductionTableHead), L(T.qty), L(T.amount)]];
 
   const leftFoot = [['', L(T.grossTotal), formatHkd(totalEarning)]];
   const rightFoot = [['', L(T.deductionTotal), formatHkd(totalDeduct)]];
@@ -480,6 +518,46 @@ export function generatePayslipPdf(input: GeneratePayslipPdfInput, fontPack?: Fo
   const rightFinalY = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? cursorY;
 
   cursorY = Math.max(leftFinalY, rightFinalY) + 20;
+
+  // --- Quantity / Annual leave summary ---
+  const qs = input.quantitySummary;
+  const alb = input.annualLeaveBalance;
+  if (qs || alb) {
+    setBold(true);
+    doc.setFontSize(10);
+    doc.text(L(T.leaveSummary), margin, cursorY);
+    cursorY += 14;
+    setBold(false);
+    doc.setFontSize(9);
+    const bits: string[] = [];
+    if (qs) {
+      if (qs.overtimeHours) bits.push(`加班 ${qs.overtimeHours} 小時 / OT ${qs.overtimeHours} hrs`);
+      if (qs.leaveDays) bits.push(`請假 ${qs.leaveDays} 日 / Leave ${qs.leaveDays} d`);
+      if (qs.compLeaveDays) bits.push(`補假 ${qs.compLeaveDays} 日 / Comp ${qs.compLeaveDays} d`);
+      if (qs.statutoryHolidayDays) bits.push(`例假 ${qs.statutoryHolidayDays} 日 / Statutory ${qs.statutoryHolidayDays} d`);
+      if (qs.annualLeaveDays) bits.push(`年假（本期）${qs.annualLeaveDays} 日 / Annual (period) ${qs.annualLeaveDays} d`);
+    }
+    if (bits.length) {
+      doc.text(bits.join('  ·  '), margin, cursorY, { maxWidth: pageW - margin * 2 });
+      cursorY += 14;
+    }
+    if (alb && (alb.entitlementDays > 0 || alb.usedDays > 0)) {
+      setBold(true);
+      doc.text(L(T.annualLeaveBlock), margin, cursorY);
+      cursorY += 12;
+      setBold(false);
+      doc.text(
+        `${alb.year}：額度 ${alb.entitlementDays} 日／已用 ${alb.usedDays} 日／餘額 ${alb.remainingDays} 日` +
+          `  |  Entitlement ${alb.entitlementDays} / Used ${alb.usedDays} / Remaining ${alb.remainingDays}`,
+        margin,
+        cursorY,
+        { maxWidth: pageW - margin * 2 },
+      );
+      cursorY += 16;
+    } else {
+      cursorY += 4;
+    }
+  }
 
   // --- Totals Banner ---
   doc.setFillColor(254, 243, 199);

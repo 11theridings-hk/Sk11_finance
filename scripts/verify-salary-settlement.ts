@@ -7,6 +7,10 @@ import {
   splitEvenInstallments,
   buildMonthlyDueDates,
   roundHkd,
+  summarizeQuantities,
+  displayItemName,
+  ITEM_CODE_META,
+  itemNeedsQuantity,
 } from '../src/lib/payroll/calc';
 import { buildIouInstallmentDrafts, iouInstallmentToPayrollLine } from '../src/lib/payroll/iou';
 
@@ -93,6 +97,31 @@ function assert(cond: boolean, msg: string) {
   assert(normalize('SUBMITTED') === 'PENDING_CONFIRM', 'status remap submitted');
   assert(normalize('CONFIRMED') === 'PENDING_PAYMENT', 'status remap confirmed');
   assert(normalize('PENDING_APPROVAL') === 'PENDING_APPROVAL', 'status pending approval passthrough');
+}
+
+// 6) Quantity summary + 年假 rename
+{
+  assert(ITEM_CODE_META.ANNUAL_LEAVE.defaultName === '年假', 'ANNUAL_LEAVE label = 年假');
+  assert(displayItemName('ANNUAL_LEAVE', '大假') === '年假', 'legacy 大假 → 年假');
+  assert(itemNeedsQuantity('OVERTIME') && itemNeedsQuantity('ANNUAL_LEAVE'), 'qty required codes');
+  assert(!itemNeedsQuantity('BONUS'), 'bonus no qty');
+
+  const r = computePayroll({
+    baseSalaryHkd: 18000,
+    lines: [
+      { itemType: 'EARNING', itemCode: 'OVERTIME', itemName: '加班', unitCount: 6, amountHkd: 900, origin: 'MEMBER' },
+      { itemType: 'EARNING', itemCode: 'ANNUAL_LEAVE', itemName: '大假', unitCount: 2, amountHkd: 0, origin: 'MEMBER' },
+      { itemType: 'DEDUCTION', itemCode: 'LEAVE', itemName: '請假', unitCount: 0.5, amountHkd: 300, origin: 'MEMBER' },
+    ],
+  });
+  const annual = r.items.find((i) => i.itemCode === 'ANNUAL_LEAVE');
+  assert(!!annual && annual.itemName === '年假', 'normalize upgrades 大假 name');
+  assert(annual!.unitCount === 2, 'annual leave unitCount persisted');
+  const q = summarizeQuantities(r.items);
+  assert(q.overtimeHours === 6, 'OT hours sum');
+  assert(q.annualLeaveDays === 2, 'annual leave days sum');
+  assert(q.leaveDays === 0.5, 'leave days sum');
+  assert(q.totalLeaveRelatedDays === 2.5, 'total leave-related days');
 }
 
 console.log('\nAll salary-settlement verify checks passed.');

@@ -120,6 +120,7 @@ export async function createUser(data: CreateUserPayload) {
             department: p.department || null,
             dateJoined: p.dateJoined ? new Date(p.dateJoined as string) : null,
             defaultBaseSalaryHkd: Number(p.defaultBaseSalaryHkd) || 0,
+            annualLeaveDaysPerYear: Number((p as any).annualLeaveDaysPerYear) || 0,
             bankName: p.bankName || null,
             bankAccountNo: p.bankAccountNo || null,
             mpfAccountNo: p.mpfAccountNo || null,
