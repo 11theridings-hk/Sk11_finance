@@ -1,4 +1,7 @@
-import { createCanvas } from '@napi-rs/canvas';
+/**
+ * 將 PDF 各位元組轉成 PNG data URL（伺服器端，供薪金確認後掛附件）。
+ * 使用動態 require／import，避免 Turbopack 把 native canvas 打進 ESM chunk。
+ */
 
 const MAX_PAGES = 8;
 
@@ -9,21 +12,28 @@ export type PdfPageImage = {
   note: string;
 };
 
-/**
- * 將 PDF 各位元組轉成 PNG data URL（伺服器端，供薪金確認後掛附件）。
- */
+export function pdfBytesToDataUrl(pdfBytes: Uint8Array): { dataUrl: string; size: number } {
+  const b64 = Buffer.from(pdfBytes).toString('base64');
+  return {
+    dataUrl: `data:application/pdf;base64,${b64}`,
+    size: pdfBytes.byteLength,
+  };
+}
+
 export async function pdfBytesToPageImages(pdfBytes: Uint8Array): Promise<{
   pages: PdfPageImage[];
   truncated: boolean;
   totalPages: number;
 }> {
+  // Native binding — must stay external to the Next bundle
+  const { createCanvas } = await import('@napi-rs/canvas');
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  // Node：不設 worker，改用主執行緒
+
   const loadingTask = pdfjs.getDocument({
     data: pdfBytes,
     useSystemFonts: true,
     disableWorker: true,
-  } as any);
+  } as Record<string, unknown>);
   const pdf = await loadingTask.promise;
   const totalPages = pdf.numPages || 1;
   const pageCount = Math.min(totalPages, MAX_PAGES);
@@ -53,13 +63,5 @@ export async function pdfBytesToPageImages(pdfBytes: Uint8Array): Promise<{
     pages,
     truncated: totalPages > MAX_PAGES,
     totalPages,
-  };
-}
-
-export function pdfBytesToDataUrl(pdfBytes: Uint8Array): { dataUrl: string; size: number } {
-  const b64 = Buffer.from(pdfBytes).toString('base64');
-  return {
-    dataUrl: `data:application/pdf;base64,${b64}`,
-    size: pdfBytes.byteLength,
   };
 }

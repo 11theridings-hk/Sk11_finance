@@ -27,26 +27,12 @@ import {
   normalizeContactPhoneInput,
   syncWhatsAppBindingForUser,
 } from '@/lib/whatsapp/phoneSync';
+import { normalizePayrollStatus, type PayrollStatus } from '@/lib/payroll/status';
 
-export type PayrollStatus =
-  | 'DRAFT'
-  | 'SUBMITTED'
-  | 'PENDING_APPROVAL'
-  | 'PENDING_CONFIRM'
-  | 'CONFIRMED'
-  | 'PENDING_PAYMENT'
-  | 'PAID'
-  | 'REJECTED';
+export type { PayrollStatus };
 
 export type SalaryCycleStatus = 'OPEN' | 'LOCKED' | 'SETTLED';
 export type SalaryCycleType = 'MONTHLY' | 'SEMI_MONTHLY' | 'WEEKLY' | 'BI_WEEKLY' | 'ONE_OFF';
-
-/** 正規化舊狀態 → 新流程狀態 */
-export function normalizePayrollStatus(s: string): PayrollStatus {
-  if (s === 'SUBMITTED') return 'PENDING_CONFIRM';
-  if (s === 'CONFIRMED') return 'PENDING_PAYMENT';
-  return s as PayrollStatus;
-}
 
 async function requireAdmin() {
   const s = await getSession();
