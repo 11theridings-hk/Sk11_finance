@@ -7,6 +7,8 @@ import {
   snapshotProfile,
   MEMBER_CLAIM_CODES,
   ITEM_CODE_META,
+  summarizeQuantities,
+  displayItemName,
   type PayrollAmountsInput,
   type PayrollItemInput,
   type UserProfileSnapshotInput,
@@ -95,6 +97,7 @@ function profileFromDb(u: {
     contactPhone: u.profile?.contactPhone ?? null,
     contactEmail: u.profile?.contactEmail ?? null,
     defaultBaseSalaryHkd: baseSalary,
+    annualLeaveDaysPerYear: u.profile?.annualLeaveDaysPerYear ?? 0,
   };
 }
 
@@ -355,7 +358,7 @@ export async function saveMyProfile(userId: string, profile: UserProfileSaveInpu
 
   const existing = await prisma.userProfile.findUnique({ where: { userId } });
 
-  // 受僱資料（職稱／部門／入職／離職／預設底薪）僅管理員可改；成員儲存時保留原值
+  // 受僱資料（職稱／部門／入職／離職／預設底薪／年假額度）僅管理員可改；成員儲存時保留原值
   const employment = s.isAdmin
     ? {
         jobTitle: profile.jobTitle || null,
@@ -365,6 +368,7 @@ export async function saveMyProfile(userId: string, profile: UserProfileSaveInpu
           ? new Date(profile.dateOfTermination as string)
           : null,
         defaultBaseSalaryHkd: profile.defaultBaseSalaryHkd ?? 0,
+        annualLeaveDaysPerYear: profile.annualLeaveDaysPerYear ?? 0,
       }
     : {
         jobTitle: existing?.jobTitle ?? null,
@@ -372,6 +376,7 @@ export async function saveMyProfile(userId: string, profile: UserProfileSaveInpu
         dateJoined: existing?.dateJoined ?? null,
         dateOfTermination: existing?.dateOfTermination ?? null,
         defaultBaseSalaryHkd: existing?.defaultBaseSalaryHkd ?? 0,
+        annualLeaveDaysPerYear: existing?.annualLeaveDaysPerYear ?? 0,
       };
 
   const data = {
@@ -404,6 +409,41 @@ export async function saveMyProfile(userId: string, profile: UserProfileSaveInpu
 export async function adminUpdateUserProfile(userId: string, profile: UserProfileSaveInput) {
   await requireAdmin();
   return saveMyProfile(userId, profile);
+}
+
+/** 年假額度／已用／餘額（曆年） */
+export async function getAnnualLeaveBalance(userId: string, year?: number) {
+  const s = await requireSession();
+  if (!s.isAdmin && s.userId !== userId) throw new Error('Forbidden');
+  const y = year ?? new Date().getFullYear();
+  const yearStart = new Date(Date.UTC(y, 0, 1));
+  const yearEnd = new Date(Date.UTC(y, 11, 31, 23, 59, 59, 999));
+
+  const profile = await prisma.userProfile.findUnique({ where: { userId } });
+  const entitlement = Number(profile?.annualLeaveDaysPerYear) || 0;
+
+  const items = await prisma.payrollItem.findMany({
+    where: {
+      itemCode: 'ANNUAL_LEAVE',
+      payroll: {
+        userId,
+        cycle: {
+          periodStart: { lte: yearEnd },
+          periodEnd: { gte: yearStart },
+        },
+        status: { not: 'REJECTED' },
+      },
+    },
+    select: { unitCount: true, amountHkd: true, payrollId: true },
+  });
+  const used = items.reduce((sum, it) => sum + (Number(it.unitCount) || 0), 0);
+  const remaining = Math.max(0, entitlement - used);
+  return {
+    year: y,
+    entitlementDays: entitlement,
+    usedDays: Math.round((used + Number.EPSILON) * 100) / 100,
+    remainingDays: Math.round((remaining + Number.EPSILON) * 100) / 100,
+  };
 }
 
 // ---------- Payroll core ----------
@@ -815,6 +855,12 @@ export async function addPayrollClaimLine(
     throw new Error('成員不可申報此項目類型');
   }
   const meta = ITEM_CODE_META[code] || { itemType: 'EARNING' as const, defaultName: code };
+  if (meta.unitLabel && !(Number(line.unitCount) > 0)) {
+    throw new Error(meta.unitLabel === 'hours' ? '請填寫加班時數' : '請填寫日數');
+  }
+  if (!line.occurredOn && meta.unitLabel) {
+    throw new Error('請填寫發生日期');
+  }
 
   const newLine: PayrollItemInput = {
     itemType: meta.itemType,
@@ -1232,6 +1278,18 @@ async function buildPdfForPayroll(payrollId: string, { isAdmin, sessionUserId, l
   } catch (_e) { /* keep empty defaults */ }
   const pdfGeneratedAt = p.pdfGeneratedAt || new Date();
   const profileInput = (p.snapshotProfileJson ?? {}) as any;
+  // 年假額度優先用最新受僱資料，其次 snapshot
+  let liveEntitlement: number | null = null;
+  try {
+    const liveProfile = await prisma.userProfile.findUnique({
+      where: { userId: p.userId },
+      select: { annualLeaveDaysPerYear: true },
+    });
+    if (liveProfile?.annualLeaveDaysPerYear != null) {
+      liveEntitlement = Number(liveProfile.annualLeaveDaysPerYear) || 0;
+    }
+  } catch { /* ignore */ }
+
   const profile = snapshotProfile({
     legalNameEn: profileInput?.legalNameEn ?? p.userId?.slice(0, 8) ?? 'User',
     legalNameZh: profileInput?.legalNameZh ?? null,
@@ -1242,6 +1300,8 @@ async function buildPdfForPayroll(payrollId: string, { isAdmin, sessionUserId, l
     department: profileInput?.department ?? null,
     dateJoined: profileInput?.dateJoined ?? null,
     defaultBaseSalaryHkd: profileInput?.defaultBaseSalaryHkd ?? 0,
+    annualLeaveDaysPerYear:
+      liveEntitlement ?? profileInput?.annualLeaveDaysPerYear ?? 0,
     bankName: profileInput?.bankName ?? null,
     bankAccountNo: profileInput?.bankAccountNo ?? null,
     mpfAccountNo: profileInput?.mpfAccountNo ?? null,
@@ -1250,6 +1310,45 @@ async function buildPdfForPayroll(payrollId: string, { isAdmin, sessionUserId, l
     contactPhone: profileInput?.contactPhone ?? null,
     contactEmail: profileInput?.contactEmail ?? null,
   });
+
+  const qtySummary = summarizeQuantities(
+    (p.items ?? []).map((it: any) => ({
+      itemType: (it.itemType as any) === 'DEDUCTION' ? 'DEDUCTION' : 'EARNING',
+      itemCode: String(it.itemCode ?? ''),
+      itemName: displayItemName(String(it.itemCode ?? ''), it.itemName),
+      amountHkd: Number(it.amountHkd) || 0,
+      unitCount: it.unitCount == null ? null : Number(it.unitCount),
+    })),
+  );
+
+  let annualLeaveYtd = { year: new Date().getFullYear(), entitlementDays: 0, usedDays: 0, remainingDays: 0 };
+  try {
+    const periodEnd =
+      p.cycle.periodEnd instanceof Date ? p.cycle.periodEnd : new Date(String(p.cycle.periodEnd));
+    const y = periodEnd.getUTCFullYear();
+    const yearStart = new Date(Date.UTC(y, 0, 1));
+    const yearEnd = new Date(Date.UTC(y, 11, 31, 23, 59, 59, 999));
+    const ytdItems = await prisma.payrollItem.findMany({
+      where: {
+        itemCode: 'ANNUAL_LEAVE',
+        payroll: {
+          userId: p.userId,
+          cycle: { periodStart: { lte: yearEnd }, periodEnd: { gte: yearStart } },
+          status: { not: 'REJECTED' },
+        },
+      },
+      select: { unitCount: true },
+    });
+    const used = ytdItems.reduce((s, it) => s + (Number(it.unitCount) || 0), 0);
+    const entitlement = Number(profile.annualLeaveDaysPerYear) || 0;
+    annualLeaveYtd = {
+      year: y,
+      entitlementDays: entitlement,
+      usedDays: Math.round((used + Number.EPSILON) * 100) / 100,
+      remainingDays: Math.max(0, Math.round((entitlement - used + Number.EPSILON) * 100) / 100),
+    };
+  } catch { /* ignore */ }
+
   const pdfInput: Parameters<typeof generatePayslipPdf>[0] = {
     company,
     profile,
@@ -1276,10 +1375,18 @@ async function buildPdfForPayroll(payrollId: string, { isAdmin, sessionUserId, l
     items: (p.items ?? []).map((it: any) => ({
       itemType: (it.itemType as any) === 'DEDUCTION' ? 'DEDUCTION' : 'EARNING',
       itemCode: String(it.itemCode ?? ''),
-      itemName: String(it.itemName ?? 'Item'),
+      itemName: displayItemName(String(it.itemCode ?? ''), it.itemName),
       amountHkd: Number(it.amountHkd) || 0,
       sourceText: it.sourceText ?? null,
+      unitCount: it.unitCount == null ? null : Number(it.unitCount),
+      occurredOn: it.occurredOn
+        ? it.occurredOn instanceof Date
+          ? it.occurredOn.toISOString().slice(0, 10)
+          : String(it.occurredOn).slice(0, 10)
+        : null,
     })),
+    quantitySummary: qtySummary,
+    annualLeaveBalance: annualLeaveYtd,
     submittedBy: p.submittedBy?.profile ?? null,
     cycleNote: p.cycle?.note ?? null,
   };

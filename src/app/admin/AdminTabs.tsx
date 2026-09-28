@@ -624,6 +624,7 @@ type FullProfileForm = {
   department: string
   dateJoined: string
   defaultBaseSalaryHkd: number
+  annualLeaveDaysPerYear: number
   bankName: string
   bankAccountNo: string
   mpfAccountNo: string
@@ -649,6 +650,7 @@ const PROFILE_FIELD_DEFS: Array<{
   { tKey: 'profileDepartment', key: 'department' },
   { tKey: 'profileDateJoined', key: 'dateJoined', type: 'date' },
   { tKey: 'profileDefaultBaseSalaryHkd', key: 'defaultBaseSalaryHkd', type: 'number' },
+  { tKey: 'profileAnnualLeaveDays', key: 'annualLeaveDaysPerYear', type: 'number' },
   { tKey: 'profileBankName', key: 'bankName' },
   { tKey: 'profileBankAccountNo', key: 'bankAccountNo' },
   { tKey: 'profileMpfAccountNo', key: 'mpfAccountNo' },
@@ -663,7 +665,7 @@ const PROFILE_FIELD_DEFS: Array<{
 const EMPTY_PROFILE: FullProfileForm = {
   legalNameEn: '', legalNameZh: '', hkid: '', passportNo: '',
   dateOfBirth: '', jobTitle: '', department: '', dateJoined: '',
-  defaultBaseSalaryHkd: 0, bankName: '', bankAccountNo: '',
+  defaultBaseSalaryHkd: 0, annualLeaveDaysPerYear: 0, bankName: '', bankAccountNo: '',
   mpfAccountNo: '', addressLine1: '', addressLine2: '',
   contactPhone: '', contactEmail: '', emergencyName: '', emergencyPhone: '',
 }
@@ -848,6 +850,7 @@ function UserTab({ initialUsers, locale }: { initialUsers: any[], locale: Locale
             ? new Date((raw as any).dateJoined).toISOString().slice(0, 10)
             : '',
           defaultBaseSalaryHkd: Number((raw as any).defaultBaseSalaryHkd) || 0,
+          annualLeaveDaysPerYear: Number((raw as any).annualLeaveDaysPerYear) || 0,
           bankName: (raw as any).bankName || '',
           bankAccountNo: (raw as any).bankAccountNo || '',
           mpfAccountNo: (raw as any).mpfAccountNo || '',

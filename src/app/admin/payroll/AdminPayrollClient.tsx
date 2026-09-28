@@ -26,7 +26,7 @@ import {
   type PayrollStatus,
 } from '@/app/actions/payroll';
 import type { PayrollAmountsInput, PayrollItemInput, UserProfileSnapshotInput } from '@/lib/payroll/calc';
-import { ITEM_CODE_META } from '@/lib/payroll/calc';
+import { ITEM_CODE_META, itemNeedsQuantity, displayItemName } from '@/lib/payroll/calc';
 import { createTranslator, normalizeLocale, type Locale } from '@/lib/i18n';
 
 type PdfLocale = 'bilingual' | 'zh' | 'en';
@@ -188,10 +188,18 @@ export default function AdminPayrollClient(props: Props) {
     baseSalaryHkd: 0,
     lines: [],
   });
-  const [newEditLine, setNewEditLine] = useState<{ itemCode: string; amountHkd: number; note: string }>({
+  const [newEditLine, setNewEditLine] = useState<{
+    itemCode: string;
+    amountHkd: number;
+    note: string;
+    unitCount: number;
+    occurredOn: string;
+  }>({
     itemCode: 'OVERTIME',
     amountHkd: 0,
     note: '',
+    unitCount: 0,
+    occurredOn: new Date().toISOString().slice(0, 10),
   });
   const [markPaidForm, setMarkPaidForm] = useState<{ paidAt: string; paidReference: string }>(
     { paidAt: new Date().toISOString().slice(0, 10), paidReference: '' },
@@ -409,7 +417,13 @@ export default function AdminPayrollClient(props: Props) {
       adminNote: row.adminNote ?? null,
       remark: row.remark ?? null,
     });
-    setNewEditLine({ itemCode: 'OVERTIME', amountHkd: 0, note: '' });
+    setNewEditLine({
+      itemCode: 'OVERTIME',
+      amountHkd: 0,
+      note: '',
+      unitCount: 0,
+      occurredOn: new Date().toISOString().slice(0, 10),
+    });
     setActionModal({ mode: 'edit', payrollId: row.id });
   };
 
@@ -440,7 +454,10 @@ export default function AdminPayrollClient(props: Props) {
   };
 
   const handleAddEditLineLocal = () => {
-    if (!newEditLine.amountHkd) return;
+    const needsQty = itemNeedsQuantity(newEditLine.itemCode);
+    if (needsQty && !(newEditLine.unitCount > 0)) return;
+    // 獎金／借款等仍要金額；請假／補假／年假／例假允許金額 0
+    if (!needsQty && !(newEditLine.amountHkd > 0) && newEditLine.itemCode !== 'COMP_LEAVE') return;
     const meta = ITEM_CODE_META[newEditLine.itemCode] || { itemType: 'EARNING' as const, defaultName: newEditLine.itemCode };
     const line: PayrollItemInput = {
       itemType: meta.itemType,
@@ -448,10 +465,18 @@ export default function AdminPayrollClient(props: Props) {
       itemName: newEditLine.note || meta.defaultName,
       sourceText: newEditLine.note || null,
       origin: 'ADMIN',
+      occurredOn: needsQty ? newEditLine.occurredOn || null : null,
+      unitCount: needsQty ? newEditLine.unitCount : null,
       amountHkd: newEditLine.amountHkd,
     };
     setEditForm((f) => ({ ...f, lines: [...(f.lines ?? []), line] }));
-    setNewEditLine({ itemCode: 'OVERTIME', amountHkd: 0, note: '' });
+    setNewEditLine({
+      itemCode: 'OVERTIME',
+      amountHkd: 0,
+      note: '',
+      unitCount: 0,
+      occurredOn: new Date().toISOString().slice(0, 10),
+    });
   };
 
   const handleMarkPaid = async () => {
@@ -478,6 +503,7 @@ export default function AdminPayrollClient(props: Props) {
         department: r?.department ?? null,
         dateJoined: r?.dateJoined ? toIsoDay(r.dateJoined) : null,
         defaultBaseSalaryHkd: r?.defaultBaseSalaryHkd ?? 0,
+        annualLeaveDaysPerYear: r?.annualLeaveDaysPerYear ?? 0,
         bankName: r?.bankName ?? null,
         bankAccountNo: r?.bankAccountNo ?? null,
         mpfAccountNo: r?.mpfAccountNo ?? null,
@@ -1062,9 +1088,16 @@ export default function AdminPayrollClient(props: Props) {
               {(editForm.lines ?? []).map((line, idx) => (
                 <div key={`${line.itemCode}-${idx}`} className="px-3 py-2 flex items-center justify-between gap-2 text-xs">
                   <div className="min-w-0">
-                    <span className="font-medium text-slate-800">{line.itemName}</span>
+                    <span className="font-medium text-slate-800">{displayItemName(line.itemCode, line.itemName)}</span>
                     <span className="ml-1.5 text-slate-400">[{line.itemCode}]</span>
                     {line.origin && <span className="ml-1.5 text-slate-400">{line.origin}</span>}
+                    {line.occurredOn ? <span className="ml-1.5 text-slate-500">{String(line.occurredOn).slice(0, 10)}</span> : null}
+                    {line.unitCount != null ? (
+                      <span className="ml-1.5 text-indigo-700 tabular-nums">
+                        ×{line.unitCount}
+                        {ITEM_CODE_META[line.itemCode]?.unitLabel === 'hours' ? '小時' : ITEM_CODE_META[line.itemCode]?.unitLabel === 'days' ? '日' : ''}
+                      </span>
+                    ) : null}
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="tabular-nums font-medium">{fmtHkd(line.amountHkd)}</span>
@@ -1089,9 +1122,9 @@ export default function AdminPayrollClient(props: Props) {
                 </div>
               ))}
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-sm">
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-2 text-sm">
               <select
-                className="border border-slate-300 rounded px-2 py-1.5"
+                className="border border-slate-300 rounded px-2 py-1.5 md:col-span-1"
                 value={newEditLine.itemCode}
                 onChange={(e) => setNewEditLine({ ...newEditLine, itemCode: e.target.value })}
               >
@@ -1099,6 +1132,26 @@ export default function AdminPayrollClient(props: Props) {
                   <option key={c} value={c}>{ITEM_CODE_META[c]?.defaultName || c} ({c})</option>
                 ))}
               </select>
+              {itemNeedsQuantity(newEditLine.itemCode) && (
+                <>
+                  <input
+                    type="date"
+                    className="border border-slate-300 rounded px-2 py-1.5"
+                    value={newEditLine.occurredOn}
+                    onChange={(e) => setNewEditLine({ ...newEditLine, occurredOn: e.target.value })}
+                    title={t('claimDate')}
+                  />
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    placeholder={ITEM_CODE_META[newEditLine.itemCode]?.unitLabel === 'hours' ? t('overtimeHours') : t('leaveDays')}
+                    className="border border-slate-300 rounded px-2 py-1.5"
+                    value={newEditLine.unitCount || ''}
+                    onChange={(e) => setNewEditLine({ ...newEditLine, unitCount: Number(e.target.value) || 0 })}
+                  />
+                </>
+              )}
               <input
                 type="number"
                 step="0.01"
@@ -1116,11 +1169,21 @@ export default function AdminPayrollClient(props: Props) {
               <button
                 type="button"
                 onClick={handleAddEditLineLocal}
-                className="text-xs px-2 py-1.5 border border-indigo-300 bg-indigo-50 text-indigo-800 rounded hover:bg-indigo-100"
+                disabled={
+                  itemNeedsQuantity(newEditLine.itemCode)
+                    ? !(newEditLine.unitCount > 0)
+                    : !(newEditLine.amountHkd > 0)
+                }
+                className="text-xs px-2 py-1.5 border border-indigo-300 bg-indigo-50 text-indigo-800 rounded hover:bg-indigo-100 disabled:opacity-40"
               >
                 + {t('addClaim')}
               </button>
             </div>
+            {itemNeedsQuantity(newEditLine.itemCode) && (
+              <p className="mt-1.5 text-[11px] text-slate-500">
+                請填寫{ITEM_CODE_META[newEditLine.itemCode]?.unitLabel === 'hours' ? '時數' : '日數'}（數量）與日期；金額可為 0。
+              </p>
+            )}
           </div>
 
           <div className="mt-4">
@@ -1184,6 +1247,7 @@ export default function AdminPayrollClient(props: Props) {
                 ['profileDepartment', 'department', 'text'],
                 ['profileDateJoined', 'dateJoined', 'date'],
                 ['profileDefaultBaseSalaryHkd', 'defaultBaseSalaryHkd', 'number'],
+                ['profileAnnualLeaveDays', 'annualLeaveDaysPerYear', 'number'],
                 ['profileBankName', 'bankName', 'text'],
                 ['profileBankAccountNo', 'bankAccountNo', 'text'],
                 ['profileMpfAccountNo', 'mpfAccountNo', 'text'],

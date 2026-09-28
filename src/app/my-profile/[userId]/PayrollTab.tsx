@@ -24,6 +24,7 @@ import {
   type PayrollStatus,
 } from '@/app/actions/payroll';
 import { createTranslator, normalizeLocale, type Locale } from '@/lib/i18n';
+import { displayItemName, summarizeQuantities } from '@/lib/payroll/calc';
 
 type PdfLocale = 'bilingual' | 'zh' | 'en';
 function getBrowserLocaleFromCookieOrFallback(): Locale {
@@ -113,7 +114,7 @@ const CLAIM_CODE_LABELS: Record<string, string> = {
   COMP_LEAVE: '補假 COMP_LEAVE',
   LEAVE: '請假 LEAVE',
   STATUTORY_HOLIDAY: '例假 STATUTORY_HOLIDAY',
-  ANNUAL_LEAVE: '大假 ANNUAL_LEAVE',
+  ANNUAL_LEAVE: '年假 ANNUAL_LEAVE',
 };
 
 const fmtHkd = (n: number) =>
@@ -582,6 +583,15 @@ function PayrollCard(props: {
   const memberRemovable = p.items.filter(
     (i) => i.itemCode !== 'BASE_SALARY' && i.origin !== 'ADMIN' && i.origin !== 'IOU_AUTO',
   );
+  const qty = summarizeQuantities(
+    p.items.map((it) => ({
+      itemType: (it.itemType === 'DEDUCTION' ? 'DEDUCTION' : 'EARNING') as 'EARNING' | 'DEDUCTION',
+      itemCode: it.itemCode,
+      itemName: it.itemName,
+      amountHkd: it.amountHkd,
+      unitCount: it.unitCount,
+    })),
+  );
 
   const unitLabel =
     claimForm.itemCode === 'OVERTIME' ? t('overtimeHours') : t('leaveDays');
@@ -685,7 +695,7 @@ function PayrollCard(props: {
               {memberRemovable.map((it) => (
                 <div key={it.id} className="flex items-center justify-between text-xs bg-white border border-slate-200 rounded px-2 py-1.5">
                   <span>
-                    {it.itemName}
+                    {displayItemName(it.itemCode, it.itemName)}
                     {it.occurredOn ? ` · ${shortDate(it.occurredOn)}` : ''}
                     {it.unitCount != null ? ` · ${it.unitCount}` : ''}
                     {' · '}
@@ -706,7 +716,11 @@ function PayrollCard(props: {
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              disabled={props.claimBusy || !claimForm.occurredOn || !claimForm.amountHkd}
+              disabled={
+                props.claimBusy ||
+                !claimForm.occurredOn ||
+                !(claimForm.unitCount > 0)
+              }
               onClick={() => props.onAddClaim(claimForm)}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
             >
@@ -737,6 +751,20 @@ function PayrollCard(props: {
         <AmountItem label={t('amountLabelGross')} value={p.grossTotalHkd} tone="blue" highlight />
         <AmountItem label={t('amountLabelNet')} value={p.netPayableHkd} tone="emerald" highlight />
       </div>
+
+      {(qty.overtimeHours > 0 ||
+        qty.leaveDays > 0 ||
+        qty.compLeaveDays > 0 ||
+        qty.statutoryHolidayDays > 0 ||
+        qty.annualLeaveDays > 0) && (
+        <div className="mx-4 md:mx-5 mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 flex flex-wrap gap-x-4 gap-y-1">
+          {qty.overtimeHours > 0 && <span>加班時數：{qty.overtimeHours}</span>}
+          {qty.leaveDays > 0 && <span>請假日數：{qty.leaveDays}</span>}
+          {qty.compLeaveDays > 0 && <span>補假日數：{qty.compLeaveDays}</span>}
+          {qty.statutoryHolidayDays > 0 && <span>例假日數：{qty.statutoryHolidayDays}</span>}
+          {qty.annualLeaveDays > 0 && <span>年假日數：{qty.annualLeaveDays}</span>}
+        </div>
+      )}
 
       {/* Notes / Rejected reason */}
       {p.status === 'REJECTED' && p.employeeNote && (
@@ -776,12 +804,14 @@ function PayrollCard(props: {
                     <div key={it.id} className="px-3 py-2 flex justify-between items-start gap-2">
                       <div className="min-w-0">
                         <div className="font-medium text-slate-800 text-sm">
-                          {it.itemName}
+                          {displayItemName(it.itemCode, it.itemName)}
                           <span className="ml-1.5 text-xs text-slate-400">[{it.itemCode}]</span>
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5">
                           {it.occurredOn ? shortDate(it.occurredOn) : ''}
-                          {it.unitCount != null ? ` · ${it.unitCount}` : ''}
+                          {it.unitCount != null
+                            ? ` · ${it.unitCount}${it.itemCode === 'OVERTIME' ? '小時' : '日'}`
+                            : ''}
                           {it.origin ? ` · ${it.origin}` : ''}
                         </div>
                         {it.sourceText && (
@@ -808,12 +838,14 @@ function PayrollCard(props: {
                     <div key={it.id} className="px-3 py-2 flex justify-between items-start gap-2">
                       <div className="min-w-0">
                         <div className="font-medium text-slate-800 text-sm">
-                          {it.itemName}
+                          {displayItemName(it.itemCode, it.itemName)}
                           <span className="ml-1.5 text-xs text-slate-400">[{it.itemCode}]</span>
                         </div>
                         <div className="text-[11px] text-slate-500 mt-0.5">
                           {it.occurredOn ? shortDate(it.occurredOn) : ''}
-                          {it.unitCount != null ? ` · ${it.unitCount}` : ''}
+                          {it.unitCount != null
+                            ? ` · ${it.unitCount}${it.itemCode === 'OVERTIME' ? '小時' : '日'}`
+                            : ''}
                           {it.origin ? ` · ${it.origin}` : ''}
                         </div>
                         {it.sourceText && (

@@ -68,7 +68,7 @@ export const ITEM_CODE_META: Record<
   COMP_LEAVE: { itemType: 'EARNING', defaultName: '補假', unitLabel: 'days' },
   LEAVE: { itemType: 'DEDUCTION', defaultName: '請假', unitLabel: 'days' },
   STATUTORY_HOLIDAY: { itemType: 'EARNING', defaultName: '例假', unitLabel: 'days' },
-  ANNUAL_LEAVE: { itemType: 'EARNING', defaultName: '大假', unitLabel: 'days' },
+  ANNUAL_LEAVE: { itemType: 'EARNING', defaultName: '年假', unitLabel: 'days' },
   BONUS: { itemType: 'EARNING', defaultName: '獎金' },
   BONUS_ANNUAL: { itemType: 'EARNING', defaultName: '獎金 / 花紅' },
   COMMISSION: { itemType: 'EARNING', defaultName: '佣金' },
@@ -102,10 +102,16 @@ function toIsoDay(d: string | Date | null | undefined): string | null {
 function normalizeLine(it: PayrollItemInput, fallbackSort: number): PayrollItemInput {
   const meta = ITEM_CODE_META[it.itemCode];
   const itemType = it.itemType || meta?.itemType || 'EARNING';
+  // 舊標籤「大假」升級為「年假」
+  const rawName = it.itemName || meta?.defaultName || it.itemCode;
+  const itemName =
+    it.itemCode === 'ANNUAL_LEAVE' || rawName === '大假'
+      ? ITEM_CODE_META.ANNUAL_LEAVE.defaultName
+      : rawName;
   return {
     ...it,
     itemType,
-    itemName: it.itemName || meta?.defaultName || it.itemCode,
+    itemName,
     origin: it.origin || 'ADMIN',
     occurredOn: toIsoDay(it.occurredOn as string | Date | null) || null,
     amountHkd: roundHkd(it.amountHkd || 0),
@@ -264,6 +270,7 @@ export type UserProfileSnapshotInput = {
   contactPhone?: string | null;
   contactEmail?: string | null;
   defaultBaseSalaryHkd?: number | null;
+  annualLeaveDaysPerYear?: number | null;
 };
 
 export function snapshotProfile(p: UserProfileSnapshotInput) {
@@ -291,7 +298,59 @@ export function snapshotProfile(p: UserProfileSnapshotInput) {
     contactPhone: p.contactPhone ?? null,
     contactEmail: p.contactEmail ?? null,
     defaultBaseSalaryHkd: p.defaultBaseSalaryHkd ?? null,
+    annualLeaveDaysPerYear: p.annualLeaveDaysPerYear ?? null,
     snapshotTakenAtIso: new Date().toISOString(),
+  };
+}
+
+/** 數量型項目代碼（加班＝時數；請假／補假／例假／年假＝日數） */
+export const QUANTITY_ITEM_CODES = [
+  'OVERTIME',
+  'COMP_LEAVE',
+  'LEAVE',
+  'STATUTORY_HOLIDAY',
+  'ANNUAL_LEAVE',
+] as const;
+
+export function itemNeedsQuantity(itemCode: string): boolean {
+  return (QUANTITY_ITEM_CODES as readonly string[]).includes(itemCode);
+}
+
+export function unitLabelForCode(itemCode: string): 'hours' | 'days' | null {
+  return ITEM_CODE_META[itemCode]?.unitLabel ?? null;
+}
+
+/** 顯示用：舊資料「大假」統一顯示為「年假」 */
+export function displayItemName(itemCode: string, itemName?: string | null): string {
+  if (itemCode === 'ANNUAL_LEAVE') return ITEM_CODE_META.ANNUAL_LEAVE.defaultName;
+  return itemName || ITEM_CODE_META[itemCode]?.defaultName || itemCode;
+}
+
+/** 彙總明細數量（加班時數、請假日數、年假日數等） */
+export function summarizeQuantities(items: PayrollItemInput[]): {
+  overtimeHours: number;
+  leaveDays: number;
+  compLeaveDays: number;
+  statutoryHolidayDays: number;
+  annualLeaveDays: number;
+  totalLeaveRelatedDays: number;
+} {
+  const sum = (code: string) =>
+    roundHkd(
+      items.filter((i) => i.itemCode === code).reduce((s, i) => s + (Number(i.unitCount) || 0), 0),
+    );
+  const overtimeHours = sum('OVERTIME');
+  const leaveDays = sum('LEAVE');
+  const compLeaveDays = sum('COMP_LEAVE');
+  const statutoryHolidayDays = sum('STATUTORY_HOLIDAY');
+  const annualLeaveDays = sum('ANNUAL_LEAVE');
+  return {
+    overtimeHours,
+    leaveDays,
+    compLeaveDays,
+    statutoryHolidayDays,
+    annualLeaveDays,
+    totalLeaveRelatedDays: roundHkd(leaveDays + compLeaveDays + statutoryHolidayDays + annualLeaveDays),
   };
 }
 
