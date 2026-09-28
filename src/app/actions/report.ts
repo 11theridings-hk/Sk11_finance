@@ -13,6 +13,11 @@ export type ReportFilter = {
   userId?: string
   noteKeyword?: string
   status?: 'PENDING' | 'PENDING_PAYMENT' | 'APPROVED' | 'ALL' | 'REJECTED'
+  /** 類型：收入／支出；未填或 ALL 表示不限 */
+  type?: 'INCOME' | 'EXPENSE' | 'ALL'
+  /** 主要排序欄（伺服器端）；列表端仍可再排序 */
+  sortBy?: 'date' | 'type' | 'category' | 'status' | 'pool'
+  sortDir?: 'asc' | 'desc'
 }
 
 export async function getReportRecords(filter: ReportFilter) {
@@ -78,6 +83,10 @@ export async function getReportRecords(filter: ReportFilter) {
     where.poolId = filter.poolId
   }
 
+  if (filter.type && filter.type !== 'ALL') {
+    where.type = filter.type
+  }
+
   if (filter.noteKeyword?.trim()) {
     const kw = filter.noteKeyword.trim()
     where.AND = [
@@ -92,9 +101,21 @@ export async function getReportRecords(filter: ReportFilter) {
     ]
   }
 
+  const sortDir = filter.sortDir === 'asc' ? ('asc' as const) : ('desc' as const)
+  const orderBy =
+    filter.sortBy === 'type'
+      ? ([{ type: sortDir }, { date: 'desc' as const }] as const)
+      : filter.sortBy === 'category'
+        ? ([{ category: { name: sortDir } }, { date: 'desc' as const }] as const)
+        : filter.sortBy === 'status'
+          ? ([{ status: sortDir }, { date: 'desc' as const }] as const)
+          : filter.sortBy === 'pool'
+            ? ([{ pool: { name: sortDir } }, { date: 'desc' as const }] as const)
+            : ([{ date: sortDir }] as const)
+
   return await prisma.record.findMany({
     where,
-    orderBy: { date: 'desc' },
+    orderBy: [...orderBy],
     include: {
       category: { select: { name: true } },
       subCategory: { select: { name: true } },
