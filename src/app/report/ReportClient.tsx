@@ -19,6 +19,17 @@ import {
   saveVisibleColumnIds,
   isColumnVisible,
 } from '@/lib/reportColumns'
+import {
+  type PageOrientation,
+  type PageOrientationPreference,
+  type ReportSortDir,
+  type ReportSortKey,
+  LANDSCAPE_COLUMN_THRESHOLD,
+  loadPageOrientationPreference,
+  resolvePageOrientation,
+  savePageOrientationPreference,
+  sortReportRows,
+} from '@/lib/reportLayout'
 
 function categoryPath(item: any) {
   return [item?.category?.name, item?.subCategory?.name, item?.thirdCategory?.name].filter(Boolean).join(' / ') || '-'
@@ -121,6 +132,10 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     defaultVisibleIds(REPORT_COLUMNS_BY_TAB.records)
   )
   const [columnsPanelOpen, setColumnsPanelOpen] = useState(false)
+  const [pageOrientationPref, setPageOrientationPref] = useState<PageOrientationPreference>('auto')
+  const [sortBy, setSortBy] = useState<ReportSortKey>('date')
+  const [sortDir, setSortDir] = useState<ReportSortDir>('desc')
+  const [recordType, setRecordType] = useState<'ALL' | 'INCOME' | 'EXPENSE'>('ALL')
 
   useEffect(() => {
     setExportLocale(locale)
@@ -130,9 +145,32 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     setVisibleColumnIds(loadVisibleColumnIds(reportTab))
   }, [reportTab])
 
+  useEffect(() => {
+    // Clamp sort key to dimensions available on the current tab
+    if (reportTab === 'activities' && (sortBy === 'type' || sortBy === 'status' || sortBy === 'pool')) {
+      setSortBy('date')
+    } else if (reportTab === 'contracts' && sortBy === 'status') {
+      setSortBy('date')
+    }
+  }, [reportTab, sortBy])
+
+  useEffect(() => {
+    setPageOrientationPref(loadPageOrientationPreference())
+  }, [])
+
   const columnDefs = REPORT_COLUMNS_BY_TAB[reportTab]
   const visibleSet = useMemo(() => new Set(visibleColumnIds), [visibleColumnIds])
   const showCol = (id: string) => isColumnVisible(visibleSet, id)
+
+  const effectiveOrientation: PageOrientation = useMemo(
+    () => resolvePageOrientation(pageOrientationPref, visibleColumnIds.length),
+    [pageOrientationPref, visibleColumnIds.length]
+  )
+
+  const setOrientationPreference = (value: PageOrientationPreference) => {
+    setPageOrientationPref(value)
+    savePageOrientationPreference(value)
+  }
 
   const toggleColumn = (id: string) => {
     setVisibleColumnIds((prev) => {
@@ -197,6 +235,19 @@ export default function ReportClient({ categories, users, pools, locale }: Props
 
   const activeCount =
     reportTab === 'records' ? records.length : reportTab === 'activities' ? activities.length : contracts.length
+
+  const sortedRecords = useMemo(
+    () => sortReportRows(records, sortBy, sortDir),
+    [records, sortBy, sortDir]
+  )
+  const sortedActivities = useMemo(() => {
+    const key: ReportSortKey = sortBy === 'type' || sortBy === 'status' || sortBy === 'pool' ? 'date' : sortBy
+    return sortReportRows(activities, key, sortDir)
+  }, [activities, sortBy, sortDir])
+  const sortedContracts = useMemo(() => {
+    const key: ReportSortKey = sortBy === 'status' ? 'date' : sortBy
+    return sortReportRows(contracts, key, sortDir)
+  }, [contracts, sortBy, sortDir])
 
   const handleEditClick = (record: any) => {
     setEditingRecord(record)
@@ -377,13 +428,14 @@ export default function ReportClient({ categories, users, pools, locale }: Props
 
     try {
       if (reportTab === 'records') {
-        const filter: ReportFilter = { ...range, status }
+        const filter: ReportFilter = { ...range, status, sortBy, sortDir }
         if (categoryId) filter.categoryId = categoryId
         if (subCategoryId) filter.subCategoryId = subCategoryId
         if (thirdCategoryId) filter.thirdCategoryId = thirdCategoryId
         if (poolId) filter.poolId = poolId
         if (userId) filter.userId = userId
         if (noteKeyword.trim()) filter.noteKeyword = noteKeyword.trim()
+        if (recordType !== 'ALL') filter.type = recordType
         setRecords(await getReportRecords(filter))
       } else if (reportTab === 'activities') {
         setActivities(await getReportActivities({
@@ -429,23 +481,25 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     const t = createTranslator(exportLocale)
     const dateLocale = exportLocale === 'en' ? 'en-HK' : 'zh-HK'
     const locale = exportLocale
+    const orientation = effectiveOrientation
+    const exportRows = sortedRecords
 
-    if (records.length === 0) {
+    if (exportRows.length === 0) {
       alert(t('noDataToExport'))
       return
     }
 
-    const totalCount = records.length
+    const totalCount = exportRows.length
     let totalIncome = 0
     let totalExpense = 0
-    records.forEach(r => {
+    exportRows.forEach(r => {
       const val = Math.abs(r.amount)
       if (r.type === 'INCOME') totalIncome += val
       else if (r.type === 'EXPENSE') totalExpense += val
     })
     const balance = totalIncome - totalExpense
 
-    const doc = createPdfDoc('landscape')
+    const doc = createPdfDoc(orientation)
     const pageW = doc.internal.pageSize.getWidth()
     const marginX = 10
 
@@ -463,9 +517,11 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     const categoryName = categoryId ? categories.find(c => c.id === categoryId)?.name || t('unknown') : t('all')
     const roleName = userId ? users.find(u => u.id === userId)?.roleName || t('unknown') : t('all')
     const poolName = poolId ? pools.find(p => p.id === poolId)?.name || t('unknown') : t('all')
+    const typeName =
+      recordType === 'INCOME' ? t('income') : recordType === 'EXPENSE' ? t('expense') : t('all')
     doc.setTextColor(130, 130, 140)
     doc.text(
-      `${t('filterSummary')}: ${t('category')}[${categoryName}] · ${t('pool')}[${poolName}] · ${t('role')}[${roleName}] · ${t('reportNoteSearch')}[${noteKeyword.trim() || t('all')}]`,
+      `${t('filterSummary')}: ${t('type')}[${typeName}] · ${t('category')}[${categoryName}] · ${t('pool')}[${poolName}] · ${t('role')}[${roleName}] · ${t('reportNoteSearch')}[${noteKeyword.trim() || t('all')}]`,
       marginX,
       34
     )
@@ -484,7 +540,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
 
     const categoryStats: Record<string, number> = {}
     let totalExpenseMerged = 0
-    records.filter(r => r.type === 'EXPENSE').forEach(r => {
+    exportRows.filter(r => r.type === 'EXPENSE').forEach(r => {
       const catName = r.category?.name || t('uncategorized')
       const val = Math.abs(r.amount)
       categoryStats[catName] = (categoryStats[catName] || 0) + val
@@ -512,7 +568,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       yPos += 9
     })
 
-    doc.addPage('a4', 'landscape')
+    doc.addPage('a4', orientation)
     if (fontBase64) doc.setFont('NotoSansSC', 'bold')
     doc.setFontSize(13)
     doc.setTextColor(30, 30, 40)
@@ -550,7 +606,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         .map((c) => c.value)
     }
 
-    const tableData = records.map(rowCells)
+    const tableData = exportRows.map(rowCells)
 
     const headCells: { id: string; label: string }[] = [
       { id: 'recordIdShort', label: t('recordIdShort') },
@@ -580,7 +636,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       body: tableData,
       styles: {
         font: pdfFont(),
-        fontSize: 7,
+        fontSize: orientation === 'portrait' ? 6.5 : 7,
         cellPadding: 1.4,
         overflow: 'linebreak',
         valign: 'middle',
@@ -589,27 +645,31 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         fillColor: [0, 122, 255],
         textColor: 255,
         font: pdfFont(),
-        fontSize: 7,
+        fontSize: orientation === 'portrait' ? 6.5 : 7,
         fontStyle: 'bold',
       },
       alternateRowStyles: { fillColor: [248, 250, 252] },
       margin: { left: marginX, right: marginX },
     })
 
-    doc.save(locale === 'en' ? 'financial-report-landscape.pdf' : '財務報表_明細列表.pdf')
+    const fileBase = locale === 'en' ? 'financial-report' : '財務報表_明細列表'
+    const orientSuffix = orientation === 'landscape' ? (locale === 'en' ? '-landscape' : '_橫向') : (locale === 'en' ? '-portrait' : '_直向')
+    doc.save(`${fileBase}${orientSuffix}.pdf`)
   }
 
   const exportActivityListPdf = () => {
     const t = createTranslator(exportLocale)
     const dateLocale = exportLocale === 'en' ? 'en-HK' : 'zh-HK'
     const locale = exportLocale
+    const orientation = effectiveOrientation
+    const exportRows = sortedActivities
 
-    if (activities.length === 0) {
+    if (exportRows.length === 0) {
       alert(t('noDataToExport'))
       return
     }
 
-    const doc = createPdfDoc('landscape')
+    const doc = createPdfDoc(orientation)
     const pageW = doc.internal.pageSize.getWidth()
     const marginX = 10
 
@@ -622,7 +682,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     if (fontBase64) doc.setFont('NotoSansSC', 'normal')
     doc.setFontSize(9)
     doc.setTextColor(90, 90, 100)
-    doc.text(`${t('statisticsPeriod')}: ${timeRangeLabel()}  ·  ${activities.length} ${t('resultCount')}`, pageW / 2, 18, { align: 'center' })
+    doc.text(`${t('statisticsPeriod')}: ${timeRangeLabel()}  ·  ${exportRows.length} ${t('resultCount')}`, pageW / 2, 18, { align: 'center' })
 
     const activityHeadMeta = [
       { id: 'recordIdShort', label: t('recordIdShort') },
@@ -638,7 +698,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     ]
     const activityHead = activityHeadMeta.filter((c) => showCol(c.id)).map((c) => c.label)
 
-    const tableData = activities.map((a) => {
+    const tableData = exportRows.map((a) => {
       const map: Record<string, string> = {
         recordIdShort: a.id.slice(-8),
         activityTitle: a.title || '-',
@@ -658,8 +718,8 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       startY: 28,
       head: [activityHead],
       body: tableData,
-      styles: { font: pdfFont(), fontSize: 8, cellPadding: 1.6, overflow: 'linebreak' },
-      headStyles: { fillColor: [0, 122, 255], textColor: 255, font: pdfFont(), fontSize: 8, fontStyle: 'bold' },
+      styles: { font: pdfFont(), fontSize: orientation === 'portrait' ? 7 : 8, cellPadding: 1.6, overflow: 'linebreak' },
+      headStyles: { fillColor: [0, 122, 255], textColor: 255, font: pdfFont(), fontSize: orientation === 'portrait' ? 7 : 8, fontStyle: 'bold' },
       alternateRowStyles: { fillColor: [248, 250, 252] },
       margin: { left: marginX, right: marginX },
     })
@@ -671,13 +731,15 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     const t = createTranslator(exportLocale)
     const dateLocale = exportLocale === 'en' ? 'en-HK' : 'zh-HK'
     const locale = exportLocale
+    const orientation = effectiveOrientation
+    const exportRows = sortedContracts
 
-    if (contracts.length === 0) {
+    if (exportRows.length === 0) {
       alert(t('noDataToExport'))
       return
     }
 
-    const doc = createPdfDoc('landscape')
+    const doc = createPdfDoc(orientation)
     const pageW = doc.internal.pageSize.getWidth()
     const marginX = 10
 
@@ -690,7 +752,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     if (fontBase64) doc.setFont('NotoSansSC', 'normal')
     doc.setFontSize(9)
     doc.setTextColor(90, 90, 100)
-    doc.text(`${t('statisticsPeriod')}: ${timeRangeLabel()}  ·  ${contracts.length} ${t('resultCount')}`, pageW / 2, 18, { align: 'center' })
+    doc.text(`${t('statisticsPeriod')}: ${timeRangeLabel()}  ·  ${exportRows.length} ${t('resultCount')}`, pageW / 2, 18, { align: 'center' })
 
     const contractHeadMeta = [
       { id: 'recordIdShort', label: t('recordIdShort') },
@@ -713,7 +775,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       return showCol(c.id)
     })
 
-    const tableData = contracts.map((c) => {
+    const tableData = exportRows.map((c) => {
       const map: Record<string, string> = {
         recordIdShort: c.id.slice(-8),
         contractTitle: c.title || '-',
@@ -737,8 +799,8 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       startY: 28,
       head: [visibleContractHead.map((c) => c.label)],
       body: tableData,
-      styles: { font: pdfFont(), fontSize: 7, cellPadding: 1.4, overflow: 'linebreak' },
-      headStyles: { fillColor: [0, 122, 255], textColor: 255, font: pdfFont(), fontSize: 7, fontStyle: 'bold' },
+      styles: { font: pdfFont(), fontSize: orientation === 'portrait' ? 6.5 : 7, cellPadding: 1.4, overflow: 'linebreak' },
+      headStyles: { fillColor: [0, 122, 255], textColor: 255, font: pdfFont(), fontSize: orientation === 'portrait' ? 6.5 : 7, fontStyle: 'bold' },
       alternateRowStyles: { fillColor: [248, 250, 252] },
       margin: { left: marginX, right: marginX },
     })
@@ -750,8 +812,10 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     const t = createTranslator(exportLocale)
     const dateLocale = exportLocale === 'en' ? 'en-HK' : 'zh-HK'
     const locale = exportLocale
+    const orientation = effectiveOrientation
+    const exportRows = sortedRecords
 
-    if (records.length === 0) {
+    if (exportRows.length === 0) {
       alert(t('noDataToExport'))
       return
     }
@@ -762,10 +826,10 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       const voucherFolderName = t('attachmentsFolder')
       const attFolder = zip.folder(voucherFolderName)
 
-      const totalCount = records.length
+      const totalCount = exportRows.length
       let totalIncome = 0
       let totalExpense = 0
-      records.forEach(r => {
+      exportRows.forEach(r => {
         const val = Math.abs(r.amount)
         if (r.type === 'INCOME') totalIncome += val
         else if (r.type === 'EXPENSE') totalExpense += val
@@ -820,7 +884,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         csvVisible.map((c) => csvEscape(values[c.id] ?? '-')).join(',')
 
       for (let i = 0; i < totalCount; i++) {
-        const r = records[i]
+        const r = exportRows[i]
         const voucherNo = padVoucherNo(i + 1)
         const dateObj = new Date(r.date)
         const dateStr = dateObj.toLocaleDateString(dateLocale)
@@ -946,7 +1010,10 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       if (fontBase64) doc.setFont('NotoSansSC', 'normal')
       doc.setFontSize(9)
       doc.setTextColor(muted[0], muted[1], muted[2])
+      const typeName =
+        recordType === 'INCOME' ? t('income') : recordType === 'EXPENSE' ? t('expense') : t('all')
       const filterLines = [
+        `${t('type')}: ${typeName}`,
         `${t('category')}: ${categoryName}`,
         `${t('pool')}: ${poolName}`,
         `${t('role')}: ${roleName}`,
@@ -983,7 +1050,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
 
       // Category expense table
       const categoryStats: Record<string, number> = {}
-      records.filter(r => r.type === 'EXPENSE').forEach(r => {
+      exportRows.filter(r => r.type === 'EXPENSE').forEach(r => {
         const catName = r.category?.name || t('uncategorized')
         categoryStats[catName] = (categoryStats[catName] || 0) + Math.abs(r.amount)
       })
@@ -1016,8 +1083,8 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         })
       }
 
-      // Landscape ledger
-      doc.addPage('a4', 'landscape')
+      // Detail ledger page (orientation follows user preference / auto rule)
+      doc.addPage('a4', orientation)
       const landW = doc.internal.pageSize.getWidth()
       doc.setFillColor(accent[0], accent[1], accent[2])
       doc.rect(0, 0, landW, 18, 'F')
@@ -1074,7 +1141,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
         body: ledgerBody,
         styles: {
           font: pdfFont(),
-          fontSize: 7,
+          fontSize: orientation === 'portrait' ? 6.5 : 7,
           cellPadding: 1.3,
           overflow: 'linebreak',
           valign: 'middle',
@@ -1084,7 +1151,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
           fillColor: accent,
           textColor: 255,
           font: pdfFont(),
-          fontSize: 7,
+          fontSize: orientation === 'portrait' ? 6.5 : 7,
           fontStyle: 'bold',
         },
         alternateRowStyles: { fillColor: [248, 249, 251] },
@@ -1209,6 +1276,18 @@ export default function ReportClient({ categories, users, pools, locale }: Props
 
           {reportTab === 'records' && (
             <>
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('recordTypeFilter')}</label>
+                <select
+                  value={recordType}
+                  onChange={e => setRecordType(e.target.value as 'ALL' | 'INCOME' | 'EXPENSE')}
+                  className={inputClass}
+                >
+                  <option value="ALL">{t('all')}</option>
+                  <option value="INCOME">{t('income')}</option>
+                  <option value="EXPENSE">{t('expense')}</option>
+                </select>
+              </div>
               <div>
                 <label className="block text-[11px] font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">{t('mainCategory')}</label>
                 <select
@@ -1410,6 +1489,76 @@ export default function ReportClient({ categories, users, pools, locale }: Props
           )}
         </div>
 
+        <div className="mb-4 rounded-2xl border border-gray-200 bg-white px-4 py-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider">{t('reportSortBy')}</label>
+              <p className="mt-0.5 mb-2 text-xs text-gray-500">{t('reportSortByHint')}</p>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as ReportSortKey)}
+                className={inputClass}
+              >
+                <option value="date">{t('reportSortDate')}</option>
+                {(reportTab === 'records' || reportTab === 'contracts') && (
+                  <option value="type">{t('type')}</option>
+                )}
+                <option value="category">{t('category')}</option>
+                {reportTab === 'records' && <option value="status">{t('status')}</option>}
+                {(reportTab === 'records' || reportTab === 'contracts') && (
+                  <option value="pool">{t('pool')}</option>
+                )}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider">{t('reportSortDir')}</label>
+              <p className="mt-0.5 mb-2 text-xs text-gray-500">&nbsp;</p>
+              <select
+                value={sortDir}
+                onChange={(e) => setSortDir(e.target.value as ReportSortDir)}
+                className={inputClass}
+              >
+                <option value="asc">{t('reportSortAsc')}</option>
+                <option value="desc">{t('reportSortDesc')}</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="mb-4 rounded-2xl border border-[#34C759]/20 bg-[#34C759]/5 px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider">{t('reportPageLayout')}</label>
+            <p className="text-xs text-gray-500 mt-0.5">{t('reportPageLayoutHint')}</p>
+            <p className="text-xs text-gray-600 mt-1 font-medium">
+              {t('reportOrientationResolved')}：
+              {effectiveOrientation === 'landscape' ? t('reportOrientationLandscape') : t('reportOrientationPortrait')}
+              {pageOrientationPref === 'auto'
+                ? `（${t('reportOrientationAuto')} · ${visibleColumnIds.length}/${LANDSCAPE_COLUMN_THRESHOLD}）`
+                : ''}
+            </p>
+          </div>
+          <div className="inline-flex rounded-xl bg-white p-1 shadow-sm ring-1 ring-black/5">
+            {(
+              [
+                ['auto', t('reportOrientationAuto')],
+                ['portrait', t('reportOrientationPortrait')],
+                ['landscape', t('reportOrientationLandscape')],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setOrientationPreference(value)}
+                className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+                  pageOrientationPref === value ? 'bg-[#34C759] text-white' : 'text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="flex flex-wrap gap-2.5 mb-6">
           <button
             onClick={handleSearch}
@@ -1487,7 +1636,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                       <td colSpan={visibleColumnIds.length + 3} className="p-8 text-center text-gray-400 font-medium">{t('noDataTrySearch')}</td>
                     </tr>
                   ) : (
-                    records.map(record => (
+                    sortedRecords.map(record => (
                       <tr key={record.id} className="hover:bg-[#F8FAFF] transition-colors">
                         {showCol('recordIdShort') && (
                           <td className="px-4 py-3 font-mono text-xs text-gray-500">{record.id.slice(-8)}</td>
@@ -1558,7 +1707,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
               {records.length === 0 ? (
                 <div className="p-8 text-center text-gray-400 font-medium">{t('noDataTrySearch')}</div>
               ) : (
-                records.map(record => (
+                sortedRecords.map(record => (
                   <div key={record.id} className="p-4 space-y-2">
                     <div className="flex justify-between items-center">
                       <div className="flex items-center gap-2">
@@ -1639,7 +1788,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                       <td colSpan={Math.max(visibleColumnIds.length, 1)} className="p-8 text-center text-gray-400 font-medium">{t('noDataTrySearch')}</td>
                     </tr>
                   ) : (
-                    activities.map(item => (
+                    sortedActivities.map(item => (
                       <tr key={item.id} className="hover:bg-[#F8FAFF]">
                         {showCol('recordIdShort') && <td className="px-4 py-3 font-mono text-xs text-gray-500">{item.id.slice(-8)}</td>}
                         {showCol('activityTitle') && <td className="px-4 py-3 font-medium">{item.title}</td>}
@@ -1686,7 +1835,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
                       <td colSpan={Math.max(visibleColumnIds.length, 1)} className="p-8 text-center text-gray-400 font-medium">{t('noDataTrySearch')}</td>
                     </tr>
                   ) : (
-                    contracts.map(item => (
+                    sortedContracts.map(item => (
                       <tr key={item.id} className="hover:bg-[#F8FAFF]">
                         {showCol('recordIdShort') && <td className="px-4 py-3 font-mono text-xs text-gray-500">{item.id.slice(-8)}</td>}
                         {showCol('contractTitle') && <td className="px-4 py-3 font-medium">{item.title}</td>}
