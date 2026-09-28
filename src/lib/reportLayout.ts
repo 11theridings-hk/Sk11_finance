@@ -9,6 +9,17 @@ export type ReportSortDir = 'asc' | 'desc'
 /** Visible display-column count at or above this → landscape when preference is「自動」. */
 export const LANDSCAPE_COLUMN_THRESHOLD = 7
 
+/**
+ * Equal-width column centers for the PDF first-page summary bar
+ * (總收入 / 總支出 / 結餘). Avoids landscape-tuned hardcoded x offsets
+ * that clip the rightmost value on portrait A4.
+ */
+export function summaryBarColumnCenters(barX: number, barW: number, count: number): number[] {
+  if (count <= 0 || barW <= 0) return []
+  const colW = barW / count
+  return Array.from({ length: count }, (_, i) => barX + (i + 0.5) * colW)
+}
+
 const ORIENTATION_STORAGE_KEY = 'report.pageOrientation.v1'
 
 export function resolvePageOrientation(
