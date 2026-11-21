@@ -4,9 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { getReportRecords, getReportActivities, getReportContracts, ReportFilter } from '../actions/report'
 import { requestModifyRecord } from '../actions/modify'
 import { deleteRecord } from '../actions/record'
-import { jsPDF } from 'jspdf'
-import autoTable from 'jspdf-autotable'
-import JSZip from 'jszip'
+import { loadClientPdfLibs, loadJSZip } from '@/lib/client-pdf'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
 import { compressImage, MAX_PDF_PAGES, prepareAttachments, type ClientAttachment } from '@/lib/image'
 import OcrNoteButton, { type OcrResolvedPayload } from '@/components/OcrNoteButton'
@@ -465,7 +463,8 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     }
   }
 
-  const createPdfDoc = (orientation: 'portrait' | 'landscape' = 'portrait') => {
+  const createPdfDoc = async (orientation: 'portrait' | 'landscape' = 'portrait') => {
+    const { jsPDF, autoTable } = await loadClientPdfLibs()
     const doc = new jsPDF({ orientation, unit: 'mm', format: 'a4' })
     if (fontBase64) {
       doc.addFileToVFS('NotoSansSC-Regular.ttf', fontBase64)
@@ -473,12 +472,12 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       doc.addFont('NotoSansSC-Regular.ttf', 'NotoSansSC', 'bold')
       doc.setFont('NotoSansSC')
     }
-    return doc
+    return { doc, autoTable }
   }
 
   const pdfFont = () => (fontBase64 ? 'NotoSansSC' : 'helvetica')
 
-  const exportListPdf = () => {
+  const exportListPdf = async () => {
     const t = createTranslator(exportLocale)
     const dateLocale = exportLocale === 'en' ? 'en-HK' : 'zh-HK'
     const locale = exportLocale
@@ -500,7 +499,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     })
     const balance = totalIncome - totalExpense
 
-    const doc = createPdfDoc(orientation)
+    const { doc, autoTable } = await createPdfDoc(orientation)
     const pageW = doc.internal.pageSize.getWidth()
     const marginX = 10
 
@@ -676,7 +675,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     doc.save(`${fileBase}${orientSuffix}.pdf`)
   }
 
-  const exportActivityListPdf = () => {
+  const exportActivityListPdf = async () => {
     const t = createTranslator(exportLocale)
     const dateLocale = exportLocale === 'en' ? 'en-HK' : 'zh-HK'
     const locale = exportLocale
@@ -688,7 +687,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       return
     }
 
-    const doc = createPdfDoc(orientation)
+    const { doc, autoTable } = await createPdfDoc(orientation)
     const pageW = doc.internal.pageSize.getWidth()
     const marginX = 10
 
@@ -746,7 +745,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     doc.save(locale === 'en' ? 'activity-report.pdf' : '活動列表報表.pdf')
   }
 
-  const exportContractListPdf = () => {
+  const exportContractListPdf = async () => {
     const t = createTranslator(exportLocale)
     const dateLocale = exportLocale === 'en' ? 'en-HK' : 'zh-HK'
     const locale = exportLocale
@@ -758,7 +757,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       return
     }
 
-    const doc = createPdfDoc(orientation)
+    const { doc, autoTable } = await createPdfDoc(orientation)
     const pageW = doc.internal.pageSize.getWidth()
     const marginX = 10
 
@@ -841,6 +840,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
 
     setExporting(true)
     try {
+      const JSZip = await loadJSZip()
       const zip = new JSZip()
       const voucherFolderName = t('attachmentsFolder')
       const attFolder = zip.folder(voucherFolderName)
@@ -963,7 +963,7 @@ export default function ReportClient({ categories, users, pools, locale }: Props
       zip.file(t('voucherIndexCsv'), '\uFEFF' + csvRows.join('\n'))
 
       // —— PDF: formal accounting pack ——
-      const doc = createPdfDoc('portrait')
+      const { doc, autoTable } = await createPdfDoc('portrait')
       const pageW = doc.internal.pageSize.getWidth()
       const ink: [number, number, number] = [28, 35, 45]
       const muted: [number, number, number] = [100, 110, 120]

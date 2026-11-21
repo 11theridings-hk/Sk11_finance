@@ -2,8 +2,7 @@
 
 import Link from 'next/link'
 import React, { useEffect, useState } from 'react'
-import { jsPDF } from 'jspdf'
-import autoTable from 'jspdf-autotable'
+import { loadClientPdfLibs } from '@/lib/client-pdf'
 import { createPrivateRecord, updatePrivateLedgerVisibility } from '../actions/private-record'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
 import { compressImage, MAX_PDF_PAGES, prepareAttachments, type ClientAttachment } from '@/lib/image'
@@ -218,7 +217,13 @@ export default function PrivateLedgerClient({
     setIsSavingVisibility(false)
   }
 
-  const createPdfDoc = () => {
+  const exportPrivateLedgerPdf = async () => {
+    if (initialRecords.length === 0) {
+      alert(t('noDataToExport'))
+      return
+    }
+
+    const { jsPDF, autoTable } = await loadClientPdfLibs()
     const doc = new jsPDF()
     if (fontBase64) {
       doc.addFileToVFS('NotoSansSC-Regular.ttf', fontBase64)
@@ -226,16 +231,7 @@ export default function PrivateLedgerClient({
       doc.addFont('NotoSansSC-Regular.ttf', 'NotoSansSC', 'bold')
       doc.setFont('NotoSansSC')
     }
-    return doc
-  }
 
-  const exportPrivateLedgerPdf = () => {
-    if (initialRecords.length === 0) {
-      alert(t('noDataToExport'))
-      return
-    }
-
-    const doc = createPdfDoc()
     const totalIncome = initialRecords.filter((item) => item.type === 'INCOME').reduce((sum, item) => sum + Math.abs(item.amount), 0)
     const totalExpense = initialRecords.filter((item) => item.type === 'EXPENSE').reduce((sum, item) => sum + Math.abs(item.amount), 0)
 
