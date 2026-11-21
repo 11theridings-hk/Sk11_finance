@@ -2,10 +2,18 @@
 
 import React, { useEffect, useMemo, useState } from 'react'
 import { createContract } from '../actions/contract'
+import { createCategory } from '../actions/category'
 import { createTranslator, formatCurrency, type Locale } from '@/lib/i18n'
 import { compressImage, MAX_PDF_PAGES, prepareAttachments, type ClientAttachment } from '@/lib/image'
 import ContractDetailModal from '../ContractDetailModal'
 import OcrNoteButton, { type OcrResolvedPayload } from '@/components/OcrNoteButton'
+
+type Category = {
+  id: string
+  name: string
+  type?: string
+  children?: Category[]
+}
 
 type ContractItem = {
   id: string
@@ -33,9 +41,13 @@ type ContractItem = {
 type Props = {
   locale: Locale
   pools: any[]
+  categories: Category[]
   currentUserId: string
   initialContracts: ContractItem[]
 }
+
+/** Suggested top-level contract kinds (created on demand via admin Category tree). */
+const SUGGESTED_CONTRACT_KINDS = ['僱員', '維修保養', '物業租約'] as const
 
 function getDaysDiff(value: string | Date) {
   const today = new Date()
@@ -45,8 +57,32 @@ function getDaysDiff(value: string | Date) {
   return Math.ceil((targetDay.getTime() - startOfToday.getTime()) / 86400000)
 }
 
-export default function ContractsClient({ locale, pools, currentUserId, initialContracts }: Props) {
+function contractCategoryPath(contract: ContractItem, uncategorizedLabel: string) {
+  const path = [contract.category?.name, contract.subCategory?.name, contract.thirdCategory?.name]
+    .filter(Boolean)
+    .join(' / ')
+  return path || uncategorizedLabel
+}
+
+function matchesCategoryFilter(contract: ContractItem, filterId: string) {
+  if (!filterId) return true
+  if (filterId === '__none__') return !contract.categoryId
+  return (
+    contract.categoryId === filterId ||
+    contract.subCategoryId === filterId ||
+    contract.thirdCategoryId === filterId
+  )
+}
+
+export default function ContractsClient({
+  locale,
+  pools,
+  categories,
+  currentUserId,
+  initialContracts,
+}: Props) {
   const t = createTranslator(locale)
+  const dateLocale = locale === 'en' ? 'en-HK' : 'zh-HK'
   const [selectedContract, setSelectedContract] = useState<ContractItem | null>(null)
   const [type, setType] = useState<'INCOME' | 'EXPENSE'>('EXPENSE')
   const [title, setTitle] = useState('')
@@ -55,9 +91,17 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
   const [reminderDays, setReminderDays] = useState('15')
   const [amount, setAmount] = useState('')
   const [poolId, setPoolId] = useState('')
+  const [categoryId, setCategoryId] = useState('')
+  const [subCategoryId, setSubCategoryId] = useState('')
+  const [thirdCategoryId, setThirdCategoryId] = useState('')
   const [content, setContent] = useState('')
   const [note, setNote] = useState('')
   const [ocrMemo, setOcrMemo] = useState('')
+  const [localCategories, setLocalCategories] = useState(categories)
+
+  useEffect(() => {
+    setLocalCategories(categories)
+  }, [categories])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -78,6 +122,29 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
   const [ocrAttachmentIndex, setOcrAttachmentIndex] = useState(0)
   const [attachmentNote, setAttachmentNote] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const [filterCategoryId, setFilterCategoryId] = useState('')
+  const [filterSubCategoryId, setFilterSubCategoryId] = useState('')
+  const [filterThirdCategoryId, setFilterThirdCategoryId] = useState('')
+  const [filterKeyword, setFilterKeyword] = useState('')
+  const [filterFrom, setFilterFrom] = useState('')
+  const [filterTo, setFilterTo] = useState('')
+  const [filterType, setFilterType] = useState<'ALL' | 'INCOME' | 'EXPENSE'>('ALL')
+
+  const currentCategory = localCategories.find((c) => c.id === categoryId)
+  const currentSub = currentCategory?.children?.find((c) => c.id === subCategoryId)
+  const filterCategory = localCategories.find((c) => c.id === filterCategoryId)
+  const filterSub = filterCategory?.children?.find((c) => c.id === filterSubCategoryId)
+  const activeFilterCategoryId =
+    filterCategoryId === '__none__'
+      ? '__none__'
+      : filterThirdCategoryId || filterSubCategoryId || filterCategoryId
+
+  const existingKindNames = useMemo(
+    () => new Set(localCategories.map((c) => c.name)),
+    [localCategories]
+  )
+  const missingSuggestedKinds = SUGGESTED_CONTRACT_KINDS.filter((name) => !existingKindNames.has(name))
 
   const reminderGroups = useMemo(() => {
     const items = initialContracts
@@ -100,6 +167,69 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
       upcoming: items.filter((item) => item.bucket === 'upcoming'),
     }
   }, [initialContracts])
+
+  const filteredContracts = useMemo(() => {
+    const keyword = filterKeyword.trim().toLowerCase()
+    const fromTime = filterFrom ? new Date(filterFrom).setHours(0, 0, 0, 0) : null
+    const toTime = filterTo ? new Date(filterTo).setHours(23, 59, 59, 999) : null
+
+    return initialContracts
+      .filter((contract) => matchesCategoryFilter(contract, activeFilterCategoryId))
+      .filter((contract) => (filterType === 'ALL' ? true : contract.type === filterType))
+      .filter((contract) => {
+        const time = new Date(contract.expiryDate).getTime()
+        if (fromTime != null && time < fromTime) return false
+        if (toTime != null && time > toTime) return false
+        return true
+      })
+      .filter((contract) => {
+        if (!keyword) return true
+        const haystack = [
+          contract.title,
+          contract.content,
+          contract.note,
+          contractCategoryPath(contract, ''),
+          ...(contract.memos || []).map((memo: any) => memo.content),
+        ]
+          .filter(Boolean)
+          .join('\n')
+          .toLowerCase()
+        return haystack.includes(keyword)
+      })
+  }, [initialContracts, activeFilterCategoryId, filterFrom, filterTo, filterKeyword, filterType])
+
+  const hasActiveFilters = Boolean(
+    activeFilterCategoryId || filterKeyword.trim() || filterFrom || filterTo || filterType !== 'ALL'
+  )
+
+  const clearFilters = () => {
+    setFilterCategoryId('')
+    setFilterSubCategoryId('')
+    setFilterThirdCategoryId('')
+    setFilterKeyword('')
+    setFilterFrom('')
+    setFilterTo('')
+    setFilterType('ALL')
+  }
+
+  const categoryOptionLabel = (cat: Category) => {
+    if (!cat.type) return cat.name
+    const typeLabel = cat.type === 'INCOME' ? t('income') : t('expense')
+    return `${cat.name}（${typeLabel}）`
+  }
+
+  const handleAddCategory = async (parentId?: string, suggestedName?: string) => {
+    const name =
+      suggestedName ||
+      window.prompt(t('createNewCategoryPrompt'))
+    if (!name || !name.trim()) return
+    const res = await createCategory(name.trim(), parentId, type)
+    if (res.success) {
+      window.location.reload()
+      return
+    }
+    alert(res.error || t('submitFailed'))
+  }
 
   const handleImageChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -160,6 +290,9 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
       content: content.trim() || undefined,
       note: note.trim() || undefined,
       poolId: poolId || undefined,
+      categoryId: categoryId || undefined,
+      subCategoryId: categoryId ? subCategoryId || undefined : undefined,
+      thirdCategoryId: categoryId ? thirdCategoryId || undefined : undefined,
       attachment: first
         ? { url: first.url, size: first.size, note: first.note || attachmentNote || undefined }
         : undefined,
@@ -250,7 +383,7 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
           >
             <div className="font-medium text-gray-900">{contract.title}</div>
             <div className="flex items-center gap-2 text-xs sm:text-sm">
-              <span>{new Date(contract.expiryDate).toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK')}</span>
+              <span>{new Date(contract.expiryDate).toLocaleDateString(dateLocale)}</span>
               <span className="rounded-full bg-[#FFF7ED] px-2 py-0.5 font-medium text-[#C2410C]">
                 {contract.daysUntilExpiry < 0
                   ? locale === 'en'
@@ -293,6 +426,7 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
       <section className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-5">
         <h2 className="text-xl font-semibold text-gray-900">{t('contractsPage')}</h2>
         <p className="mt-2 text-sm text-gray-500">{t('contractsPageHint')}</p>
+        <p className="mt-2 text-sm text-gray-500">{t('contractCategoryExtensibleHint')}</p>
       </section>
 
       <section className={`rounded-2xl border p-4 shadow-sm sm:rounded-3xl sm:p-6 ${type === 'INCOME' ? 'border-[#007AFF]/20 bg-[#F2F8FF]' : 'border-[#FF3B30]/20 bg-[#FFF2F2]'}`}>
@@ -342,6 +476,100 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
                 <option value="">{t('all')}</option>
                 {pools.map((pool: any) => <option key={pool.id} value={pool.id}>{pool.name}</option>)}
               </select>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('contractCategoryOptional')}</label>
+              <select
+                value={categoryId}
+                onChange={(e) => {
+                  setCategoryId(e.target.value)
+                  setSubCategoryId('')
+                  setThirdCategoryId('')
+                }}
+                className={inputClass}
+              >
+                <option value="">{t('uncategorized')}</option>
+                {localCategories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {categoryOptionLabel(cat)}
+                  </option>
+                ))}
+              </select>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleAddCategory()}
+                  className="text-xs font-semibold text-[#007AFF] hover:underline"
+                >
+                  {t('contractAddCategory')}
+                </button>
+                {missingSuggestedKinds.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => handleAddCategory(undefined, name)}
+                    className="rounded-lg bg-white/80 px-2 py-1 text-xs font-medium text-gray-700 ring-1 ring-gray-200 hover:bg-white"
+                  >
+                    + {name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('subCategory')}</label>
+              <select
+                value={subCategoryId}
+                onChange={(e) => {
+                  setSubCategoryId(e.target.value)
+                  setThirdCategoryId('')
+                }}
+                disabled={!currentCategory?.children?.length}
+                className={inputClass}
+              >
+                <option value="">{t('selectSubCategory')}</option>
+                {currentCategory?.children?.map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
+              {categoryId && (
+                <button
+                  type="button"
+                  onClick={() => handleAddCategory(categoryId)}
+                  className="mt-2 text-xs font-semibold text-[#007AFF] hover:underline"
+                >
+                  {t('addSubCategory')}
+                </button>
+              )}
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('grandCategory')}</label>
+              <select
+                value={thirdCategoryId}
+                onChange={(e) => setThirdCategoryId(e.target.value)}
+                disabled={!currentSub?.children?.length}
+                className={inputClass}
+              >
+                <option value="">{t('selectGrandCategory')}</option>
+                {currentSub?.children?.map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
+              {subCategoryId && (
+                <button
+                  type="button"
+                  onClick={() => handleAddCategory(subCategoryId)}
+                  className="mt-2 text-xs font-semibold text-[#007AFF] hover:underline"
+                >
+                  {t('addGrandCategory')}
+                </button>
+              )}
             </div>
 
             <div className="md:col-span-2">
@@ -439,15 +667,120 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
         </form>
       </section>
 
+      <section className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-5">
+        <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">{t('contractCategoryJournal')}</h2>
+            <p className="mt-1 text-sm text-gray-500">{t('contractCategoryJournalHint')}</p>
+          </div>
+          {hasActiveFilters && (
+            <button type="button" onClick={clearFilters} className="text-sm font-medium text-[#007AFF] hover:underline">
+              {t('activityClearFilters')}
+            </button>
+          )}
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('mainCategory')}</label>
+            <select
+              value={filterCategoryId}
+              onChange={(e) => {
+                setFilterCategoryId(e.target.value)
+                setFilterSubCategoryId('')
+                setFilterThirdCategoryId('')
+              }}
+              className={inputClass}
+            >
+              <option value="">{t('all')}</option>
+              <option value="__none__">{t('activityNoCategoryFilter')}</option>
+              {localCategories.map((cat) => (
+                <option key={cat.id} value={cat.id}>
+                  {categoryOptionLabel(cat)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('subCategory')}</label>
+            <select
+              value={filterSubCategoryId}
+              onChange={(e) => {
+                setFilterSubCategoryId(e.target.value)
+                setFilterThirdCategoryId('')
+              }}
+              disabled={filterCategoryId === '__none__' || !filterCategory?.children?.length}
+              className={inputClass}
+            >
+              <option value="">{t('all')}</option>
+              {filterCategory?.children?.map((cat) => (
+                <option key={cat.id} value={cat.id}>
+                  {cat.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('grandCategory')}</label>
+            <select
+              value={filterThirdCategoryId}
+              onChange={(e) => setFilterThirdCategoryId(e.target.value)}
+              disabled={!filterSub?.children?.length}
+              className={inputClass}
+            >
+              <option value="">{t('all')}</option>
+              {filterSub?.children?.map((cat) => (
+                <option key={cat.id} value={cat.id}>
+                  {cat.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('type')}</label>
+            <select
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value as 'ALL' | 'INCOME' | 'EXPENSE')}
+              className={inputClass}
+            >
+              <option value="ALL">{t('all')}</option>
+              <option value="EXPENSE">{t('expense')}</option>
+              <option value="INCOME">{t('income')}</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('contractFilterExpiryFrom')}</label>
+            <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} className={inputClass} />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('contractFilterExpiryTo')}</label>
+            <input type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} className={inputClass} />
+          </div>
+          <div className="md:col-span-3">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">{t('activityFilterKeyword')}</label>
+            <input
+              value={filterKeyword}
+              onChange={(e) => setFilterKeyword(e.target.value)}
+              className={inputClass}
+              placeholder={t('contractFilterKeywordPlaceholder')}
+            />
+          </div>
+        </div>
+      </section>
+
       <section className="mb-10 overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm sm:rounded-3xl">
         <div className="flex items-center justify-between border-b border-gray-100 p-4 pb-3 sm:p-6 sm:pb-4">
           <h2 className="text-lg font-semibold text-gray-800">{t('contractsList')}</h2>
+          <span className="text-xs font-medium text-gray-400">
+            {filteredContracts.length}
+            {hasActiveFilters ? ` / ${initialContracts.length}` : ''}
+          </span>
         </div>
         <div className="hidden overflow-x-auto md:block">
           <table className="w-full text-left text-sm text-gray-700">
             <thead className="bg-[#F2F2F7]/50 text-xs uppercase tracking-wider text-gray-500">
               <tr>
                 <th className="px-6 py-3 font-medium">{t('contractTitle')}</th>
+                <th className="px-6 py-3 font-medium">{t('categoryPath')}</th>
                 <th className="px-6 py-3 font-medium">{t('type')}</th>
                 <th className="px-6 py-3 font-medium">{t('expiryDate')}</th>
                 <th className="px-6 py-3 font-medium">{t('reminderDays')}</th>
@@ -456,14 +789,19 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {initialContracts.length === 0 ? (
-                <tr><td colSpan={6} className="p-8 text-center font-medium text-gray-400">{t('noContracts')}</td></tr>
+              {filteredContracts.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="p-8 text-center font-medium text-gray-400">
+                    {hasActiveFilters ? t('contractJournalEmpty') : t('noContracts')}
+                  </td>
+                </tr>
               ) : (
-                initialContracts.map((contract) => (
+                filteredContracts.map((contract) => (
                   <tr key={contract.id} className="transition-colors hover:bg-gray-50/80">
                     <td className="px-6 py-4 font-medium">{contract.title}</td>
+                    <td className="px-6 py-4 text-gray-500">{contractCategoryPath(contract, t('uncategorized'))}</td>
                     <td className="px-6 py-4">{contract.type === 'INCOME' ? t('income') : t('expense')}</td>
-                    <td className="px-6 py-4">{new Date(contract.expiryDate).toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK')}</td>
+                    <td className="px-6 py-4">{new Date(contract.expiryDate).toLocaleDateString(dateLocale)}</td>
                     <td className="px-6 py-4">{contract.reminderDays}</td>
                     <td className={`px-6 py-4 font-bold ${contract.amount > 0 ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>{formatCurrency(locale, contract.amount)}</td>
                     <td className="px-6 py-4"><button onClick={() => setSelectedContract(contract)} className="text-sm font-medium text-[#007AFF] hover:underline">{t('detail')}</button></td>
@@ -475,16 +813,19 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
         </div>
 
         <div className="divide-y divide-gray-100 md:hidden">
-          {initialContracts.length === 0 ? (
-            <div className="p-8 text-center font-medium text-gray-400">{t('noContracts')}</div>
+          {filteredContracts.length === 0 ? (
+            <div className="p-8 text-center font-medium text-gray-400">
+              {hasActiveFilters ? t('contractJournalEmpty') : t('noContracts')}
+            </div>
           ) : (
-            initialContracts.map((contract) => (
+            filteredContracts.map((contract) => (
               <div key={contract.id} className="space-y-2 p-4">
                 <div className="flex items-center justify-between">
                   <div className="text-sm font-semibold text-gray-900">{contract.title}</div>
                   <div className={`text-sm font-bold ${contract.amount > 0 ? 'text-[#007AFF]' : 'text-[#FF3B30]'}`}>{formatCurrency(locale, contract.amount)}</div>
                 </div>
-                <div className="text-xs text-gray-500">{t('expiryDate')}: {new Date(contract.expiryDate).toLocaleDateString(locale === 'en' ? 'en-HK' : 'zh-HK')}</div>
+                <div className="text-xs text-gray-500">{contractCategoryPath(contract, t('uncategorized'))}</div>
+                <div className="text-xs text-gray-500">{t('expiryDate')}: {new Date(contract.expiryDate).toLocaleDateString(dateLocale)}</div>
                 <div className="text-xs text-gray-500">{t('reminderDays')}: {contract.reminderDays}</div>
                 <div className="flex items-center justify-between border-t border-gray-50 pt-2">
                   <span className="text-xs text-gray-400">{contract.type === 'INCOME' ? t('income') : t('expense')}</span>
@@ -501,6 +842,7 @@ export default function ContractsClient({ locale, pools, currentUserId, initialC
           contract={selectedContract}
           locale={locale}
           pools={pools}
+          categories={localCategories}
           canManage={selectedContract.userId === currentUserId}
           onClose={() => {
             setSelectedContract(null)

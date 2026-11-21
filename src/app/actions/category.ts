@@ -93,6 +93,9 @@ export async function createCategory(name: string, parentId?: string, type: 'INC
     })
     revalidatePath('/admin')
     revalidatePath('/')
+    revalidatePath('/contracts')
+    revalidatePath('/activities')
+    revalidatePath('/report')
     return { success: true, category }
   } catch (error: any) {
     return { success: false, error: error.message }
@@ -112,6 +115,9 @@ export async function updateCategory(id: string, name: string, type?: 'INCOME' |
     })
     revalidatePath('/admin')
     revalidatePath('/')
+    revalidatePath('/contracts')
+    revalidatePath('/activities')
+    revalidatePath('/report')
     return { success: true, category }
   } catch (error: any) {
     return { success: false, error: error.message }
@@ -178,6 +184,9 @@ export async function deleteCategory(id: string) {
 
     revalidatePath('/admin')
     revalidatePath('/')
+    revalidatePath('/contracts')
+    revalidatePath('/activities')
+    revalidatePath('/report')
     return { success: true }
   } catch (error: any) {
     return { success: false, error: error.message }

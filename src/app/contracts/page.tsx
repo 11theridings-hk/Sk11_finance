@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { getSession } from '../actions/auth'
 import { getCapitalPools } from '../actions/pool'
 import { getContracts } from '../actions/contract'
+import { getCategories } from '../actions/category'
 import ContractsClient from './ContractsClient'
 import { getCurrentLocale } from '@/lib/locale'
 import { getDefaultHomePath } from '@/lib/access'
@@ -26,9 +27,10 @@ export default async function ContractsPage() {
   }
 
   const locale = await getCurrentLocale()
-  const [pools, contracts] = await Promise.all([
+  const [pools, contracts, categories] = await Promise.all([
     getCapitalPools(session.userId),
     getContracts(),
+    getCategories(),
   ])
 
   return (
@@ -36,6 +38,7 @@ export default async function ContractsPage() {
       <ContractsClient
         locale={locale}
         pools={pools}
+        categories={categories}
         currentUserId={session.userId}
         initialContracts={contracts}
       />

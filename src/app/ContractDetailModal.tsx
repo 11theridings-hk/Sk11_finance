@@ -8,17 +8,26 @@ import OcrNoteButton, { type OcrResolvedPayload } from '@/components/OcrNoteButt
 import OcrSavedAttachmentButton from '@/components/OcrSavedAttachmentButton'
 import NoteTimeline from '@/components/NoteTimeline'
 
+type Category = {
+  id: string
+  name: string
+  type?: string
+  children?: Category[]
+}
+
 export default function ContractDetailModal({
   contract,
   locale,
   canManage,
   pools,
+  categories = [],
   onClose,
 }: {
   contract: any
   locale: Locale
   canManage: boolean
   pools: any[]
+  categories?: Category[]
   onClose: () => void
 }) {
   const t = createTranslator(locale)
@@ -33,6 +42,9 @@ export default function ContractDetailModal({
   const [reminderDays, setReminderDays] = useState(String(contract.reminderDays ?? 15))
   const [amount, setAmount] = useState(String(Math.abs(Number(contract.amount) || 0)))
   const [poolId, setPoolId] = useState(contract.poolId || '')
+  const [categoryId, setCategoryId] = useState(contract.categoryId || '')
+  const [subCategoryId, setSubCategoryId] = useState(contract.subCategoryId || '')
+  const [thirdCategoryId, setThirdCategoryId] = useState(contract.thirdCategoryId || '')
   const [content, setContent] = useState(contract.content || '')
   const [note, setNote] = useState(contract.note || '')
   const [attachments, setAttachments] = useState<ClientAttachment[]>([])
@@ -41,6 +53,12 @@ export default function ContractDetailModal({
   const [pendingOcrContent, setPendingOcrContent] = useState('')
   const [pendingOcrNote, setPendingOcrNote] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const currentCategory = categories.find((c) => c.id === categoryId)
+  const currentSub = currentCategory?.children?.find((c) => c.id === subCategoryId)
+  const categoryPath = [contract.category?.name, contract.subCategory?.name, contract.thirdCategory?.name]
+    .filter(Boolean)
+    .join(' / ')
 
   const handleAttachmentChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -99,9 +117,9 @@ export default function ContractDetailModal({
       content: content.trim() || undefined,
       note: note.trim() || undefined,
       poolId: poolId || undefined,
-      categoryId: contract.categoryId || undefined,
-      subCategoryId: contract.subCategoryId || undefined,
-      thirdCategoryId: contract.thirdCategoryId || undefined,
+      categoryId: categoryId || undefined,
+      subCategoryId: categoryId ? subCategoryId || undefined : undefined,
+      thirdCategoryId: categoryId ? thirdCategoryId || undefined : undefined,
     })
     if (res.success) {
       window.location.reload()
@@ -313,13 +331,67 @@ export default function ContractDetailModal({
               )}
             </div>
 
-            {(contract.category || contract.subCategory || contract.thirdCategory) && (
-              <div className="md:col-span-2">
-                <div className="text-gray-500 mb-1">{t('category')}</div>
-                <div className={readOnlyFieldClass}>
-                  {[contract.category?.name, contract.subCategory?.name, contract.thirdCategory?.name].filter(Boolean).join(' / ') || '-'}
+            <div>
+              <div className="text-gray-500 mb-1">{t('contractCategoryOptional')}</div>
+              {canManage ? (
+                <select
+                  value={categoryId}
+                  onChange={(e) => {
+                    setCategoryId(e.target.value)
+                    setSubCategoryId('')
+                    setThirdCategoryId('')
+                  }}
+                  className={inputClass}
+                >
+                  <option value="">{t('uncategorized')}</option>
+                  {categories.map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.type === 'INCOME'
+                        ? `${cat.name}（${t('income')}）`
+                        : cat.type === 'EXPENSE'
+                          ? `${cat.name}（${t('expense')}）`
+                          : cat.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div className={readOnlyFieldClass}>{categoryPath || t('uncategorized')}</div>
+              )}
+            </div>
+            {canManage && (
+              <>
+                <div>
+                  <div className="text-gray-500 mb-1">{t('subCategory')}</div>
+                  <select
+                    value={subCategoryId}
+                    onChange={(e) => {
+                      setSubCategoryId(e.target.value)
+                      setThirdCategoryId('')
+                    }}
+                    disabled={!currentCategory?.children?.length}
+                    className={inputClass}
+                  >
+                    <option value="">{t('selectSubCategory')}</option>
+                    {currentCategory?.children?.map((cat) => (
+                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                    ))}
+                  </select>
                 </div>
-              </div>
+                <div>
+                  <div className="text-gray-500 mb-1">{t('grandCategory')}</div>
+                  <select
+                    value={thirdCategoryId}
+                    onChange={(e) => setThirdCategoryId(e.target.value)}
+                    disabled={!currentSub?.children?.length}
+                    className={inputClass}
+                  >
+                    <option value="">{t('selectGrandCategory')}</option>
+                    {currentSub?.children?.map((cat) => (
+                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </>
             )}
           </div>
 

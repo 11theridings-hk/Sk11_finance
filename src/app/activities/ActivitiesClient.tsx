@@ -178,6 +178,7 @@ export default function ActivitiesClient({
           activity.title,
           activity.content,
           activity.note,
+          activityCategoryPath(activity, ''),
           ...(activity.memos || []).map((memo) => memo.content),
         ]
           .filter(Boolean)
