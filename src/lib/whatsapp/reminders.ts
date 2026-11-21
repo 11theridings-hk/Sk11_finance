@@ -1,11 +1,6 @@
 import prisma from '@/lib/prisma'
-import {
-  DEFAULT_PLUGIN_FLAGS,
-  PLUGIN_SETTING_KEYS,
-  type PluginFlags,
-  type PluginId,
-} from '@/lib/plugins'
 import type { WhatsAppActor } from './identity'
+import { loadWhatsAppPluginFlags } from './matters'
 
 export type WaReminderBucket = 'overdue' | 'today' | 'upcoming'
 
@@ -34,19 +29,6 @@ function getBucket(daysDiff: number, reminderDays: number): WaReminderBucket | n
   return null
 }
 
-async function loadPluginFlags(): Promise<PluginFlags> {
-  const keys = Object.values(PLUGIN_SETTING_KEYS)
-  const rows = await prisma.systemSetting.findMany({ where: { key: { in: keys } } })
-  const map = new Map(rows.map((r) => [r.key, r.value]))
-  const flags = { ...DEFAULT_PLUGIN_FLAGS }
-  for (const id of Object.keys(PLUGIN_SETTING_KEYS) as PluginId[]) {
-    const raw = map.get(PLUGIN_SETTING_KEYS[id])
-    if (raw === '0' || raw === 'false') flags[id] = false
-    if (raw === '1' || raw === 'true') flags[id] = true
-  }
-  return flags
-}
-
 function ymd(d: Date) {
   return d.toISOString().slice(0, 10)
 }
@@ -73,7 +55,7 @@ const SOURCE_EN: Record<WaReminderItem['source'], string> = {
  * 彙總合約 / 事項 / 恆常提醒（依用戶權限過濾）。
  */
 export async function collectWhatsAppReminders(actor: WhatsAppActor): Promise<WaReminderItem[]> {
-  const flags = await loadPluginFlags()
+  const flags = await loadWhatsAppPluginFlags()
   const items: WaReminderItem[] = []
 
   if (flags.contracts && actor.isAdmin) {
