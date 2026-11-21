@@ -5,7 +5,7 @@ import { getCategories } from "../actions/category";
 import { queryAttachmentsForAdmin } from "../actions/attachment";
 import { getCapitalPools } from "../actions/pool";
 import { getUsers } from "../actions/user";
-import AdminTabs from "./AdminTabs";
+import AdminTabsLoader from "./AdminTabsLoader";
 import { getCurrentLocale } from "@/lib/locale";
 import { createTranslator } from "@/lib/i18n";
 import { getDefaultHomePath } from "@/lib/access";
@@ -63,7 +63,7 @@ export default async function AdminPage() {
 
       {/* 选项卡及内容组件 */}
       <main>
-        <AdminTabs
+        <AdminTabsLoader
           initialCategories={categories}
           initialAttachments={attachments}
           initialPools={pools}

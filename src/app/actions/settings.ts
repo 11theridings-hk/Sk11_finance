@@ -1,5 +1,6 @@
 'use server'
 
+import { cache } from 'react'
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { getSession } from './auth'
@@ -94,7 +95,8 @@ export async function updateAISettings(input: AISettings) {
   }
 }
 
-export async function getPluginFlags(): Promise<PluginFlags> {
+/** Dedupes plugin flag reads within a single RSC/request tree. */
+export const getPluginFlags = cache(async (): Promise<PluginFlags> => {
   const settings = await prisma.systemSetting.findMany({
     where: { key: { in: Object.values(PLUGIN_SETTING_KEYS) } },
   })
@@ -107,7 +109,7 @@ export async function getPluginFlags(): Promise<PluginFlags> {
     }
   })
   return flags
-}
+})
 
 export async function updatePluginFlags(input: PluginFlags) {
   try {

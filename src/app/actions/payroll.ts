@@ -22,7 +22,6 @@ import {
 import { appendPayrollAudit, summarizeItemChange } from '@/lib/payroll/audit';
 import { buildIouInstallmentDrafts, dueDateInPeriod, iouInstallmentToPayrollLine } from '@/lib/payroll/iou';
 import { pdfBytesToDataUrl, pdfBytesToPageImages } from '@/lib/payroll/pdfAttach';
-import JSZip from 'jszip';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -1432,6 +1431,7 @@ export async function downloadPayrollPdf(payrollId: string, locale: 'bilingual' 
 export async function batchDownloadPdfZip(payrollIds: string[], locale: 'bilingual' | 'zh' | 'en' = 'bilingual'): Promise<{ filename: string; bytes: Uint8Array }> {
   const s = await requireAdmin();
   void s;
+  const { default: JSZip } = await import('jszip');
   const zip = new JSZip();
   for (const id of payrollIds) {
     try {

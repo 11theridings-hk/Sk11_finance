@@ -4,7 +4,7 @@ import { getSession } from '../actions/auth'
 import { getCapitalPools } from '../actions/pool'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import ReportClient from './ReportClient'
+import ReportClientLoader from './ReportClientLoader'
 import { getCurrentLocale } from '@/lib/locale'
 import { createTranslator } from '@/lib/i18n'
 import { getDefaultHomePath } from '@/lib/access'
@@ -42,7 +42,7 @@ export default async function ReportPage() {
       </header>
 
       <main className="max-w-7xl mx-auto p-4 sm:px-6 lg:px-8 mt-4 pb-10">
-        <ReportClient categories={categories} users={users} pools={pools} locale={locale} />
+        <ReportClientLoader categories={categories} users={users} pools={pools} locale={locale} />
       </main>
     </div>
   );

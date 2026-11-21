@@ -1,5 +1,6 @@
 'use server'
 
+import { cache } from 'react'
 import { cookies } from 'next/headers'
 import prisma from '@/lib/prisma'
 import { SignJWT, jwtVerify } from 'jose'
@@ -7,6 +8,13 @@ import { createHash } from 'crypto'
 import { getCurrentLocale } from '@/lib/locale'
 import { createTranslator } from '@/lib/i18n'
 import type { PublicLedgerRole } from '@/lib/access'
+
+/** Opt-in expensive legacy login scans (password-only / plaintext). Off in production by default. */
+function allowLegacyLoginCompat() {
+  if (process.env.ALLOW_LEGACY_LOGIN === '1') return true
+  if (process.env.ALLOW_LEGACY_LOGIN === '0') return false
+  return process.env.NODE_ENV !== 'production'
+}
 
 const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'finance-18-super-secret-key-change-in-prod')
 const PWD_SALT = process.env.PWD_SALT || 'finance-18-salt'
@@ -93,8 +101,9 @@ export async function login(account: string, password: string, isAdminLogin: boo
     }
   }
 
-  // 相容舊版「只用密碼登入」：若雜湊密碼在庫中唯一命中一人，且帳號欄等於其 email / roleName / 密碼本身
-  if (!user) {
+  // 相容舊版掃描較貴；正式環境預設關閉（ALLOW_LEGACY_LOGIN=1 可重開）
+  if (!user && allowLegacyLoginCompat()) {
+    // 相容舊版「只用密碼登入」：若雜湊密碼在庫中唯一命中一人，且帳號欄等於其 email / roleName / 密碼本身
     const byPassword = await prisma.user.findMany({
       where: { password: hashedPassword },
       select: { id: true, roleName: true, isAdmin: true, publicLedgerRole: true, email: true },
@@ -109,25 +118,25 @@ export async function login(account: string, password: string, isAdminLogin: boo
         user = only
       }
     }
-  }
 
-  // 極舊資料：明文密碼尚未升雜湊
-  if (!user) {
-    const legacy = await prisma.user.findFirst({
-      where: { password: plainPassword },
-      select: { id: true, roleName: true, isAdmin: true, publicLedgerRole: true, email: true },
-    })
-    if (
-      legacy &&
-      (legacy.email.toLowerCase() === normalizedAccount.toLowerCase() ||
-        legacy.roleName.toLowerCase() === normalizedAccount.toLowerCase() ||
-        normalizedAccount === plainPassword)
-    ) {
-      await prisma.user.update({
-        where: { id: legacy.id },
-        data: { password: hashedPassword },
+    // 極舊資料：明文密碼尚未升雜湊
+    if (!user) {
+      const legacy = await prisma.user.findFirst({
+        where: { password: plainPassword },
+        select: { id: true, roleName: true, isAdmin: true, publicLedgerRole: true, email: true },
       })
-      user = legacy
+      if (
+        legacy &&
+        (legacy.email.toLowerCase() === normalizedAccount.toLowerCase() ||
+          legacy.roleName.toLowerCase() === normalizedAccount.toLowerCase() ||
+          normalizedAccount === plainPassword)
+      ) {
+        await prisma.user.update({
+          where: { id: legacy.id },
+          data: { password: hashedPassword },
+        })
+        user = legacy
+      }
     }
   }
 
@@ -186,7 +195,8 @@ export async function logout() {
   return { success: true }
 }
 
-export async function getSession() {
+/** Dedupes JWT verify + user lookup within a single RSC/request tree. */
+export const getSession = cache(async (): Promise<SessionUser | null> => {
   const cookieStore = await cookies()
   const token = cookieStore.get('session_token')?.value
 
@@ -203,22 +213,22 @@ export async function getSession() {
         publicLedgerRole: ((payload.publicLedgerRole as string) || 'MEMBER') as PublicLedgerRole,
       }
     }
-    
+
     // 二次核对数据库确保用户未被删除或撤销权限
     const user = await prisma.user.findUnique({
       where: { id: payload.userId as string },
-      select: { id: true, roleName: true, isAdmin: true, publicLedgerRole: true }
+      select: { id: true, roleName: true, isAdmin: true, publicLedgerRole: true },
     })
-    
+
     if (!user) return null
 
     return {
-      userId: user.id, 
-      roleName: user.roleName, 
+      userId: user.id,
+      roleName: user.roleName,
       isAdmin: user.isAdmin,
       publicLedgerRole: (user.publicLedgerRole ?? 'NONE') as PublicLedgerRole,
     }
   } catch {
     return null
   }
-}
+})
