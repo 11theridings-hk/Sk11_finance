@@ -21,7 +21,55 @@ export type PendingLedgerDraft = {
   locale?: 'zh' | 'en'
 }
 
-export type PendingAction = PendingLedgerDraft
+export type PendingPrivateLedgerDraft = {
+  kind: 'private_ledger'
+  type: 'INCOME' | 'EXPENSE'
+  amount: number
+  categoryId: string
+  categoryLabel: string
+  subCategoryId?: string
+  thirdCategoryId?: string
+  customCategory?: string
+  note?: string
+  dateIso: string
+  createdAt: number
+  userId: string
+  locale?: 'zh' | 'en'
+}
+
+export type PendingMatterDraft = {
+  kind: 'matter'
+  title: string
+  eventDateIso: string
+  reminderDays: number
+  visibility: 'PUBLIC' | 'PRIVATE'
+  note?: string
+  createdAt: number
+  userId: string
+  locale?: 'zh' | 'en'
+}
+
+export type PendingContractDraft = {
+  kind: 'contract'
+  title: string
+  type: 'INCOME' | 'EXPENSE'
+  effectiveDateIso: string
+  expiryDateIso: string
+  reminderDays: number
+  amount: number
+  poolId?: string
+  poolLabel?: string
+  note?: string
+  createdAt: number
+  userId: string
+  locale?: 'zh' | 'en'
+}
+
+export type PendingAction =
+  | PendingLedgerDraft
+  | PendingPrivateLedgerDraft
+  | PendingMatterDraft
+  | PendingContractDraft
 
 function keyFor(phoneE164: string) {
   return `${PENDING_PREFIX}${phoneE164}`
