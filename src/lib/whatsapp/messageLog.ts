@@ -25,15 +25,21 @@ export type WhatsAppMessageLogRow = {
   createdAt: Date
 }
 
-/** 脫敏：匯出連結＋私帳摘要金額，避免管理員日誌讀取他人私帳 */
+/** 是否像私帳相關進出站（含指令與確認卡） */
+function looksLikePrivateLedgerLog(body: string): boolean {
+  return /私帳|私账|【私帳】|【PRIVATE】|PRIVATE\s*ledger|private\s+ledger|私帳摘要|private\s+report|private\s+(expense|income|exp|inc)\b|^private\b/i.test(
+    body,
+  )
+}
+
+/** 脫敏：匯出連結＋私帳金額／備註數字，避免管理員日誌讀取他人私帳 */
 function redactLogBody(body: string): string {
   let out = body.replace(
     /https?:\/\/\S*\/api\/exports\/whatsapp\/[^\s]+/gi,
     '[export-link-redacted]',
   )
-  if (
-    /【私帳】|PRIVATE.?ledger|私帳摘要|PRIVATE】\s*PDF|private report/i.test(out)
-  ) {
+  if (looksLikePrivateLedgerLog(out)) {
+    // 金額與夾雜數字；保留關鍵字結構便於排查
     out = out.replace(/[+\-]?\d+(?:\.\d{1,2})?/g, '[n]')
   }
   return out
