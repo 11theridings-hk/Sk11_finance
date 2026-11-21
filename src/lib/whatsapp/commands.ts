@@ -25,6 +25,7 @@ import {
 } from './privateLedger'
 import {
   createMatterForWhatsApp,
+  isMatterUsageRequest,
   listMattersForWhatsApp,
   loadWhatsAppPluginFlags,
   parseMatterCreateCommand,
@@ -42,6 +43,41 @@ import {
 } from './reportExport'
 import { detectWhatsAppLocale, type WhatsAppLocale } from './locale'
 
+function matterUsageText(locale: WhatsAppLocale) {
+  if (locale === 'en') {
+    return [
+      '📌 Matter commands',
+      '',
+      'Create (reply confirm):',
+      '• matter Title|YYYY-MM-DD|15|private',
+      '• matter Pool service|2026-11-25|15|public note…',
+      '',
+      'Format: matter <title>|<YYYY-MM-DD>[|<reminderDays>][|public|private][|note]',
+      'Default: reminder 15 days · private',
+      '',
+      'List: matters   /   list matters',
+      'Due reminders: remind',
+      '',
+      'Chinese also works: 事項 … / 查事項',
+    ].join('\n')
+  }
+  return [
+    '📌 事項指令用法',
+    '',
+    '建立事項（需回覆「確認」）：',
+    '• 事項 標題|YYYY-MM-DD|15|私人',
+    '• 事項 泳池保養|2026-11-25|15|公開 備註…',
+    '',
+    '格式：事項 <標題>|<日期 YYYY-MM-DD>[|<提醒天數>][|公開|私人][|備註]',
+    '預設：提醒 15 天 · 私人',
+    '',
+    '查列表：查事項　／　matters',
+    '到期提醒：提醒',
+    '',
+    '例：事項 泳池保養|2026-11-25|15|私人',
+  ].join('\n')
+}
+
 function helpText(actor: WhatsAppActor, locale: WhatsAppLocale) {
   if (locale === 'en') {
     const lines = [
@@ -55,6 +91,7 @@ function helpText(actor: WhatsAppActor, locale: WhatsAppLocale) {
       '• categories',
       '• pools',
       '• matters → list matters',
+      '• matter → matter usage help (also for incomplete create)',
     ]
     if (actor.isAdmin) {
       lines.push('• report → this month public text summary')
@@ -78,7 +115,7 @@ function helpText(actor: WhatsAppActor, locale: WhatsAppLocale) {
       '• private expense 120 lunch',
       '• 私帳 支 80 交通',
       '',
-      'Matters (reply confirm):',
+      'Matters (reply confirm; send matter alone for usage):',
       '• matter Pool service|2026-11-25|15|private',
       '• 事項 泳池保養|2026-11-25|15|私人',
     )
@@ -106,6 +143,7 @@ function helpText(actor: WhatsAppActor, locale: WhatsAppLocale) {
     '• 分類　→ 列出常用分類',
     '• 資金池',
     '• 查事項 / matters　→ 事項列表',
+    '• 事項　→ 事項用法說明（不完整指令亦同）',
   ]
   if (actor.isAdmin) {
     lines.push('• 報表　→ 本月公帳文字摘要')
@@ -131,7 +169,7 @@ function helpText(actor: WhatsAppActor, locale: WhatsAppLocale) {
     '',
     '格式：私帳 <收|支> <金額> [分類] [備註…]',
     '',
-    '事項建立（需確認）：',
+    '事項建立（需確認；只傳「事項」可看用法）：',
     '• 事項 泳池保養|2026-11-25|15|私人',
     '• matter Pool service|2026-11-25|15|private',
   )
@@ -1092,7 +1130,7 @@ export async function handleWhatsAppCommand(
     return formatRemindersMessage(items, locale)
   }
 
-  // 查事項（純查詢；「事項」單獨字仍走提醒相容，但「查事項／matters」專查列表）
+  // 查事項（列表）；純「事項」／不完整建立指令 → 用法說明
   if (
     text === '查事項' ||
     text === '查事项' ||
@@ -1104,8 +1142,12 @@ export async function handleWhatsAppCommand(
     return handleListMatters(actor, locale)
   }
 
-  // 單獨「事項／合約」維持提醒一覽（相容舊行為）
-  if (['事項', '事项', '合約', '合同'].includes(text)) {
+  if (isMatterUsageRequest(text)) {
+    return matterUsageText(locale)
+  }
+
+  // 單獨「合約／合同」維持提醒一覽（建立請用「合約草稿 …」）
+  if (['合約', '合同'].includes(text)) {
     const items = await collectWhatsAppReminders(actor)
     return formatRemindersMessage(items, locale)
   }

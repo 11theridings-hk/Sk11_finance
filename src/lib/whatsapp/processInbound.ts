@@ -55,7 +55,7 @@ export async function processWhatsAppInboundText(
   // 結構化確認卡／說明不潤飾
   if (
     !(
-      /^(請確認公帳|請確認【私帳】|請確認建立事項|請確認合約草稿|Please confirm this (PUBLIC|【PRIVATE】|matter|CONTRACT)|✅ 已入帳|✅ Posted|✅ 已建立|✅ Matter|✅ Contract|你好，|Hi,|未能辨識|Could not understand|已取消|Pending action cancelled|沒有待確認|No pending)/.test(
+      /^(請確認公帳|請確認【私帳】|請確認建立事項|請確認合約草稿|Please confirm this (PUBLIC|【PRIVATE】|matter|CONTRACT)|✅ 已入帳|✅ Posted|✅ 已建立|✅ Matter|✅ Contract|你好，|Hi,|未能辨識|Could not understand|已取消|Pending action cancelled|沒有待確認|No pending|📌 事項指令用法|📌 Matter commands)/.test(
         reply,
       ) ||
       reply.includes('回覆「確認」') ||

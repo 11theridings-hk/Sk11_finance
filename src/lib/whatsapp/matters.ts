@@ -68,6 +68,19 @@ export async function listMattersForWhatsApp(actor: WhatsAppActor, limit = 8) {
   })
 }
 
+const MATTER_PREFIX_RE =
+  /^(新建事項|建立事項|新增事項|事項建立|事項|create\s+matter|new\s+matter|matter)(?:\s+|$)/iu
+
+/** 純「事項」／matter，或帶前綴但格式不完整 → 應回用法說明 */
+export function isMatterUsageRequest(text: string): boolean {
+  const t = text.trim()
+  if (!t) return false
+  if (/^(事項|事项|matter)$/iu.test(t)) return true
+  if (!MATTER_PREFIX_RE.test(t)) return false
+  // 有前綴但解析不成完整建立指令
+  return parseMatterCreateCommand(t) === null
+}
+
 export function parseMatterCreateCommand(text: string): {
   title: string
   eventDate: Date
