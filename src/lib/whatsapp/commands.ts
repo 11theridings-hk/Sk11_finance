@@ -25,7 +25,6 @@ import {
 } from './privateLedger'
 import {
   createMatterForWhatsApp,
-  isMatterUsageRequest,
   listMattersForWhatsApp,
   loadWhatsAppPluginFlags,
   parseMatterCreateCommand,
@@ -42,148 +41,110 @@ import {
   createWhatsAppPrivateMonthReportPdf,
 } from './reportExport'
 import { detectWhatsAppLocale, type WhatsAppLocale } from './locale'
-
-function matterUsageText(locale: WhatsAppLocale) {
-  if (locale === 'en') {
-    return [
-      '📌 Matter commands',
-      '',
-      'Create (reply confirm):',
-      '• matter Title|YYYY-MM-DD|15|private',
-      '• matter Pool service|2026-11-25|15|public note…',
-      '',
-      'Format: matter <title>|<YYYY-MM-DD>[|<reminderDays>][|public|private][|note]',
-      'Default: reminder 15 days · private',
-      '',
-      'List: matters   /   list matters',
-      'Due reminders: remind',
-      '',
-      'Chinese also works: 事項 … / 查事項',
-    ].join('\n')
-  }
-  return [
-    '📌 事項指令用法',
-    '',
-    '建立事項（需回覆「確認」）：',
-    '• 事項 標題|YYYY-MM-DD|15|私人',
-    '• 事項 泳池保養|2026-11-25|15|公開 備註…',
-    '',
-    '格式：事項 <標題>|<日期 YYYY-MM-DD>[|<提醒天數>][|公開|私人][|備註]',
-    '預設：提醒 15 天 · 私人',
-    '',
-    '查列表：查事項　／　matters',
-    '到期提醒：提醒',
-    '',
-    '例：事項 泳池保養|2026-11-25|15|私人',
-  ].join('\n')
-}
+import {
+  categoryUsageText,
+  confirmUsageText,
+  contractUsageText,
+  isBareOrIncompleteContract,
+  isBareOrIncompletePrivateLedger,
+  isBareOrIncompletePublicLedger,
+  isMatterUsageRequest,
+  isReportUsageKeyword,
+  matterUsageText,
+  poolUsageText,
+  privateLedgerUsageText,
+  publicLedgerUsageText,
+  remindUsageText,
+  reportUsageText,
+} from './usage'
 
 function helpText(actor: WhatsAppActor, locale: WhatsAppLocale) {
   if (locale === 'en') {
     const lines = [
       `Hi, ${actor.roleName} 👋`,
-      'Commands (natural language also works):',
+      'Tip: send a keyword alone (ledger / private / matter / contract / report / remind / categories / pools) for usage help.',
       '',
       '• help',
-      '• remind → contracts / matters / recurring due',
-      '• recent → recent public-ledger entries',
-      '• recent private → your private-ledger entries',
-      '• categories',
-      '• pools',
-      '• matters → list matters',
-      '• matter → matter usage help (also for incomplete create)',
+      '• remind / 查提醒 → due list (+ usage when bare)',
+      '• recent → public ledger recent',
+      '• recent private → your private recent',
+      '• categories / 查分類',
+      '• pools / 查資金池',
+      '• matters / 查事項 → list',
+      '• matter → usage; matter Title|YYYY-MM-DD|… → create',
+      '• ledger / 公帳 → usage; then expense|income … → draft',
+      '• private / 私帳 → usage; then expense|income … → draft',
+      '• contract / 合約 → usage',
+      '• report / 報表 → usage',
+      '• confirm / cancel → after a draft card',
     ]
     if (actor.isAdmin) {
-      lines.push('• report → this month public text summary')
-      lines.push('• report pdf → public PDF (short-lived link)')
+      lines.push('• report summary / report pdf (admin)')
+      lines.push('• contract draft Title|income|… (admin)')
     }
-    lines.push('• private report → your private month summary')
-    lines.push('• private report pdf → your private PDF link')
-    if (actorCanUsePublicLedger(actor)) {
-      lines.push(
-        '',
-        'Public ledger (reply confirm):',
-        '• ledger expense 120 food lunch',
-        '• ledger income 5000 rent',
-        '',
-        'Format: [ledger] <expense|income> <amount> [category] [note…] [@pool]',
-      )
-    }
-    lines.push(
-      '',
-      'Private ledger 【私帳】(reply confirm):',
-      '• private expense 120 lunch',
-      '• 私帳 支 80 交通',
-      '',
-      'Matters (reply confirm; send matter alone for usage):',
-      '• matter Pool service|2026-11-25|15|private',
-      '• 事項 泳池保養|2026-11-25|15|私人',
-    )
-    if (actor.isAdmin) {
-      lines.push(
-        '',
-        'Contract draft (admin, reply confirm):',
-        '• contract draft Lease|income|2026-01-01|2026-12-31|5000|30',
-        '• 合約草稿 租約|收|2026-01-01|2026-12-31|5000|30',
-      )
-    }
-    lines.push('', 'Cancel pending: cancel')
-    lines.push('Groups: broadcast only; chat 1:1 with the bot.')
+    lines.push('• private report / private report pdf (login for PDF)')
+    lines.push('', 'Groups: broadcast only; chat 1:1.')
     return lines.join('\n')
   }
 
   const lines = [
     `你好，${actor.roleName} 👋`,
-    '可用指令（亦可口語／英文；英文會用英文回覆）：',
+    '提示：只傳關鍵字（公帳／私帳／事項／合約／報表／提醒／分類／資金池）可看該操作說明；不完整指令亦同。',
     '',
     '• 幫助 / help',
-    '• 提醒　→ 合約／事項／恆常到期一覽',
-    '• 最近　→ 最近公帳紀錄',
-    '• 最近私帳　→ 你的私帳紀錄',
-    '• 分類　→ 列出常用分類',
-    '• 資金池',
-    '• 查事項 / matters　→ 事項列表',
-    '• 事項　→ 事項用法說明（不完整指令亦同）',
+    '• 提醒 / 查提醒　→ 到期一覽（只傳「提醒」會先附用法）',
+    '• 最近　→ 公帳最近紀錄',
+    '• 最近私帳',
+    '• 分類 / 查分類',
+    '• 資金池 / 查資金池',
+    '• 查事項　→ 事項列表',
+    '• 事項　→ 用法；完整「事項 標題|日期|…」→ 建立（需確認）',
+    '• 公帳　→ 用法；「公帳 支 120 …」→ 草稿（需確認）',
+    '• 私帳　→ 用法；「私帳 支 120 …」→ 草稿（需確認）',
+    '• 合約　→ 用法',
+    '• 報表　→ 用法；產生請用「報表摘要」「報表PDF」「私帳報表」',
+    '• 確認 / 取消　→ 待確認草稿',
   ]
   if (actor.isAdmin) {
-    lines.push('• 報表　→ 本月公帳文字摘要')
-    lines.push('• 報表PDF　→ 公帳 PDF（短時下載連結）')
+    lines.push('• 報表摘要 / 報表PDF（管理員）')
+    lines.push('• 合約草稿 標題|收|生效|到期|…（管理員）')
   }
-  lines.push('• 私帳報表　→ 本月私帳文字摘要（僅本人）')
-  lines.push('• 私帳報表PDF　→ 私帳 PDF（短時連結）')
-  if (actorCanUsePublicLedger(actor)) {
-    lines.push(
-      '',
-      '公帳入數（需回覆「確認」／confirm）：',
-      '• 公帳 支 120 餐飲 午餐',
-      '• ledger expense 120 food lunch',
-      '',
-      '格式：公帳 <收|支> <金額> [分類] [備註…] [@資金池]',
-    )
-  }
-  lines.push(
-    '',
-    '【私帳】入數（需確認；確認卡會標明私帳）：',
-    '• 私帳 支 120 午餐',
-    '• private expense 120 lunch',
-    '',
-    '格式：私帳 <收|支> <金額> [分類] [備註…]',
-    '',
-    '事項建立（需確認；只傳「事項」可看用法）：',
-    '• 事項 泳池保養|2026-11-25|15|私人',
-    '• matter Pool service|2026-11-25|15|private',
-  )
-  if (actor.isAdmin) {
-    lines.push(
-      '',
-      '合約草稿（管理員，需確認）：',
-      '• 合約草稿 租約|收|2026-01-01|2026-12-31|5000|30',
-      '• contract draft Lease|income|2026-01-01|2026-12-31|5000|30',
-    )
-  }
-  lines.push('', '取消待確認：取消 / cancel')
-  lines.push('群組只收系統推播；互動請用 1 對 1 對話。')
+  lines.push('• 私帳報表 / 私帳報表PDF（PDF 須登入網頁）')
+  lines.push('', '群組只收系統推播；互動請用 1 對 1。')
   return lines.join('\n')
+}
+
+async function categoriesListText(locale: WhatsAppLocale) {
+  const [ex, inc] = await Promise.all([
+    listTopCategories('EXPENSE'),
+    listTopCategories('INCOME'),
+  ])
+  if (locale === 'en') {
+    return [
+      '📂 Categories (sample)',
+      '',
+      'Expense: ' + (ex.join(', ') || '(none)'),
+      'Income: ' + (inc.join(', ') || '(none)'),
+    ].join('\n')
+  }
+  return [
+    '📂 分類（部分）',
+    '',
+    '支出：' + (ex.join('、') || '（無）'),
+    '收入：' + (inc.join('、') || '（無）'),
+  ].join('\n')
+}
+
+async function poolsListText(locale: WhatsAppLocale) {
+  const pools = await listPools()
+  if (pools.length === 0) {
+    return locale === 'en' ? 'No pools yet.' : '尚未建立資金池。'
+  }
+  return [
+    locale === 'en' ? '🏦 Pools' : '🏦 資金池',
+    '',
+    ...pools.map((p) => `• ${p.name}：${p.balanceHkd.toFixed(2)} HKD`),
+  ].join('\n')
 }
 
 function parseLedgerCommand(text: string): {
@@ -1123,16 +1084,40 @@ export async function handleWhatsAppCommand(
   }
 
   if (
+    text === '確認說明' ||
+    text === '确认说明' ||
+    lower === 'confirm help' ||
+    text === '取消說明'
+  ) {
+    return confirmUsageText(locale)
+  }
+
+  // 提醒：只傳關鍵字 → 用法 + 列表；查提醒 → 僅列表
+  if (
+    text === '查提醒' ||
+    text === '提醒列表' ||
+    lower === 'list reminders'
+  ) {
+    const items = await collectWhatsAppReminders(actor)
+    return formatRemindersMessage(items, locale)
+  }
+  if (
     ['提醒', '到期'].includes(text) ||
     lower === 'remind' ||
     lower === 'reminder' ||
     lower === 'reminders'
   ) {
     const items = await collectWhatsAppReminders(actor)
-    return formatRemindersMessage(items, locale)
+    return [
+      remindUsageText(locale),
+      '',
+      '——',
+      '',
+      formatRemindersMessage(items, locale),
+    ].join('\n')
   }
 
-  // 查事項（列表）；純「事項」／不完整建立指令 → 用法說明
+  // 查事項（列表）；純「事項」／不完整 → 用法
   if (
     text === '查事項' ||
     text === '查事项' ||
@@ -1148,10 +1133,18 @@ export async function handleWhatsAppCommand(
     return matterUsageText(locale)
   }
 
-  // 單獨「合約／合同」維持提醒一覽（建立請用「合約草稿 …」）
-  if (['合約', '合同'].includes(text)) {
-    const items = await collectWhatsAppReminders(actor)
-    return formatRemindersMessage(items, locale)
+  const matterParsed = parseMatterCreateCommand(text)
+  if (matterParsed) {
+    return prepareMatter(actor, matterParsed, locale)
+  }
+
+  // 合約：bare／不完整草稿 → 用法
+  const contractParsed = await parseContractDraftCommand(text, actor)
+  if (contractParsed) {
+    return prepareContract(actor, contractParsed, locale)
+  }
+  if (isBareOrIncompleteContract(text, false)) {
+    return contractUsageText(locale, actor.isAdmin)
   }
 
   if (
@@ -1185,50 +1178,27 @@ export async function handleWhatsAppCommand(
     return formatRecentRows(rows, locale, '🧾 最近公帳：', '🧾 Recent public ledger:')
   }
 
+  // 分類：bare → 用法 + 列表；查分類 → 僅列表
+  if (text === '查分類' || text === '查分类' || lower === 'list categories') {
+    return categoriesListText(locale)
+  }
   if (
     text === '分類' ||
     text === '分类' ||
     lower === 'categories' ||
     lower === 'category'
   ) {
-    const [ex, inc] = await Promise.all([
-      listTopCategories('EXPENSE'),
-      listTopCategories('INCOME'),
-    ])
-    if (locale === 'en') {
-      return [
-        '📂 Categories (sample)',
-        '',
-        'Expense: ' + (ex.join(', ') || '(none)'),
-        'Income: ' + (inc.join(', ') || '(none)'),
-        '',
-        'You can type a category name when posting an entry.',
-      ].join('\n')
-    }
-    return [
-      '📂 分類（部分）',
-      '',
-      '支出：' + (ex.join('、') || '（無）'),
-      '收入：' + (inc.join('、') || '（無）'),
-      '',
-      '入數時可寫分類名稱，系統會模糊匹配。',
-    ].join('\n')
+    return [categoryUsageText(locale), '', '——', '', await categoriesListText(locale)].join(
+      '\n',
+    )
   }
 
+  // 資金池：同上
+  if (text === '查資金池' || text === '查资金池' || lower === 'list pools') {
+    return poolsListText(locale)
+  }
   if (text === '資金池' || text === '资金池' || lower === 'pools' || lower === 'pool') {
-    const pools = await listPools()
-    if (pools.length === 0) {
-      return locale === 'en' ? 'No pools yet.' : '尚未建立資金池。'
-    }
-    return [
-      locale === 'en' ? '🏦 Pools' : '🏦 資金池',
-      '',
-      ...pools.map((p) => `• ${p.name}：${p.balanceHkd.toFixed(2)} HKD`),
-      '',
-      locale === 'en'
-        ? 'Use @PoolName when posting, e.g. expense 50 food coffee @Main'
-        : '入數可用 @資金池名 指定，例如：公帳 支 50 餐飲 咖啡 @公司戶',
-    ].join('\n')
+    return [poolUsageText(locale), '', '——', '', await poolsListText(locale)].join('\n')
   }
 
   if (
@@ -1265,33 +1235,35 @@ export async function handleWhatsAppCommand(
   }
 
   if (
-    text === '報表' ||
-    text === '报表' ||
-    lower === 'report' ||
+    text === '報表摘要' ||
+    text === '报表摘要' ||
+    text === '報表本月' ||
+    text === '报表本月' ||
+    lower === 'report summary' ||
     text === '摘要' ||
     lower === 'summary'
   ) {
     return handleReportSummary(actor, locale)
   }
 
+  if (isReportUsageKeyword(text)) {
+    return reportUsageText(locale, actor.isAdmin)
+  }
+
   const privateLedger = parsePrivateLedgerCommand(text)
   if (privateLedger) {
     return preparePrivateLedger(actor, privateLedger, locale)
   }
-
-  const matter = parseMatterCreateCommand(text)
-  if (matter) {
-    return prepareMatter(actor, matter, locale)
-  }
-
-  const contract = await parseContractDraftCommand(text, actor)
-  if (contract) {
-    return prepareContract(actor, contract, locale)
+  if (isBareOrIncompletePrivateLedger(text, false)) {
+    return privateLedgerUsageText(locale)
   }
 
   const ledger = parseLedgerCommand(text)
   if (ledger) {
     return prepareLedger(actor, ledger, locale)
+  }
+  if (isBareOrIncompletePublicLedger(text, false)) {
+    return publicLedgerUsageText(locale)
   }
 
   const intent = await parseWhatsAppLlmIntent(text, locale)
