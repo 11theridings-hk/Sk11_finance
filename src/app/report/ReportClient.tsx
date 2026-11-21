@@ -745,6 +745,55 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     doc.save(locale === 'en' ? 'activity-report.pdf' : '活動列表報表.pdf')
   }
 
+  const exportActivityListCsv = () => {
+    const t = createTranslator(exportLocale)
+    const dateLocale = exportLocale === 'en' ? 'en-HK' : 'zh-HK'
+    const exportRows = sortedActivities
+
+    if (exportRows.length === 0) {
+      alert(t('noDataToExport'))
+      return
+    }
+
+    const activityHeadMeta = [
+      { id: 'recordIdShort', label: t('recordIdShort') },
+      { id: 'activityTitle', label: t('activityTitle') },
+      { id: 'activityDate', label: t('activityDate') },
+      { id: 'category', label: t('categoryPath') },
+      { id: 'reminderDays', label: t('reminderDays') },
+      { id: 'activityVisibility', label: t('activityVisibility') },
+      { id: 'role', label: t('role') },
+      { id: 'attachmentCount', label: t('attachmentCount') },
+      { id: 'content', label: t('content') },
+      { id: 'note', label: t('note') },
+    ]
+    const visible = activityHeadMeta.filter((c) => showCol(c.id))
+    const csvRows = [visible.map((c) => csvEscape(c.label)).join(',')]
+    for (const a of exportRows) {
+      const values: Record<string, string> = {
+        recordIdShort: a.id.slice(-8),
+        activityTitle: a.title || '-',
+        activityDate: new Date(a.eventDate).toLocaleDateString(dateLocale),
+        category: categoryPath(a),
+        reminderDays: String(a.reminderDays ?? '-'),
+        activityVisibility: a.visibility === 'PRIVATE' ? t('privateActivity') : t('publicActivity'),
+        role: a.user?.roleName || '-',
+        attachmentCount: String(attachmentCountOf(a)),
+        content: a.content || '-',
+        note: a.note || '-',
+      }
+      csvRows.push(visible.map((c) => csvEscape(values[c.id] ?? '-')).join(','))
+    }
+
+    const blob = new Blob(['\uFEFF' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = exportLocale === 'en' ? 'activity-report.csv' : '事項列表報表.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const exportContractListPdf = async () => {
     const t = createTranslator(exportLocale)
     const dateLocale = exportLocale === 'en' ? 'en-HK' : 'zh-HK'
@@ -824,6 +873,60 @@ export default function ReportClient({ categories, users, pools, locale }: Props
     })
 
     doc.save(locale === 'en' ? 'contract-report.pdf' : '合約列表報表.pdf')
+  }
+
+  const exportContractListCsv = () => {
+    const t = createTranslator(exportLocale)
+    const dateLocale = exportLocale === 'en' ? 'en-HK' : 'zh-HK'
+    const locale = exportLocale
+    const exportRows = sortedContracts
+
+    if (exportRows.length === 0) {
+      alert(t('noDataToExport'))
+      return
+    }
+
+    const contractHeadMeta = [
+      { id: 'recordIdShort', label: t('recordIdShort') },
+      { id: 'contractTitle', label: t('contractTitle') },
+      { id: 'type', label: t('type') },
+      { id: 'effectiveDate', label: t('effectiveDate') },
+      { id: 'expiryDate', label: t('expiryDate') },
+      { id: 'category', label: t('categoryPath') },
+      { id: 'pool', label: t('pool') },
+      { id: 'amount', label: t('amount') },
+      { id: 'role', label: t('role') },
+      { id: 'attachmentCount', label: t('attachmentCount') },
+      { id: 'content', label: t('content') },
+      { id: 'note', label: t('note') },
+    ]
+    const visible = contractHeadMeta.filter((c) => showCol(c.id))
+    const csvRows = [visible.map((c) => csvEscape(c.label)).join(',')]
+    for (const c of exportRows) {
+      const values: Record<string, string> = {
+        recordIdShort: c.id.slice(-8),
+        contractTitle: c.title || '-',
+        type: c.type === 'INCOME' ? t('income') : t('expense'),
+        effectiveDate: new Date(c.effectiveDate).toLocaleDateString(dateLocale),
+        expiryDate: new Date(c.expiryDate).toLocaleDateString(dateLocale),
+        category: categoryPath(c),
+        pool: c.pool?.name || '-',
+        amount: formatCurrency(locale, c.amount),
+        role: c.user?.roleName || '-',
+        attachmentCount: String(attachmentCountOf(c)),
+        content: c.content || '-',
+        note: c.note || '-',
+      }
+      csvRows.push(visible.map((col) => csvEscape(values[col.id] ?? '-')).join(','))
+    }
+
+    const blob = new Blob(['\uFEFF' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = exportLocale === 'en' ? 'contract-report.csv' : '合約列表報表.csv'
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   const exportAccountingPdfs = async () => {
@@ -1607,23 +1710,41 @@ export default function ReportClient({ categories, users, pools, locale }: Props
           )}
 
           {reportTab === 'activities' && (
-            <button
-              onClick={exportActivityListPdf}
-              disabled={loading || activities.length === 0}
-              className="px-5 py-2.5 bg-[#34C759] text-white rounded-xl text-sm font-semibold hover:bg-[#2EB850] transition-colors shadow-sm disabled:opacity-50"
-            >
-              {t('exportActivityListPdf')}
-            </button>
+            <>
+              <button
+                onClick={exportActivityListPdf}
+                disabled={loading || activities.length === 0}
+                className="px-5 py-2.5 bg-[#34C759] text-white rounded-xl text-sm font-semibold hover:bg-[#2EB850] transition-colors shadow-sm disabled:opacity-50"
+              >
+                {t('exportActivityListPdf')}
+              </button>
+              <button
+                onClick={exportActivityListCsv}
+                disabled={loading || activities.length === 0}
+                className="px-5 py-2.5 bg-[#5856D6] text-white rounded-xl text-sm font-semibold hover:bg-[#4B49B8] transition-colors shadow-sm disabled:opacity-50"
+              >
+                {t('exportActivityListCsv')}
+              </button>
+            </>
           )}
 
           {reportTab === 'contracts' && (
-            <button
-              onClick={exportContractListPdf}
-              disabled={loading || contracts.length === 0}
-              className="px-5 py-2.5 bg-[#34C759] text-white rounded-xl text-sm font-semibold hover:bg-[#2EB850] transition-colors shadow-sm disabled:opacity-50"
-            >
-              {t('exportContractListPdf')}
-            </button>
+            <>
+              <button
+                onClick={exportContractListPdf}
+                disabled={loading || contracts.length === 0}
+                className="px-5 py-2.5 bg-[#34C759] text-white rounded-xl text-sm font-semibold hover:bg-[#2EB850] transition-colors shadow-sm disabled:opacity-50"
+              >
+                {t('exportContractListPdf')}
+              </button>
+              <button
+                onClick={exportContractListCsv}
+                disabled={loading || contracts.length === 0}
+                className="px-5 py-2.5 bg-[#5856D6] text-white rounded-xl text-sm font-semibold hover:bg-[#4B49B8] transition-colors shadow-sm disabled:opacity-50"
+              >
+                {t('exportContractListCsv')}
+              </button>
+            </>
           )}
         </div>
 
