@@ -25,6 +25,20 @@ export type WhatsAppMessageLogRow = {
   createdAt: Date
 }
 
+/** 脫敏：匯出連結＋私帳摘要金額，避免管理員日誌讀取他人私帳 */
+function redactLogBody(body: string): string {
+  let out = body.replace(
+    /https?:\/\/\S*\/api\/exports\/whatsapp\/[^\s]+/gi,
+    '[export-link-redacted]',
+  )
+  if (
+    /【私帳】|PRIVATE.?ledger|私帳摘要|PRIVATE】\s*PDF|private report/i.test(out)
+  ) {
+    out = out.replace(/[+\-]?\d+(?:\.\d{1,2})?/g, '[n]')
+  }
+  return out
+}
+
 /**
  * 寫入一筆進出訊息日誌（失敗不影響主流程）。
  */
@@ -41,7 +55,7 @@ export async function logWhatsAppMessage(input: {
   try {
     const peer = String(input.peer || '').trim().slice(0, 128)
     if (!peer) return
-    const body = String(input.body || '').slice(0, BODY_MAX)
+    const body = redactLogBody(String(input.body || '')).slice(0, BODY_MAX)
     await prisma.whatsAppMessageLog.create({
       data: {
         direction: input.direction,

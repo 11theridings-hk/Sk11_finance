@@ -302,7 +302,13 @@ export async function createWhatsAppPrivateMonthReportPdf(input: {
 export async function readWhatsAppExport(
   token: string,
 ): Promise<
-  | { ok: true; filename: string; bytes: Buffer }
+  | {
+      ok: true
+      filename: string
+      bytes: Buffer
+      kind: 'public' | 'private'
+      userId: string
+    }
   | { ok: false; status: 404 | 410; error: string }
 > {
   const safe = token.replace(/[^a-f0-9]/gi, '')
@@ -322,25 +328,47 @@ export async function readWhatsAppExport(
     return { ok: false, status: 410, error: 'Link expired' }
   }
 
+  let bytes: Buffer | null = null
   if (existsSync(meta.filePath)) {
-    return {
-      ok: true,
-      filename: meta.filename,
-      bytes: readFileSync(meta.filePath),
+    bytes = readFileSync(meta.filePath)
+  } else {
+    const blob = await loadBlob(safe)
+    if (blob) {
+      try {
+        writeFileSync(meta.filePath, blob)
+      } catch {
+        /* ignore */
+      }
+      bytes = blob
     }
   }
 
-  const blob = await loadBlob(safe)
-  if (blob) {
-    // 暖回 /tmp（同實例後續讀更快；失敗無妨）
+  if (!bytes) {
+    await deleteMeta(safe)
+    return { ok: false, status: 404, error: 'File missing' }
+  }
+
+  return {
+    ok: true,
+    filename: meta.filename,
+    bytes,
+    kind: meta.kind === 'private' ? 'private' : 'public',
+    userId: meta.userId,
+  }
+}
+
+/** 私帳匯出單次下載後銷毀（降低轉發／日誌外洩窗口） */
+export async function consumeWhatsAppExport(token: string) {
+  const safe = token.replace(/[^a-f0-9]/gi, '')
+  if (safe.length < 16) return
+  const meta = await loadMeta(safe)
+  if (meta?.filePath) {
     try {
-      writeFileSync(meta.filePath, blob)
+      if (existsSync(meta.filePath)) unlinkSync(meta.filePath)
     } catch {
       /* ignore */
     }
-    return { ok: true, filename: meta.filename, bytes: blob }
   }
-
+  await deleteBlob(safe)
   await deleteMeta(safe)
-  return { ok: false, status: 404, error: 'File missing' }
 }

@@ -52,16 +52,17 @@ export async function processWhatsAppInboundText(
 
   const locale = detectWhatsAppLocale(text)
   let reply = await handleWhatsAppCommand(actor, text)
-  // 結構化確認卡／說明不潤飾
-  if (
-    !(
-      /^(請確認公帳|請確認【私帳】|請確認建立事項|請確認合約草稿|Please confirm this (PUBLIC|【PRIVATE】|matter|CONTRACT)|✅ 已入帳|✅ Posted|✅ 已建立|✅ Matter|✅ Contract|你好，|Hi,|未能辨識|Could not understand|已取消|Pending action cancelled|沒有待確認|No pending|📌 事項指令用法|📌 Matter commands)/.test(
-        reply,
-      ) ||
-      reply.includes('回覆「確認」') ||
-      reply.includes('Reply confirm')
-    )
-  ) {
+  // 確認卡／說明／報表（含匯出 URL、私帳數字）不潤飾
+  const skipPolish =
+    /^(請確認公帳|請確認【私帳】|請確認建立事項|請確認合約草稿|Please confirm this (PUBLIC|【PRIVATE】|matter|CONTRACT)|✅ 已入帳|✅ Posted|✅ 已建立|✅ Matter|✅ Contract|你好，|Hi,|未能辨識|Could not understand|已取消|Pending action cancelled|沒有待確認|No pending|📌 事項指令用法|📌 Matter commands|📊|📄)/.test(
+      reply,
+    ) ||
+    reply.includes('回覆「確認」') ||
+    reply.includes('Reply confirm') ||
+    reply.includes('/api/exports/whatsapp/') ||
+    /【私帳】|PRIVATE ledger|PRIVATE】/.test(reply)
+
+  if (!skipPolish) {
     reply = await polishWhatsAppOutboundText(reply, locale)
   }
 

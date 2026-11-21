@@ -44,7 +44,11 @@ export async function polishWhatsAppOutboundText(
   const urlRe = /https?:\/\/\S+/g
   const origUrls = trimmed.match(urlRe) || []
   const newUrls = polished.match(urlRe) || []
-  if (origUrls.length > 0 && newUrls.length < origUrls.length) return text
+  // 數量或任一 URL 內容不同 → 拒絕潤飾（防替換下載連結）
+  if (origUrls.length !== newUrls.length) return text
+  for (let i = 0; i < origUrls.length; i++) {
+    if (origUrls[i] !== newUrls[i]) return text
+  }
 
   return polished
 }

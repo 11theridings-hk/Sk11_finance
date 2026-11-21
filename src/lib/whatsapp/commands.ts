@@ -894,18 +894,20 @@ async function handlePrivateReportPdf(
   if (locale === 'en') {
     return [
       `📄 ${created.summaryLabel} 【PRIVATE】 PDF ready (yours only)`,
-      `Download (≈${mins} min):`,
+      `Download (≈${mins} min; single use):`,
       created.url,
       '',
-      'Do not forward this link. Expired? Send private report pdf again.',
+      'Open while signed in to SK11 as yourself (login required).',
+      'Do not forward. Expired/used? Send private report pdf again.',
     ].join('\n')
   }
   return [
     `📄 ${created.summaryLabel}【私帳】PDF 已備妥（僅本人）`,
-    `下載（約 ${mins} 分鐘內有效）：`,
+    `下載（約 ${mins} 分鐘內有效；單次使用）：`,
     created.url,
     '',
-    '請勿轉發連結。過期後再傳「私帳報表PDF」。',
+    '請以本人帳號登入 SK11 網頁後再開連結（需登入驗證）。',
+    '請勿轉發。過期或已下載後再傳「私帳報表PDF」。',
   ].join('\n')
 }
 
